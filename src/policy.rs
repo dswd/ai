@@ -52,7 +52,7 @@ impl Policy {
 
         if combined.is_empty() {
             warn!(
-                "policy: denied {:?} for {:?} (no rules defined)",
+                "\u{274C}  {:?} for {:?} (no rules defined)",
                 action, target
             );
             return false;
@@ -63,7 +63,7 @@ impl Policy {
                 PolicyRule::Allow(a, pattern) if a == action => {
                     if matches_pattern(target, pattern) {
                         debug!(
-                            "policy: allowed {:?} for {:?} (matched rule: allow {})",
+                            "\u{2705}  {:?} for {:?} (matched rule: allow {})",
                             action, target, pattern
                         );
                         return true;
@@ -72,7 +72,7 @@ impl Policy {
                 PolicyRule::Deny(a, pattern) if a == action => {
                     if matches_pattern(target, pattern) {
                         warn!(
-                            "policy: denied {:?} for {:?} (matched rule: deny {})",
+                            "\u{274C}  {:?} for {:?} (matched rule: deny {})",
                             action, target, pattern
                         );
                         return false;
@@ -83,7 +83,7 @@ impl Policy {
         }
 
         warn!(
-            "policy: denied {:?} for {:?} (no matching rule)",
+            "\u{274C}  {:?} for {:?} (no matching rule)",
             action, target
         );
         false

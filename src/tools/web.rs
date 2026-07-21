@@ -52,7 +52,7 @@ impl Tool for WebFetchTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("tool_call: web_fetch {{ url: {:?}, format: {:?} }}", args.url, args.format);
+        info!("\u{2699}  fetch {}", args.url);
         if args.url.is_empty() {
             return Err(WebError::Message("URL is required".to_string()));
         }
@@ -140,7 +140,7 @@ impl Tool for WebFetchTool {
             "html" => body,
             _ => body,
         };
-        debug!("tool_response: web_fetch: {} bytes", result.len());
+        debug!("  fetch \u{2192} {} bytes", result.len());
         Ok(result)
     }
 }
@@ -181,7 +181,7 @@ impl Tool for WebSearchTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("tool_call: web_search {{ query: {:?} }}", args.query);
+        info!("\u{2699}  search web for {:?}", args.query);
         if args.query.is_empty() {
             return Err(WebError::Message("query is required".to_string()));
         }
@@ -264,7 +264,7 @@ impl Tool for WebSearchTool {
             );
             header + &results.join("\n")
         };
-        debug!("tool_response: web_search: {} results", results.len());
+        debug!("  search web \u{2192} {} results", results.len());
         Ok(result)
     }
 }

@@ -43,9 +43,8 @@ impl Tool for ThinkTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("tool_call: think");
-        info!("think: {}", args.thought);
-        debug!("tool_response: think: {} bytes", args.thought.len());
+        info!("\u{1F9E0}  \x1b[3m{}\x1b[0m", args.thought);
+        debug!("  think \u{2192} {} bytes", args.thought.len());
         Ok(args.thought)
     }
 }

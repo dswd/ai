@@ -45,7 +45,7 @@ impl Tool for ReadFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("tool_call: read_file {{ path: {:?} }}", args.path);
+        info!("\u{2699}  read file {}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -61,7 +61,7 @@ impl Tool for ReadFileTool {
 
         let content = std::fs::read_to_string(&canonical)
             .map_err(|e| ToolExecError::Message(format!("cannot read file: {e}")))?;
-        debug!("tool_response: read_file: {} bytes", content.len());
+        debug!("  read file \u{2192} {} bytes", content.len());
         Ok(content)
     }
 }
@@ -101,7 +101,7 @@ impl Tool for WriteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("tool_call: write_file {{ path: {:?} }}", args.path);
+        info!("\u{2699}  write file {}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = if path.exists() {
             path.canonicalize()
@@ -134,7 +134,7 @@ impl Tool for WriteFileTool {
             .map_err(|e| ToolExecError::Message(format!("cannot write file: {e}")))?;
 
         let result = format!("Successfully wrote to {}", args.path);
-        debug!("tool_response: write_file: {result}");
+        debug!("  write file \u{2192} {result}");
         Ok(result)
     }
 }
@@ -172,7 +172,7 @@ impl Tool for ListDirTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("tool_call: list_dir {{ path: {:?} }}", args.path);
+        info!("\u{2699}  list dir {}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -205,7 +205,7 @@ impl Tool for ListDirTool {
             .collect();
 
         let result = entries.join("\n");
-        debug!("tool_response: list_dir: {} entries", entries.len());
+        debug!("  list dir \u{2192} {} entries", entries.len());
         Ok(result)
     }
 }
@@ -250,7 +250,7 @@ impl Tool for ReplaceInFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("tool_call: replace_in_file {{ path: {:?} }}", args.path);
+        info!("\u{2699}  edit file {}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -296,7 +296,7 @@ impl Tool for ReplaceInFileTool {
             "Successfully replaced in {} (1 occurrence)",
             args.path
         );
-        debug!("tool_response: replace_in_file: {result}");
+        debug!("  edit file \u{2192} {result}");
         Ok(result)
     }
 }
@@ -336,7 +336,7 @@ impl Tool for DeleteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("tool_call: delete_file {{ path: {:?} }}", args.path);
+        info!("\u{2699}  delete file {}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -367,7 +367,7 @@ impl Tool for DeleteFileTool {
                 .map_err(|e| ToolExecError::Message(format!("cannot delete file: {e}")))?;
             format!("Deleted file: {}", args.path)
         };
-        debug!("tool_response: delete_file: {result}");
+        debug!("  delete file \u{2192} {result}");
         Ok(result)
     }
 }
@@ -405,7 +405,7 @@ impl Tool for CreateDirectoryTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("tool_call: create_directory {{ path: {:?} }}", args.path);
+        info!("\u{2699}  create dir {}", args.path);
         let path = PathBuf::from(&args.path);
 
         let canonical = if path.exists() {
@@ -440,7 +440,7 @@ impl Tool for CreateDirectoryTool {
             .map_err(|e| ToolExecError::Message(format!("cannot create directory: {e}")))?;
 
         let result = format!("Created directory: {}", args.path);
-        debug!("tool_response: create_directory: {result}");
+        debug!("  create dir \u{2192} {result}");
         Ok(result)
     }
 }

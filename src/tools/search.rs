@@ -50,7 +50,7 @@ impl Tool for SearchContentTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("tool_call: search_content {{ path: {:?}, pattern: {:?} }}", args.path, args.pattern);
+        info!("\u{2699}  search for {:?} in {}", args.pattern, args.path);
         let root = PathBuf::from(&args.path);
         let canonical_root = root
             .canonicalize()
@@ -107,7 +107,7 @@ impl Tool for SearchContentTool {
         } else {
             results.join("\n")
         };
-        debug!("tool_response: search_content: {} matches", results.len());
+        debug!("  search \u{2192} {} matches", results.len());
         Ok(result)
     }
 }
@@ -260,7 +260,7 @@ impl Tool for FindFilesTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("tool_call: find_files {{ path: {:?}, pattern: {:?} }}", args.path, args.pattern);
+        info!("\u{2699}  find {:?} in {}", args.pattern, args.path);
         let root = PathBuf::from(&args.path);
         let canonical_root = root
             .canonicalize()
@@ -292,7 +292,7 @@ impl Tool for FindFilesTool {
             .collect();
 
         if results.is_empty() {
-            debug!("tool_response: find_files: 0 files");
+            debug!("  find \u{2192} 0 files");
             return Ok("No files found.".to_string());
         }
 
@@ -304,7 +304,7 @@ impl Tool for FindFilesTool {
         }
 
         let result = results.join("\n");
-        debug!("tool_response: find_files: {} files", results.len());
+        debug!("  find \u{2192} {} files", results.len());
         Ok(result)
     }
 }

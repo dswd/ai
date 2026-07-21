@@ -46,7 +46,7 @@ impl Tool for ExecuteTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("tool_call: execute {{ command: {:?} }}", args.command);
+        info!("\u{2699}  execute {}", args.command);
         let first_word = args
             .command
             .split_whitespace()
@@ -93,7 +93,7 @@ impl Tool for ExecuteTool {
             result = format!("(exit code: {})", output.status.code().unwrap_or(-1));
         }
 
-        debug!("tool_response: execute: {} bytes", result.len());
+        debug!("  execute \u{2192} {} bytes", result.len());
         Ok(result)
     }
 }
@@ -134,11 +134,6 @@ impl Tool for GitDiffTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("tool_call: git_diff {{ staged: {:?}, path: {:?} }}", args.staged, args.path);
-        if !self.policy.is_allowed(&Action::Execute, "git") {
-            return Err(ExecError::Message("execution denied for command: git".to_string()));
-        }
-
         let mut cmd = std::process::Command::new("git");
         cmd.arg("diff");
         cmd.arg("--no-color");
@@ -149,6 +144,11 @@ impl Tool for GitDiffTool {
 
         if let Some(ref path) = args.path {
             cmd.arg("--").arg(path);
+        }
+        
+        info!("\u{2699}  git diff {}", cmd.get_args().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
+        if !self.policy.is_allowed(&Action::Execute, "git") {
+            return Err(ExecError::Message("execution denied for command: git".to_string()));
         }
 
         let output = cmd
@@ -161,7 +161,7 @@ impl Tool for GitDiffTool {
         } else {
             stdout.to_string()
         };
-        debug!("tool_response: git_diff: {} bytes", result.len());
+        debug!("  git diff \u{2192} {} bytes", result.len());
         Ok(result)
     }
 }
@@ -201,11 +201,6 @@ impl Tool for GitLogTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("tool_call: git_log {{ n: {:?}, path: {:?} }}", args.n, args.path);
-        if !self.policy.is_allowed(&Action::Execute, "git") {
-            return Err(ExecError::Message("execution denied for command: git".to_string()));
-        }
-
         let mut cmd = std::process::Command::new("git");
         cmd.arg("log");
         cmd.arg("--oneline");
@@ -213,6 +208,11 @@ impl Tool for GitLogTool {
 
         if let Some(ref path) = args.path {
             cmd.arg("--").arg(path);
+        }
+
+        info!("\u{2699}  git log {}", cmd.get_args().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
+        if !self.policy.is_allowed(&Action::Execute, "git") {
+            return Err(ExecError::Message("execution denied for command: git".to_string()));
         }
 
         let output = cmd
@@ -225,7 +225,7 @@ impl Tool for GitLogTool {
         } else {
             stdout.to_string()
         };
-        debug!("tool_response: git_log: {} bytes", result.len());
+        debug!("  git log \u{2192} {} bytes", result.len());
         Ok(result)
     }
 }
