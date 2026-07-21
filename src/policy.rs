@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::path::Path;
+use tracing::{debug, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Read,
     Write,
     Execute,
+    WebFetch,
+    WebSearch,
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +51,10 @@ impl Policy {
         let combined: Vec<&PolicyRule> = self.cli_rules.iter().chain(self.rules.iter()).collect();
 
         if combined.is_empty() {
+            warn!(
+                "policy: denied {:?} for {:?} (no rules defined)",
+                action, target
+            );
             return false;
         }
 
@@ -55,11 +62,19 @@ impl Policy {
             match rule {
                 PolicyRule::Allow(a, pattern) if a == action => {
                     if matches_pattern(target, pattern) {
+                        debug!(
+                            "policy: allowed {:?} for {:?} (matched rule: allow {})",
+                            action, target, pattern
+                        );
                         return true;
                     }
                 }
                 PolicyRule::Deny(a, pattern) if a == action => {
                     if matches_pattern(target, pattern) {
+                        warn!(
+                            "policy: denied {:?} for {:?} (matched rule: deny {})",
+                            action, target, pattern
+                        );
                         return false;
                     }
                 }
@@ -67,9 +82,14 @@ impl Policy {
             }
         }
 
+        warn!(
+            "policy: denied {:?} for {:?} (no matching rule)",
+            action, target
+        );
         false
     }
 
+    #[allow(dead_code)]
     pub fn effective_allow_list(&self, action: &Action) -> Vec<String> {
         let mut allowed = Vec::new();
         let mut denied: HashMap<&str, bool> = HashMap::new();
@@ -111,6 +131,8 @@ fn parse_line(line: &str) -> Option<PolicyRule> {
         "read" => Action::Read,
         "write" => Action::Write,
         "execute" => Action::Execute,
+        "web-fetch" | "webfetch" => Action::WebFetch,
+        "web-search" | "websearch" => Action::WebSearch,
         _ => return None,
     };
 
@@ -201,7 +223,10 @@ mod tests {
     #[test]
     fn test_cli_rules_precedence() {
         let mut policy = Policy::parse("deny read /tmp/**");
-        policy.add_cli_rule(PolicyRule::Allow(Action::Read, "/tmp/allowed.txt".to_string()));
+        policy.add_cli_rule(PolicyRule::Allow(
+            Action::Read,
+            "/tmp/allowed.txt".to_string(),
+        ));
         assert!(policy.is_allowed(&Action::Read, "/tmp/allowed.txt"));
         assert!(!policy.is_allowed(&Action::Read, "/tmp/other.txt"));
     }

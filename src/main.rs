@@ -34,10 +34,16 @@ async fn main() -> anyhow::Result<()> {
         .system
         .clone()
         .or_else(|| config.system_prompt.clone())
-        .unwrap_or_else(|| "You are a helpful assistant.".to_string());
+        .unwrap_or_else(|| {
+            "You are a CLI assistant with access to tools for reading, writing, and searching files, \
+             as well as running shell commands. Use tools when helpful. Keep responses concise. \
+             For multi-step tasks, work methodically and report progress."
+                .to_string()
+        });
 
     let model_name = config.model.clone();
     let max_tokens = cli.max_tokens.or(config.max_tokens);
+    let max_turns = cli.max_turns;
 
     let policy = load_policy(&cli, &config)?;
     let session_dir = config.session_dir_resolved();
@@ -96,7 +102,7 @@ async fn main() -> anyhow::Result<()> {
         "openai" => {
             let client = openai_client(&config)?;
             let model = client.completion_model(&model_name);
-            let agent = build_agent(model, &system_prompt, &policy, max_tokens, mcp_tool_sets);
+            let agent = build_agent(model, &system_prompt, &policy, max_tokens, max_turns, mcp_tool_sets);
 
             if is_interactive {
                 run_interactive(agent, &mut session, &session_dir, prompt_text).await?;
@@ -111,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
         "anthropic" => {
             let client = anthropic_client(&config)?;
             let model = client.completion_model(&model_name);
-            let agent = build_agent(model, &system_prompt, &policy, max_tokens, mcp_tool_sets);
+            let agent = build_agent(model, &system_prompt, &policy, max_tokens, max_turns, mcp_tool_sets);
 
             if is_interactive {
                 run_interactive(agent, &mut session, &session_dir, prompt_text).await?;
@@ -137,9 +143,9 @@ fn setup_logging(verbose: bool, quiet: bool) {
     let filter = if verbose {
         EnvFilter::new("ai=debug,info")
     } else if quiet {
-        EnvFilter::new("warn,error")
+        EnvFilter::new("ai=warn,error")
     } else {
-        EnvFilter::new("info,warn,error")
+        EnvFilter::new("ai=info,warn")
     };
 
     let builder = tracing_subscriber::fmt()
@@ -201,16 +207,31 @@ fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> {
         policy.add_cli_rule(PolicyRule::Allow(Action::Execute, pat.clone()));
     }
 
+    for pat in &cli.web_fetch {
+        policy.add_cli_rule(PolicyRule::Allow(Action::WebFetch, pat.clone()));
+    }
+
+    for pat in &cli.web_search {
+        policy.add_cli_rule(PolicyRule::Allow(Action::WebSearch, pat.clone()));
+    }
+
+    if cli.web {
+        policy.add_cli_rule(PolicyRule::Allow(Action::WebFetch, "**".to_string()));
+        policy.add_cli_rule(PolicyRule::Allow(Action::WebSearch, "**".to_string()));
+    }
+
     if cli.yolo {
         policy.add_cli_rule(PolicyRule::Allow(Action::Read, "**".to_string()));
         policy.add_cli_rule(PolicyRule::Allow(Action::Write, "**".to_string()));
         policy.add_cli_rule(PolicyRule::Allow(Action::Execute, "*".to_string()));
+        policy.add_cli_rule(PolicyRule::Allow(Action::WebFetch, "**".to_string()));
+        policy.add_cli_rule(PolicyRule::Allow(Action::WebSearch, "**".to_string()));
     }
 
     Ok(policy)
 }
 
-fn openai_client(config: &Config) -> anyhow::Result<providers::openai::Client> {
+fn openai_client(config: &Config) -> anyhow::Result<providers::openai::CompletionsClient> {
     let api_key = config
         .resolve_api_key()
         .or_else(|| std::env::var("OPENAI_API_KEY").ok())
@@ -218,7 +239,7 @@ fn openai_client(config: &Config) -> anyhow::Result<providers::openai::Client> {
             "OpenAI API key not found. Set OPENAI_API_KEY environment variable or api_key in config."
         ))?;
 
-    let mut builder = providers::openai::Client::builder().api_key(api_key.as_str());
+    let mut builder = providers::openai::CompletionsClient::builder().api_key(api_key.as_str());
     if let Some(ref base) = config.api_base {
         builder = builder.base_url(base);
     }
@@ -245,6 +266,7 @@ fn build_agent<M: CompletionModel + 'static>(
     system_prompt: &str,
     policy: &Policy,
     max_tokens: Option<usize>,
+    max_turns: usize,
     mcp_tool_sets: Vec<mcp::McpToolSet>,
 ) -> rig_core::agent::Agent<M> {
     let mut server = ToolServer::new()
@@ -259,7 +281,9 @@ fn build_agent<M: CompletionModel + 'static>(
         .tool(tools::exec::GitLogTool::new(policy.clone()))
         .tool(tools::search::SearchContentTool::new(policy.clone()))
         .tool(tools::search::FindFilesTool::new(policy.clone()))
-        .tool(tools::think::ThinkTool::new());
+        .tool(tools::think::ThinkTool::new())
+        .tool(tools::web::WebFetchTool::new(policy.clone()))
+        .tool(tools::web::WebSearchTool::new(policy.clone()));
 
     for set in mcp_tool_sets {
         for tool in set.tools {
@@ -271,6 +295,7 @@ fn build_agent<M: CompletionModel + 'static>(
 
     let builder = AgentBuilder::new(model)
         .preamble(system_prompt)
+        .default_max_turns(max_turns)
         .tool_server_handle(handle);
 
     match max_tokens {
@@ -283,8 +308,9 @@ async fn run_oneshot<M: CompletionModel + 'static>(
     agent: rig_core::agent::Agent<M>,
     prompt: &str,
 ) -> anyhow::Result<()> {
-    info!("Sending prompt...");
+    debug!("Sending prompt...");
     let response = agent.prompt(prompt).await?;
+    debug!("Response: {response}");
     io::stdout_line(&response);
     Ok(())
 }
@@ -310,6 +336,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
             Ok(response) => {
                 session.add_message("user", &text);
                 session.add_message("assistant", &response);
+                debug!("Response: {response}");
                 io::stdout_line(&response);
                 session.save(session_dir)?;
             }
@@ -364,6 +391,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
                 match agent.chat(trimmed, &mut chat_history).await {
                     Ok(response) => {
                         session.add_message("assistant", &response);
+                        debug!("Response: {response}");
                         io::stdout_line(&response);
                         session.save(session_dir)?;
                     }

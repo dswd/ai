@@ -1,6 +1,7 @@
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ThinkArgs {
@@ -11,6 +12,7 @@ pub struct ThinkArgs {
 #[derive(Debug, thiserror::Error)]
 pub enum ThinkError {
     #[error("{0}")]
+    #[allow(dead_code)]
     Message(String),
 }
 
@@ -41,6 +43,8 @@ impl Tool for ThinkTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("tool_call: think");
+        info!("think: {}", args.thought);
         Ok(args.thought)
     }
 }

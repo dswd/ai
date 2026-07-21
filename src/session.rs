@@ -12,7 +12,9 @@ pub struct Message {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub name: String,
+    #[serde(alias = "created_at")]
     pub created: String,
+    #[serde(alias = "updated_at")]
     pub updated: String,
     pub system_prompt: String,
     pub model: String,
@@ -58,6 +60,7 @@ impl Session {
         Ok(session)
     }
 
+    #[allow(dead_code)]
     pub fn list(dir: &Path) -> anyhow::Result<Vec<String>> {
         if !dir.exists() {
             return Ok(Vec::new());
@@ -158,17 +161,15 @@ pub fn generate_session_name() -> String {
         .subsec_nanos();
 
     let adjectives = [
-        "swift", "calm", "bright", "keen", "bold", "wise", "warm", "cool",
-        "fair", "fine", "glad", "pure", "rare", "safe", "wild", "deep",
-        "eager", "fresh", "grand", "happy", "jolly", "light", "merry",
-        "noble", "proud", "quiet", "sharp", "sunny", "vivid", "zesty",
+        "swift", "calm", "bright", "keen", "bold", "wise", "warm", "cool", "fair", "fine", "glad",
+        "pure", "rare", "safe", "wild", "deep", "eager", "fresh", "grand", "happy", "jolly",
+        "light", "merry", "noble", "proud", "quiet", "sharp", "sunny", "vivid", "zesty",
     ];
 
     let nouns = [
-        "hawk", "wolf", "bear", "deer", "dove", "fox", "lark", "lynx",
-        "owl", "seal", "swan", "wren", "fern", "oak", "pine", "rose",
-        "coral", "crane", "finch", "heron", "ibis", "jay", "kiwi", "newt",
-        "pika", "tiger", "trout", "whale", "zebra", "falcon",
+        "hawk", "wolf", "bear", "deer", "dove", "fox", "lark", "lynx", "owl", "seal", "swan",
+        "wren", "fern", "oak", "pine", "rose", "coral", "crane", "finch", "heron", "ibis", "jay",
+        "kiwi", "newt", "pika", "tiger", "trout", "whale", "zebra", "falcon",
     ];
 
     let adj = adjectives[(nanos as usize) % adjectives.len()];

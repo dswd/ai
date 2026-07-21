@@ -6,6 +6,7 @@ use rmcp::{
 use tracing::info;
 
 pub struct McpToolSet {
+    #[allow(dead_code)]
     pub url: String,
     pub tools: Vec<rmcp::model::Tool>,
     pub sink: ServerSink,

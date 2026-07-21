@@ -2,6 +2,7 @@ use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use tracing::{debug, info};
 
 use crate::policy::{Action, Policy};
 
@@ -49,6 +50,7 @@ impl Tool for SearchContentTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("tool_call: search_content {{ path: {:?}, pattern: {:?} }}", args.path, args.pattern);
         let root = PathBuf::from(&args.path);
         let canonical_root = root
             .canonicalize()
@@ -256,6 +258,7 @@ impl Tool for FindFilesTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("tool_call: find_files {{ path: {:?}, pattern: {:?} }}", args.path, args.pattern);
         let root = PathBuf::from(&args.path);
         let canonical_root = root
             .canonicalize()

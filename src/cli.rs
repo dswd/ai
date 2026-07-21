@@ -62,6 +62,23 @@ pub struct Cli {
     )]
     pub execute: Vec<String>,
 
+    #[arg(long = "web", help = "Allow all web access (fetch and search)")]
+    pub web: bool,
+
+    #[arg(
+        long = "web-fetch",
+        help = "Allow web fetch for matching URL pattern",
+        value_name = "PATTERN"
+    )]
+    pub web_fetch: Vec<String>,
+
+    #[arg(
+        long = "web-search",
+        help = "Allow web search with matching query pattern",
+        value_name = "PATTERN"
+    )]
+    pub web_search: Vec<String>,
+
     #[arg(
         short = 'p',
         long = "policy",
@@ -92,8 +109,20 @@ pub struct Cli {
     )]
     pub yolo: bool,
 
-    #[arg(long = "max-tokens", help = "Set the maximum number of tokens", value_name = "N")]
+    #[arg(
+        long = "max-tokens",
+        help = "Set the maximum number of tokens",
+        value_name = "N"
+    )]
     pub max_tokens: Option<usize>,
+
+    #[arg(
+        long = "max-turns",
+        help = "Set the maximum number of agent turns (tool call rounds)",
+        value_name = "N",
+        default_value = "100"
+    )]
+    pub max_turns: usize,
 
     #[arg(
         short = 'v',

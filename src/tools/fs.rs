@@ -2,6 +2,7 @@ use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use tracing::{debug, info};
 
 use crate::policy::{Action, Policy};
 
@@ -44,6 +45,7 @@ impl Tool for ReadFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("tool_call: read_file {{ path: {:?} }}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -97,6 +99,7 @@ impl Tool for WriteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("tool_call: write_file {{ path: {:?} }}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = if path.exists() {
             path.canonicalize()
@@ -165,6 +168,7 @@ impl Tool for ListDirTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("tool_call: list_dir {{ path: {:?} }}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -240,6 +244,7 @@ impl Tool for ReplaceInFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("tool_call: replace_in_file {{ path: {:?} }}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -323,6 +328,7 @@ impl Tool for DeleteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("tool_call: delete_file {{ path: {:?} }}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -389,6 +395,7 @@ impl Tool for CreateDirectoryTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("tool_call: create_directory {{ path: {:?} }}", args.path);
         let path = PathBuf::from(&args.path);
 
         let canonical = if path.exists() {

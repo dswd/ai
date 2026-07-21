@@ -1,6 +1,7 @@
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info};
 
 use crate::policy::{Action, Policy};
 
@@ -45,6 +46,7 @@ impl Tool for ExecuteTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("tool_call: execute {{ command: {:?} }}", args.command);
         let first_word = args
             .command
             .split_whitespace()
@@ -131,6 +133,7 @@ impl Tool for GitDiffTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("tool_call: git_diff {{ staged: {:?}, path: {:?} }}", args.staged, args.path);
         if !self.policy.is_allowed(&Action::Execute, "git") {
             return Err(ExecError::Message("execution denied for command: git".to_string()));
         }
@@ -195,6 +198,7 @@ impl Tool for GitLogTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("tool_call: git_log {{ n: {:?}, path: {:?} }}", args.n, args.path);
         if !self.policy.is_allowed(&Action::Execute, "git") {
             return Err(ExecError::Message("execution denied for command: git".to_string()));
         }
