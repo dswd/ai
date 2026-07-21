@@ -13,10 +13,12 @@ use policy::{Action, Policy, PolicyRule};
 use rig_core::{
     agent::AgentBuilder,
     client::CompletionClient,
-    completion::{Chat, CompletionModel, Message, Prompt},
+    completion::{CompletionModel, Message},
     providers,
+    streaming::{StreamingChat, StreamingPrompt},
     tool::server::ToolServer,
 };
+use rig_core::agent::stream_to_stdout;
 use session::Session;
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
@@ -308,10 +310,10 @@ async fn run_oneshot<M: CompletionModel + 'static>(
     agent: rig_core::agent::Agent<M>,
     prompt: &str,
 ) -> anyhow::Result<()> {
-    debug!("Sending prompt...");
-    let response = agent.prompt(prompt).await?;
-    debug!("Response: {response}");
-    io::stdout_line(&response);
+    let mut stream = agent.stream_prompt(prompt).await;
+    let response = stream_to_stdout(&mut stream).await?;
+    println!();
+    debug!("Response: {}", response.output);
     Ok(())
 }
 
@@ -332,12 +334,21 @@ async fn run_interactive<M: CompletionModel + 'static>(
         .collect();
 
     if let Some(text) = initial_prompt {
-        match agent.chat(&text, &mut chat_history).await {
+        session.add_message("user", &text);
+        let hist = chat_history.clone();
+        let result = async {
+            let mut stream = agent.stream_chat(&text, hist).await;
+            let response = stream_to_stdout(&mut stream).await?;
+            Ok::<_, anyhow::Error>(response)
+        }.await;
+        match result {
             Ok(response) => {
-                session.add_message("user", &text);
-                session.add_message("assistant", &response);
-                debug!("Response: {response}");
-                io::stdout_line(&response);
+                session.add_message("assistant", &response.output);
+                println!();
+                if let Some(messages) = response.messages {
+                    chat_history.extend(messages);
+                }
+                debug!("Response: {}", response.output);
                 session.save(session_dir)?;
             }
             Err(e) => {
@@ -388,11 +399,20 @@ async fn run_interactive<M: CompletionModel + 'static>(
 
                 session.add_message("user", trimmed);
 
-                match agent.chat(trimmed, &mut chat_history).await {
+                let hist = chat_history.clone();
+                let result = async {
+                    let mut stream = agent.stream_chat(trimmed, hist).await;
+                    let response = stream_to_stdout(&mut stream).await?;
+                    Ok::<_, anyhow::Error>(response)
+                }.await;
+                match result {
                     Ok(response) => {
-                        session.add_message("assistant", &response);
-                        debug!("Response: {response}");
-                        io::stdout_line(&response);
+                        session.add_message("assistant", &response.output);
+                        println!();
+                        if let Some(messages) = response.messages {
+                            chat_history.extend(messages);
+                        }
+                        debug!("Response: {}", response.output);
                         session.save(session_dir)?;
                     }
                     Err(e) => {

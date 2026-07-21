@@ -19,21 +19,10 @@ pub fn read_stdin() -> Option<String> {
     }
 }
 
-pub fn print_stdout(text: &str) {
-    let mut stdout = io::stdout().lock();
-    let _ = stdout.write_all(text.as_bytes());
-    let _ = stdout.flush();
-}
-
 pub fn print_stderr(text: &str) {
     let mut stderr = io::stderr().lock();
     let _ = stderr.write_all(text.as_bytes());
     let _ = stderr.flush();
-}
-
-pub fn stdout_line(text: &str) {
-    print_stdout(text);
-    print_stdout("\n");
 }
 
 pub fn stderr_line(text: &str) {
