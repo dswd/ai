@@ -125,6 +125,15 @@ pub struct Cli {
     pub max_turns: usize,
 
     #[arg(
+        long = "thinking",
+        help = "Enable extended thinking (budget in tokens, default: 16000)",
+        num_args = 0..=1,
+        value_name = "TOKENS",
+        default_missing_value = "16000"
+    )]
+    pub thinking: Option<usize>,
+
+    #[arg(
         short = 'v',
         long = "verbose",
         help = "Enable verbose mode",

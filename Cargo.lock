@@ -18,6 +18,7 @@ dependencies = [
  "anyhow",
  "clap",
  "dirs",
+ "futures",
  "glob",
  "htmd",
  "html2text",

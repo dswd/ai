@@ -13,6 +13,7 @@ pub struct Config {
     pub model: String,
     pub system_prompt: Option<String>,
     pub max_tokens: Option<usize>,
+    pub thinking: Option<usize>,
     pub session_dir: Option<PathBuf>,
     pub policy: Option<PathBuf>,
 }
@@ -26,6 +27,7 @@ impl Default for Config {
             model: "gpt-4o".to_string(),
             system_prompt: None,
             max_tokens: None,
+            thinking: None,
             session_dir: None,
             policy: None,
         }

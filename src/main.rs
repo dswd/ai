@@ -12,16 +12,19 @@ use config::Config;
 use policy::{Action, Policy, PolicyRule};
 use rig_core::{
     agent::AgentBuilder,
+    agent::{MultiTurnStreamItem, PromptResponse, StreamingResult},
     client::CompletionClient,
     completion::{CompletionModel, Message},
     providers,
-    streaming::{StreamingChat, StreamingPrompt},
+    streaming::{StreamedAssistantContent, StreamedUserContent, StreamingChat, StreamingPrompt},
     tool::server::ToolServer,
 };
-use rig_core::agent::stream_to_stdout;
 use session::Session;
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
+
+use std::io::Write;
+use futures::StreamExt;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -46,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
     let model_name = config.model.clone();
     let max_tokens = cli.max_tokens.or(config.max_tokens);
     let max_turns = cli.max_turns;
+    let thinking = cli.thinking.or(config.thinking);
 
     let policy = load_policy(&cli, &config)?;
     let session_dir = config.session_dir_resolved();
@@ -104,7 +108,7 @@ async fn main() -> anyhow::Result<()> {
         "openai" => {
             let client = openai_client(&config)?;
             let model = client.completion_model(&model_name);
-            let agent = build_agent(model, &system_prompt, &policy, max_tokens, max_turns, mcp_tool_sets);
+            let agent = build_agent(model, &system_prompt, &policy, max_tokens, max_turns, mcp_tool_sets, thinking);
 
             if is_interactive {
                 run_interactive(agent, &mut session, &session_dir, prompt_text).await?;
@@ -119,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
         "anthropic" => {
             let client = anthropic_client(&config)?;
             let model = client.completion_model(&model_name);
-            let agent = build_agent(model, &system_prompt, &policy, max_tokens, max_turns, mcp_tool_sets);
+            let agent = build_agent(model, &system_prompt, &policy, max_tokens, max_turns, mcp_tool_sets, thinking);
 
             if is_interactive {
                 run_interactive(agent, &mut session, &session_dir, prompt_text).await?;
@@ -270,6 +274,7 @@ fn build_agent<M: CompletionModel + 'static>(
     max_tokens: Option<usize>,
     max_turns: usize,
     mcp_tool_sets: Vec<mcp::McpToolSet>,
+    thinking: Option<usize>,
 ) -> rig_core::agent::Agent<M> {
     let mut server = ToolServer::new()
         .tool(tools::fs::ReadFileTool::new(policy.clone()))
@@ -295,10 +300,19 @@ fn build_agent<M: CompletionModel + 'static>(
 
     let handle = server.run();
 
-    let builder = AgentBuilder::new(model)
+    let mut builder = AgentBuilder::new(model)
         .preamble(system_prompt)
         .default_max_turns(max_turns)
         .tool_server_handle(handle);
+
+    if let Some(budget) = thinking {
+        builder = builder.additional_params(serde_json::json!({
+            "thinking": {
+                "type": "enabled",
+                "budget_tokens": budget
+            }
+        }));
+    }
 
     match max_tokens {
         Some(tokens) => builder.max_tokens(tokens as u64).build(),
@@ -306,13 +320,76 @@ fn build_agent<M: CompletionModel + 'static>(
     }
 }
 
+async fn stream_response<R>(
+    stream: &mut StreamingResult<R>,
+) -> anyhow::Result<PromptResponse> {
+    let mut final_response = None;
+    let mut had_tool_calls = false;
+    while let Some(item) = stream.next().await {
+        match item {
+            Ok(MultiTurnStreamItem::StreamAssistantItem(
+                StreamedAssistantContent::Text(text),
+            )) => {
+                if had_tool_calls {
+                    eprintln!();
+                    had_tool_calls = false;
+                }
+                print!("{}", text.text);
+                let _ = std::io::stdout().flush();
+            }
+            Ok(MultiTurnStreamItem::StreamAssistantItem(
+                StreamedAssistantContent::Reasoning(reasoning),
+            )) => {
+                if had_tool_calls {
+                    eprintln!();
+                    had_tool_calls = false;
+                }
+                let reasoning = reasoning.display_text();
+                print!("\x1b[90;3m{reasoning}\x1b[0m");
+                let _ = std::io::stdout().flush();
+            }
+            Ok(MultiTurnStreamItem::ToolExecutionStart {
+                tool_call,
+                ..
+            }) => {
+                had_tool_calls = true;
+                print!("\n\u{2699}  {}", tool_call.function.name);
+                let _ = std::io::stdout().flush();
+            }
+            Ok(MultiTurnStreamItem::StreamUserItem(
+                StreamedUserContent::ToolResult { tool_result, .. },
+            )) => {
+                if tracing::level_enabled!(tracing::Level::DEBUG) {
+                    let output = tool_result.content.iter()
+                        .filter_map(|c| match c {
+                            rig_core::completion::message::ToolResultContent::Text(t) => Some(t.text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
+                    let truncated = tools::truncate(&output, 10, 300);
+                    print!("\x1b[34m\n  \u{2192} {}\x1b[0m\n", truncated.replace('\n', "\n  "));
+                    let _ = std::io::stdout().flush();
+                }
+            }
+            Ok(MultiTurnStreamItem::FinalResponse(resp)) => {
+                final_response = Some(resp);
+            }
+            Err(e) => {
+                eprintln!("\nError: {e}");
+            }
+            _ => {}
+        }
+    }
+    final_response.ok_or_else(|| anyhow::anyhow!("no final response"))
+}
+
 async fn run_oneshot<M: CompletionModel + 'static>(
     agent: rig_core::agent::Agent<M>,
     prompt: &str,
 ) -> anyhow::Result<()> {
     let mut stream = agent.stream_prompt(prompt).await;
-    let response = stream_to_stdout(&mut stream).await?;
-    println!();
+    let response = stream_response(&mut stream).await?;
     debug!("Response: {}", response.output);
     Ok(())
 }
@@ -338,13 +415,12 @@ async fn run_interactive<M: CompletionModel + 'static>(
         let hist = chat_history.clone();
         let result = async {
             let mut stream = agent.stream_chat(&text, hist).await;
-            let response = stream_to_stdout(&mut stream).await?;
+            let response = stream_response(&mut stream).await?;
             Ok::<_, anyhow::Error>(response)
         }.await;
         match result {
             Ok(response) => {
                 session.add_message("assistant", &response.output);
-                println!();
                 if let Some(messages) = response.messages {
                     chat_history.extend(messages);
                 }
@@ -402,13 +478,12 @@ async fn run_interactive<M: CompletionModel + 'static>(
                 let hist = chat_history.clone();
                 let result = async {
                     let mut stream = agent.stream_chat(trimmed, hist).await;
-                    let response = stream_to_stdout(&mut stream).await?;
+                    let response = stream_response(&mut stream).await?;
                     Ok::<_, anyhow::Error>(response)
                 }.await;
                 match result {
                     Ok(response) => {
                         session.add_message("assistant", &response.output);
-                        println!();
                         if let Some(messages) = response.messages {
                             chat_history.extend(messages);
                         }
