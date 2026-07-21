@@ -2,9 +2,11 @@ use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tracing::{debug, info};
+use tracing::{debug, info, level_enabled, Level};
 
+use super::truncate;
 use crate::policy::{Action, Policy};
+use std::io::Write;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SearchContentArgs {
@@ -107,7 +109,11 @@ impl Tool for SearchContentTool {
         } else {
             results.join("\n")
         };
-        debug!("  search \u{2192} {} matches", results.len());
+        let truncated = truncate(&result, 20, 500);
+        if level_enabled!(Level::DEBUG) {
+            let _ = writeln!(std::io::stderr(), "\x1b[34m  search \u{2192}\n{truncated}\x1b[0m");
+        }
+        debug!("  search \u{2192}\n{truncated}");
         Ok(result)
     }
 }
@@ -292,8 +298,15 @@ impl Tool for FindFilesTool {
             .collect();
 
         if results.is_empty() {
-            debug!("  find \u{2192} 0 files");
-            return Ok("No files found.".to_string());
+            let result = "No files found.".to_string();
+            let truncated = truncate(&result, 20, 500);
+            if level_enabled!(Level::DEBUG) {
+        if level_enabled!(Level::DEBUG) {
+            let _ = writeln!(std::io::stderr(), "\x1b[34m  find \u{2192}\n{truncated}\x1b[0m");
+        }
+            }
+            debug!("  find \u{2192}\n{truncated}");
+            return Ok(result);
         }
 
         results.sort();
@@ -304,7 +317,9 @@ impl Tool for FindFilesTool {
         }
 
         let result = results.join("\n");
-        debug!("  find \u{2192} {} files", results.len());
+        let truncated = truncate(&result, 20, 500);
+        let _ = writeln!(std::io::stderr(), "\x1b[34m  find \u{2192}\n{truncated}\x1b[0m");
+        debug!("  find \u{2192}\n{truncated}");
         Ok(result)
     }
 }

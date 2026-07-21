@@ -2,9 +2,11 @@ use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tracing::{debug, info};
+use tracing::{debug, info, level_enabled, Level};
 
+use super::truncate;
 use crate::policy::{Action, Policy};
+use std::io::Write;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WebError {
@@ -140,7 +142,11 @@ impl Tool for WebFetchTool {
             "html" => body,
             _ => body,
         };
-        debug!("  fetch \u{2192} {} bytes", result.len());
+        let truncated = truncate(&result, 20, 500);
+        if level_enabled!(Level::DEBUG) {
+            let _ = writeln!(std::io::stderr(), "\x1b[34m  fetch \u{2192}\n{truncated}\x1b[0m");
+        }
+        debug!("  fetch \u{2192}\n{truncated}");
         Ok(result)
     }
 }
@@ -264,7 +270,11 @@ impl Tool for WebSearchTool {
             );
             header + &results.join("\n")
         };
-        debug!("  search web \u{2192} {} results", results.len());
+        let truncated = truncate(&result, 20, 500);
+        if level_enabled!(Level::DEBUG) {
+            let _ = writeln!(std::io::stderr(), "\x1b[34m  search web \u{2192}\n{truncated}\x1b[0m");
+        }
+        debug!("  search web \u{2192}\n{truncated}");
         Ok(result)
     }
 }

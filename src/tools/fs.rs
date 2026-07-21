@@ -1,9 +1,11 @@
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use std::path::PathBuf;
-use tracing::{debug, info};
+use tracing::{debug, info, level_enabled, Level};
 
+use super::truncate;
 use crate::policy::{Action, Policy};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -61,7 +63,11 @@ impl Tool for ReadFileTool {
 
         let content = std::fs::read_to_string(&canonical)
             .map_err(|e| ToolExecError::Message(format!("cannot read file: {e}")))?;
-        debug!("  read file \u{2192} {} bytes", content.len());
+        let truncated = truncate(&content, 20, 500);
+        if level_enabled!(Level::DEBUG) {
+            let _ = writeln!(std::io::stderr(), "\x1b[34m  read file \u{2192}\n{truncated}\x1b[0m");
+        }
+        debug!("  read file \u{2192}\n{truncated}");
         Ok(content)
     }
 }
@@ -134,7 +140,11 @@ impl Tool for WriteFileTool {
             .map_err(|e| ToolExecError::Message(format!("cannot write file: {e}")))?;
 
         let result = format!("Successfully wrote to {}", args.path);
-        debug!("  write file \u{2192} {result}");
+        let truncated = truncate(&result, 20, 500);
+        if level_enabled!(Level::DEBUG) {
+            let _ = writeln!(std::io::stderr(), "\x1b[34m  write file \u{2192} {truncated}\x1b[0m");
+        }
+        debug!("  write file \u{2192} {truncated}");
         Ok(result)
     }
 }
@@ -205,7 +215,11 @@ impl Tool for ListDirTool {
             .collect();
 
         let result = entries.join("\n");
-        debug!("  list dir \u{2192} {} entries", entries.len());
+        let truncated = truncate(&result, 20, 500);
+        if level_enabled!(Level::DEBUG) {
+            let _ = writeln!(std::io::stderr(), "\x1b[34m  list dir \u{2192}\n{truncated}\x1b[0m");
+        }
+        debug!("  list dir \u{2192}\n{truncated}");
         Ok(result)
     }
 }
@@ -296,7 +310,11 @@ impl Tool for ReplaceInFileTool {
             "Successfully replaced in {} (1 occurrence)",
             args.path
         );
-        debug!("  edit file \u{2192} {result}");
+        let truncated = truncate(&result, 20, 500);
+        if level_enabled!(Level::DEBUG) {
+            let _ = writeln!(std::io::stderr(), "\x1b[34m  edit file \u{2192} {truncated}\x1b[0m");
+        }
+        debug!("  edit file \u{2192} {truncated}");
         Ok(result)
     }
 }
@@ -367,7 +385,11 @@ impl Tool for DeleteFileTool {
                 .map_err(|e| ToolExecError::Message(format!("cannot delete file: {e}")))?;
             format!("Deleted file: {}", args.path)
         };
-        debug!("  delete file \u{2192} {result}");
+        let truncated = truncate(&result, 20, 500);
+        if level_enabled!(Level::DEBUG) {
+            let _ = writeln!(std::io::stderr(), "\x1b[34m  delete file \u{2192} {truncated}\x1b[0m");
+        }
+        debug!("  delete file \u{2192} {truncated}");
         Ok(result)
     }
 }
@@ -440,7 +462,11 @@ impl Tool for CreateDirectoryTool {
             .map_err(|e| ToolExecError::Message(format!("cannot create directory: {e}")))?;
 
         let result = format!("Created directory: {}", args.path);
-        debug!("  create dir \u{2192} {result}");
+        let truncated = truncate(&result, 20, 500);
+        if level_enabled!(Level::DEBUG) {
+            let _ = writeln!(std::io::stderr(), "\x1b[34m  create dir \u{2192} {truncated}\x1b[0m");
+        }
+        debug!("  create dir \u{2192} {truncated}");
         Ok(result)
     }
 }
