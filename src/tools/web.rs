@@ -121,27 +121,27 @@ impl Tool for WebFetchTool {
             )));
         }
 
-        match format.as_str() {
+        let result = match format.as_str() {
             "text" => {
                 if content_type.contains("text/html") {
-                    let text = html2text::from_read(body.as_bytes(), 80);
-                    Ok(text)
+                    html2text::from_read(body.as_bytes(), 80)
                 } else {
-                    Ok(body)
+                    body
                 }
             }
             "markdown" => {
                 if content_type.contains("text/html") {
-                    let markdown = htmd::convert(&body)
-                        .map_err(|e| WebError::Message(format!("failed to convert HTML to markdown: {e}")))?;
-                    Ok(markdown)
+                    htmd::convert(&body)
+                        .map_err(|e| WebError::Message(format!("failed to convert HTML to markdown: {e}")))?
                 } else {
-                    Ok(format!("```\n{body}\n```"))
+                    format!("```\n{body}\n```")
                 }
             }
-            "html" => Ok(body),
-            _ => Ok(body),
-        }
+            "html" => body,
+            _ => body,
+        };
+        debug!("tool_response: web_fetch: {} bytes", result.len());
+        Ok(result)
     }
 }
 
@@ -254,15 +254,17 @@ impl Tool for WebSearchTool {
             }
         }
 
-        if results.is_empty() {
-            Ok("No results found.".to_string())
+        let result = if results.is_empty() {
+            "No results found.".to_string()
         } else {
             let header = format!(
                 "Search results for \"{}\" ({} found):\n\n",
                 args.query,
                 results.len()
             );
-            Ok(header + &results.join("\n"))
-        }
+            header + &results.join("\n")
+        };
+        debug!("tool_response: web_search: {} results", results.len());
+        Ok(result)
     }
 }

@@ -102,11 +102,13 @@ impl Tool for SearchContentTool {
             )?;
         }
 
-        if results.is_empty() {
-            Ok("No matches found.".to_string())
+        let result = if results.is_empty() {
+            "No matches found.".to_string()
         } else {
-            Ok(results.join("\n"))
-        }
+            results.join("\n")
+        };
+        debug!("tool_response: search_content: {} matches", results.len());
+        Ok(result)
     }
 }
 
@@ -290,6 +292,7 @@ impl Tool for FindFilesTool {
             .collect();
 
         if results.is_empty() {
+            debug!("tool_response: find_files: 0 files");
             return Ok("No files found.".to_string());
         }
 
@@ -300,6 +303,8 @@ impl Tool for FindFilesTool {
             results.push("[... results truncated ...]".to_string());
         }
 
-        Ok(results.join("\n"))
+        let result = results.join("\n");
+        debug!("tool_response: find_files: {} files", results.len());
+        Ok(result)
     }
 }

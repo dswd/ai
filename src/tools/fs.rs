@@ -59,8 +59,10 @@ impl Tool for ReadFileTool {
             )));
         }
 
-        std::fs::read_to_string(&canonical)
-            .map_err(|e| ToolExecError::Message(format!("cannot read file: {e}")))
+        let content = std::fs::read_to_string(&canonical)
+            .map_err(|e| ToolExecError::Message(format!("cannot read file: {e}")))?;
+        debug!("tool_response: read_file: {} bytes", content.len());
+        Ok(content)
     }
 }
 
@@ -131,7 +133,9 @@ impl Tool for WriteFileTool {
         std::fs::write(&canonical, &args.content)
             .map_err(|e| ToolExecError::Message(format!("cannot write file: {e}")))?;
 
-        Ok(format!("Successfully wrote to {}", args.path))
+        let result = format!("Successfully wrote to {}", args.path);
+        debug!("tool_response: write_file: {result}");
+        Ok(result)
     }
 }
 
@@ -200,7 +204,9 @@ impl Tool for ListDirTool {
             })
             .collect();
 
-        Ok(entries.join("\n"))
+        let result = entries.join("\n");
+        debug!("tool_response: list_dir: {} entries", entries.len());
+        Ok(result)
     }
 }
 
@@ -286,10 +292,12 @@ impl Tool for ReplaceInFileTool {
         std::fs::write(&canonical, &new_content)
             .map_err(|e| ToolExecError::Message(format!("cannot write file: {e}")))?;
 
-        Ok(format!(
+        let result = format!(
             "Successfully replaced in {} (1 occurrence)",
             args.path
-        ))
+        );
+        debug!("tool_response: replace_in_file: {result}");
+        Ok(result)
     }
 }
 
@@ -342,23 +350,25 @@ impl Tool for DeleteFileTool {
             )));
         }
 
-        if canonical.is_dir() {
+        let result = if canonical.is_dir() {
             if args.recursive.unwrap_or(false) {
                 std::fs::remove_dir_all(&canonical).map_err(|e| {
                     ToolExecError::Message(format!("cannot delete directory: {e}"))
                 })?;
-                Ok(format!("Deleted directory: {}", args.path))
+                format!("Deleted directory: {}", args.path)
             } else {
-                Err(ToolExecError::Message(format!(
+                return Err(ToolExecError::Message(format!(
                     "{} is a directory. Set recursive=true to delete it.",
                     args.path
-                )))
+                )));
             }
         } else {
             std::fs::remove_file(&canonical)
                 .map_err(|e| ToolExecError::Message(format!("cannot delete file: {e}")))?;
-            Ok(format!("Deleted file: {}", args.path))
-        }
+            format!("Deleted file: {}", args.path)
+        };
+        debug!("tool_response: delete_file: {result}");
+        Ok(result)
     }
 }
 
@@ -429,6 +439,8 @@ impl Tool for CreateDirectoryTool {
         std::fs::create_dir_all(&canonical)
             .map_err(|e| ToolExecError::Message(format!("cannot create directory: {e}")))?;
 
-        Ok(format!("Created directory: {}", args.path))
+        let result = format!("Created directory: {}", args.path);
+        debug!("tool_response: create_directory: {result}");
+        Ok(result)
     }
 }

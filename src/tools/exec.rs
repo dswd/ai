@@ -93,6 +93,7 @@ impl Tool for ExecuteTool {
             result = format!("(exit code: {})", output.status.code().unwrap_or(-1));
         }
 
+        debug!("tool_response: execute: {} bytes", result.len());
         Ok(result)
     }
 }
@@ -155,11 +156,13 @@ impl Tool for GitDiffTool {
             .map_err(|e| ExecError::Message(format!("git diff failed: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.is_empty() {
-            Ok("No changes.".to_string())
+        let result = if stdout.is_empty() {
+            "No changes.".to_string()
         } else {
-            Ok(stdout.to_string())
-        }
+            stdout.to_string()
+        };
+        debug!("tool_response: git_diff: {} bytes", result.len());
+        Ok(result)
     }
 }
 
@@ -217,10 +220,12 @@ impl Tool for GitLogTool {
             .map_err(|e| ExecError::Message(format!("git log failed: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.is_empty() {
-            Ok("No commits.".to_string())
+        let result = if stdout.is_empty() {
+            "No commits.".to_string()
         } else {
-            Ok(stdout.to_string())
-        }
+            stdout.to_string()
+        };
+        debug!("tool_response: git_log: {} bytes", result.len());
+        Ok(result)
     }
 }

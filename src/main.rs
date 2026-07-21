@@ -18,8 +18,76 @@ use rig_core::{
     tool::server::ToolServer,
 };
 use session::Session;
+use std::io::Write;
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
+
+struct IconWriter {
+    inner: std::io::Stderr,
+    buffer: String,
+}
+
+impl IconWriter {
+    fn new() -> Self {
+        IconWriter {
+            inner: std::io::stderr(),
+            buffer: String::new(),
+        }
+    }
+
+    fn format_line(line: &str) -> String {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return "\n".to_string();
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("tool_response:") {
+            return format!("  tool_response:{}\n", rest);
+        }
+        if let Some(rest) = trimmed.strip_prefix("tool_call:") {
+            if rest.starts_with(" think") || rest.starts_with(" \"think") {
+                return format!("\u{1F9E0} tool_call:{}\n", rest);
+            }
+            return format!("\u{2699}  tool_call:{}\n", rest);
+        }
+        if let Some(rest) = trimmed.strip_prefix("think: ") {
+            return format!("\u{1F9E0}  \x1b[3m{}\x1b[0m\n", rest);
+        }
+        if trimmed.starts_with("accepted:") {
+            return format!("\u{2705}  {}\n", trimmed);
+        }
+        if trimmed.starts_with("denied:") {
+            return format!("\u{274C}  {}\n", trimmed);
+        }
+
+        format!("{line}")
+    }
+}
+
+impl Write for IconWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let s = String::from_utf8_lossy(buf);
+        self.buffer.push_str(&s);
+
+        while let Some(pos) = self.buffer.find('\n') {
+            let line: String = self.buffer[..=pos].to_string();
+            self.buffer = self.buffer[pos + 1..].to_string();
+            let formatted = Self::format_line(&line);
+            self.inner.write_all(formatted.as_bytes())?;
+        }
+
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if !self.buffer.is_empty() {
+            let formatted = Self::format_line(&self.buffer);
+            self.inner.write_all(formatted.as_bytes())?;
+            self.buffer.clear();
+        }
+        self.inner.flush()
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -148,16 +216,16 @@ fn setup_logging(verbose: bool, quiet: bool) {
         EnvFilter::new("ai=info,warn")
     };
 
-    let builder = tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
+    tracing_subscriber::fmt()
+        .with_writer(|| IconWriter::new())
         .with_target(false)
-        .with_env_filter(filter);
-
-    if quiet {
-        builder.without_time().init();
-    } else {
-        builder.init();
-    }
+        .with_level(false)
+        .with_line_number(false)
+        .with_file(false)
+        .without_time()
+        .with_ansi(true)
+        .with_env_filter(filter)
+        .init();
 }
 
 fn load_config(cli: &Cli) -> anyhow::Result<Config> {
