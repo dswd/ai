@@ -78,6 +78,15 @@ async fn main() -> anyhow::Result<()> {
 
     let policy = load_policy(&cli, &config)?;
     let session_dir = config.session_dir_resolved();
+
+    if cli.list {
+        return cmd_list_sessions(&session_dir);
+    }
+
+    if let Some(ref name) = cli.delete {
+        return cmd_delete_session(name, &session_dir);
+    }
+
     let is_interactive = cli.is_interactive();
 
     let session_name = match &cli.session {
@@ -173,6 +182,39 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn cmd_list_sessions(dir: &std::path::Path) -> anyhow::Result<()> {
+    let names = Session::list(dir)?;
+    if names.is_empty() {
+        println!("No saved sessions.");
+        return Ok(());
+    }
+    for name in &names {
+        if let Ok(s) = Session::load(name, dir) {
+            println!(
+                "{}  — {} messages, model {}, created {}",
+                name,
+                s.messages.len(),
+                s.model,
+                s.created
+            );
+        } else {
+            println!("{name}");
+        }
+    }
+    Ok(())
+}
+
+fn cmd_delete_session(name: &str, dir: &std::path::Path) -> anyhow::Result<()> {
+    let path = dir.join(format!("{name}.json"));
+    if path.exists() {
+        std::fs::remove_file(&path)?;
+        output::stderr_line(&format!("Deleted session: {name}"));
+    } else {
+        anyhow::bail!("Session not found: {name}");
+    }
     Ok(())
 }
 
@@ -681,7 +723,7 @@ fn print_usage(usage: &Usage, elapsed: std::time::Duration) {
     let secs = elapsed.as_secs_f64();
     let out_visible = usage.output_tokens.saturating_sub(usage.reasoning_tokens);
     output::stderr_line(&format!(
-        "{BOLD}📊 {total} tokens in {dur}  ({inp} in, {out} out, {reas} thinking){RESET}",
+        "{BOLD}📊 {total} tokens in {dur}  ({inp} in, {reas} thinking, {out} out){RESET}",
         total = fmt_tok(usage.total_tokens),
         inp = fmt_tok(usage.input_tokens),
         out = fmt_tok(out_visible),

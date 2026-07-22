@@ -144,6 +144,20 @@ pub struct Cli {
     pub thinking: Option<usize>,
 
     #[arg(
+        short = 'l',
+        long = "list",
+        help = "List all saved sessions"
+    )]
+    pub list: bool,
+
+    #[arg(
+        long = "delete",
+        help = "Delete a session by NAME",
+        value_name = "NAME"
+    )]
+    pub delete: Option<String>,
+
+    #[arg(
         short = 'v',
         long = "verbose",
         help = "Enable verbose mode",

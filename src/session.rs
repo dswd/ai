@@ -60,7 +60,6 @@ impl Session {
         Ok(session)
     }
 
-    #[allow(dead_code)]
     pub fn list(dir: &Path) -> anyhow::Result<Vec<String>> {
         if !dir.exists() {
             return Ok(Vec::new());
