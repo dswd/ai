@@ -59,7 +59,7 @@ impl Policy {
                 PolicyRule::Allow(a, pattern) if a == action
                     && matches_pattern(target, pattern) => {
                         debug!(
-                            "{DIM}\u{2705}  {:?} for {:?} (matched rule: allow {}){RESET}",
+                            "{DIM}\u{2705} {:?} for {:?} (matched rule: allow {}){RESET}",
                             action, target, pattern
                         );
                         return true;
@@ -67,7 +67,7 @@ impl Policy {
                 PolicyRule::Deny(a, pattern) if a == action
                     && matches_pattern(target, pattern) => {
                         warn!(
-                            "{RED}\u{274C}  {:?} for {:?} (matched rule: deny {}){RESET}",
+                            "{RED}\u{274C} {:?} for {:?} (matched rule: deny {}){RESET}",
                             action, target, pattern
                         );
                         return false;
@@ -78,7 +78,7 @@ impl Policy {
 
         if self.ask {
             let mut stderr = io::stderr().lock();
-            let _ = stderr.write_all(format!("\u{2753}  Allow {:?} for {}? [y/N] ", action, target).as_bytes());
+            let _ = stderr.write_all(format!("\u{2753} Allow {:?} for {}? [y/N] ", action, target).as_bytes());
             let _ = stderr.flush();
             let mut answer = String::new();
             if io::stdin().read_line(&mut answer).is_ok() {
@@ -89,7 +89,7 @@ impl Policy {
             }
             false
         } else {
-            warn!("{RED}\u{274C}  {:?} for {:?} (no matching rule){RESET}", action, target);
+            warn!("{RED}\u{274C} {:?} for {:?} (no matching rule){RESET}", action, target);
             false
         }
     }

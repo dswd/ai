@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use crate::util::{bar_line, bar_title};
 
-use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output};
+use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output, fmt_offset_limit};
 use crate::policy::{Action, Policy};
 
 #[derive(Debug, thiserror::Error)]
@@ -59,7 +59,7 @@ impl Tool for WebFetchTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}🌐 fetch {}{RESET}", args.url);
+        info!("{DIM}🌐 fetch {}{}{RESET}", args.url, fmt_offset_limit(args.offset, args.limit));
         if args.url.is_empty() {
             return Err(WebError::Message("URL is required".to_string()));
         }
@@ -196,7 +196,7 @@ impl Tool for WebSearchTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}🌐 search web for {:?}{RESET}", args.query);
+        info!("{DIM}🌐 search web for {:?}{}{RESET}", args.query, fmt_offset_limit(args.offset, args.limit));
         if args.query.is_empty() {
             return Err(WebError::Message("query is required".to_string()));
         }

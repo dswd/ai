@@ -87,6 +87,23 @@ pub fn truncate_line(line: &str, max_len: usize) -> String {
     }
 }
 
+/// Format optional offset/limit for tool call log messages.
+/// Returns `" [offset=x, limit=y]"` or partial, or `""` if both absent.
+pub fn fmt_offset_limit(offset: Option<usize>, limit: Option<usize>) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(o) = offset {
+        parts.push(format!("offset={o}"));
+    }
+    if let Some(l) = limit {
+        parts.push(format!("limit={l}"));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", parts.join(", "))
+    }
+}
+
 /// Apply line-based offset/limit to content, enforce hard output limits,
 /// and append total line count. Returns an error for invalid ranges.
 pub fn process_output(

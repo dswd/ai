@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use crate::util::{bar_line, bar_title};
 
-use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output};
+use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output, fmt_offset_limit};
 use crate::policy::{Action, Policy};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -58,8 +58,8 @@ impl Tool for SearchContentTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!(
-            "{DIM}🔎 search for {:?} in {}{RESET}",
-            args.pattern, args.path
+            "{DIM}🔎 search for {:?} in {}{}{RESET}",
+            args.pattern, args.path, fmt_offset_limit(args.offset, args.limit)
         );
         let root = PathBuf::from(&args.path);
         let canonical_root = root
@@ -292,8 +292,8 @@ impl Tool for FindFilesTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!(
-            "{DIM}🔎 find {:?} in {}{RESET}",
-            args.pattern, args.path
+            "{DIM}🔎 find {:?} in {}{}{RESET}",
+            args.pattern, args.path, fmt_offset_limit(args.offset, args.limit)
         );
         let root = PathBuf::from(&args.path);
         let canonical_root = root

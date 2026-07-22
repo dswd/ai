@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use crate::util::{bar_line, bar_title};
 
-use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output};
+use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output, fmt_offset_limit};
 use crate::policy::{Action, Policy};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -53,7 +53,7 @@ impl Tool for ExecuteTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}🚀 execute {}{RESET}", args.command);
+        info!("{DIM}🚀 execute {}{}{RESET}", args.command, fmt_offset_limit(args.offset, args.limit));
         let first_word = args
             .command
             .split_whitespace()
@@ -163,11 +163,12 @@ impl Tool for GitDiffTool {
         }
 
         info!(
-            "{DIM}\u{2699} git diff {}{RESET}",
+            "{DIM}\u{2699} git diff {}{}{RESET}",
             cmd.get_args()
                 .map(|a| a.to_string_lossy())
                 .collect::<Vec<_>>()
-                .join(" ")
+                .join(" "),
+            fmt_offset_limit(args.offset, args.limit)
         );
         if !self.policy.is_allowed(&Action::Execute, "git") {
             return Err(ExecError::Message(
@@ -245,11 +246,12 @@ impl Tool for GitLogTool {
         }
 
         info!(
-            "{DIM}\u{2699} git log {}{RESET}",
+            "{DIM}\u{2699} git log {}{}{RESET}",
             cmd.get_args()
                 .map(|a| a.to_string_lossy())
                 .collect::<Vec<_>>()
-                .join(" ")
+                .join(" "),
+            fmt_offset_limit(args.offset, args.limit)
         );
         if !self.policy.is_allowed(&Action::Execute, "git") {
             return Err(ExecError::Message(
