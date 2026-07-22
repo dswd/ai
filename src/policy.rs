@@ -115,6 +115,13 @@ impl Policy {
 
         allowed
     }
+
+    pub fn has_any_allow(&self, action: &Action) -> bool {
+        self.cli_rules
+            .iter()
+            .chain(self.rules.iter())
+            .any(|rule| matches!(rule, PolicyRule::Allow(a, _) if a == action))
+    }
 }
 
 fn parse_line(line: &str) -> Option<PolicyRule> {

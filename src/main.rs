@@ -322,21 +322,46 @@ fn build_agent<M: CompletionModel + 'static>(
     thinking: Option<usize>,
     memory: Option<Arc<memory::Memory>>,
 ) -> rig_core::agent::Agent<M> {
-    let mut server = ToolServer::new()
-        .tool(tools::fs::ReadFileTool::new(policy.clone()))
-        .tool(tools::fs::WriteFileTool::new(policy.clone()))
-        .tool(tools::fs::ListDirTool::new(policy.clone()))
-        .tool(tools::fs::ReplaceInFileTool::new(policy.clone()))
-        .tool(tools::fs::DeleteFileTool::new(policy.clone()))
-        .tool(tools::fs::CreateDirectoryTool::new(policy.clone()))
-        .tool(tools::exec::ExecuteTool::new(policy.clone()))
-        .tool(tools::exec::GitDiffTool::new(policy.clone()))
-        .tool(tools::exec::GitLogTool::new(policy.clone()))
-        .tool(tools::search::SearchContentTool::new(policy.clone()))
-        .tool(tools::search::FindFilesTool::new(policy.clone()))
-        .tool(tools::think::ThinkTool::new())
-        .tool(tools::web::WebFetchTool::new(policy.clone()))
-        .tool(tools::web::WebSearchTool::new(policy.clone()));
+    let can_read = policy.ask || policy.has_any_allow(&Action::Read);
+    let can_write = policy.ask || policy.has_any_allow(&Action::Write);
+    let can_exec = policy.ask || policy.has_any_allow(&Action::Execute);
+    let can_web_fetch = policy.ask || policy.has_any_allow(&Action::WebFetch);
+    let can_web_search = policy.ask || policy.has_any_allow(&Action::WebSearch);
+
+    let mut server = ToolServer::new();
+
+    if can_read {
+        server = server
+            .tool(tools::fs::ReadFileTool::new(policy.clone()))
+            .tool(tools::fs::ListDirTool::new(policy.clone()))
+            .tool(tools::search::SearchContentTool::new(policy.clone()))
+            .tool(tools::search::FindFilesTool::new(policy.clone()));
+    }
+
+    if can_write {
+        server = server
+            .tool(tools::fs::WriteFileTool::new(policy.clone()))
+            .tool(tools::fs::ReplaceInFileTool::new(policy.clone()))
+            .tool(tools::fs::DeleteFileTool::new(policy.clone()))
+            .tool(tools::fs::CreateDirectoryTool::new(policy.clone()));
+    }
+
+    if can_exec {
+        server = server
+            .tool(tools::exec::ExecuteTool::new(policy.clone()))
+            .tool(tools::exec::GitDiffTool::new(policy.clone()))
+            .tool(tools::exec::GitLogTool::new(policy.clone()));
+    }
+
+    if can_web_fetch {
+        server = server.tool(tools::web::WebFetchTool::new(policy.clone()));
+    }
+
+    if can_web_search {
+        server = server.tool(tools::web::WebSearchTool::new(policy.clone()));
+    }
+
+    server = server.tool(tools::think::ThinkTool::new());
 
     if let Some(ref mem) = memory {
         server = server
