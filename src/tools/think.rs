@@ -4,17 +4,11 @@ use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::ToolError;
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ThinkArgs {
-    #[schemars(description = "A thought to think about.")]
     pub thought: String,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ThinkError {
-    #[error("{0}")]
-    #[allow(dead_code)]
-    Message(String),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -31,12 +25,10 @@ impl Tool for ThinkTool {
 
     type Args = ThinkArgs;
     type Output = String;
-    type Error = ThinkError;
+    type Error = ToolError;
 
     fn description(&self) -> String {
-        "Use the tool to think about something. It will not obtain new information or make changes, \
-         but just append the thought to the log. Use it when complex reasoning or some cache memory \
-         is needed.".to_string()
+        "Think (logs a thought without side effects)".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -44,8 +36,8 @@ impl Tool for ThinkTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}\u{1F9E0}  \x1b[3m{}{RESET}", args.thought);
-        debug!("{DIM}  \u{2192} {} chars{RESET}", args.thought.len());
+        info!("{DIM}{BLUE}🧠 {}{RESET}", args.thought);
+        debug!("  → {} chars", args.thought.len());
         Ok(args.thought)
     }
 }

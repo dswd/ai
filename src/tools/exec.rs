@@ -1,30 +1,43 @@
 use ansi_color_constants::*;
-use log::{info, debug};
+use log::info;
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use crate::util::{bar_line, bar_title};
 
-use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output};
+use super::{finalize_output, ToolError};
 use crate::policy::{Action, Policy};
+
+// ---------------------------------------------------------------------------
+// Args structs
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ExecuteArgs {
-    #[schemars(description = "The shell command to execute")]
     pub command: String,
-    #[schemars(description = "Working directory for the command")]
     pub cwd: Option<String>,
-    #[schemars(description = "Line number to start reading from (0-based)")]
     pub offset: Option<usize>,
-    #[schemars(description = "Maximum number of lines to return")]
     pub limit: Option<usize>,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum ExecError {
-    #[error("{0}")]
-    Message(String),
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GitDiffArgs {
+    pub staged: Option<bool>,
+    pub path: Option<String>,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GitLogArgs {
+    pub n: Option<usize>,
+    pub path: Option<String>,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+// ---------------------------------------------------------------------------
+// ExecuteTool
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct ExecuteTool {
@@ -42,10 +55,10 @@ impl Tool for ExecuteTool {
 
     type Args = ExecuteArgs;
     type Output = String;
-    type Error = ExecError;
+    type Error = ToolError;
 
     fn description(&self) -> String {
-        "Execute a shell command and return stdout and stderr".to_string()
+        "Run a shell command".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -53,7 +66,7 @@ impl Tool for ExecuteTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}🚀  execute {}{RESET}", args.command);
+        info!("{DIM}🚀 exec {}{RESET}", args.command);
         let first_word = args
             .command
             .split_whitespace()
@@ -61,9 +74,8 @@ impl Tool for ExecuteTool {
             .unwrap_or(&args.command);
 
         if !self.policy.is_allowed(&Action::Execute, first_word) {
-            return Err(ExecError::Message(format!(
-                "execution denied for command: {}",
-                first_word
+            return Err(ToolError::Message(format!(
+                "execution denied for: {first_word}"
             )));
         }
 
@@ -83,7 +95,7 @@ impl Tool for ExecuteTool {
 
         let output = cmd
             .output()
-            .map_err(|e| ExecError::Message(format!("execution failed: {e}")))?;
+            .map_err(|e| ToolError::Message(format!("exec failed: {e}")))?;
 
         let mut result = String::new();
         if !output.stdout.is_empty() {
@@ -97,31 +109,16 @@ impl Tool for ExecuteTool {
             result.push_str(&String::from_utf8_lossy(&output.stderr));
         }
         if result.is_empty() {
-            result = format!("(exit code: {})", output.status.code().unwrap_or(-1));
+            result = format!("(exit: {})", output.status.code().unwrap_or(-1));
         }
 
-        let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
-        debug!(
-            "{DIM} {} \n{truncated}\n {} {RESET}",
-            bar_title(&args.command),
-            bar_line()
-        );
-        Ok(process_output(&result, args.offset, args.limit)
-            .map_err(|e| ExecError::Message(e))?)
+        finalize_output(&result, args.offset, args.limit, &args.command)
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct GitDiffArgs {
-    #[schemars(description = "Show staged changes (--staged)")]
-    pub staged: Option<bool>,
-    #[schemars(description = "Limit diff to a specific file path")]
-    pub path: Option<String>,
-    #[schemars(description = "Line number to start reading from (0-based)")]
-    pub offset: Option<usize>,
-    #[schemars(description = "Maximum number of lines to return")]
-    pub limit: Option<usize>,
-}
+// ---------------------------------------------------------------------------
+// GitDiffTool
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct GitDiffTool {
@@ -139,10 +136,10 @@ impl Tool for GitDiffTool {
 
     type Args = GitDiffArgs;
     type Output = String;
-    type Error = ExecError;
+    type Error = ToolError;
 
     fn description(&self) -> String {
-        "Show git diff of working tree changes. Set staged=true to show staged changes.".to_string()
+        "Show git diff (working tree or staged)".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -150,34 +147,30 @@ impl Tool for GitDiffTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let mut cmd = std::process::Command::new("git");
-        cmd.arg("diff");
-        cmd.arg("--no-color");
+        if !self.policy.is_allowed(&Action::Execute, "git") {
+            return Err(ToolError::Message("execution denied for: git".to_string()));
+        }
 
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("diff").arg("--no-color");
         if args.staged.unwrap_or(false) {
             cmd.arg("--staged");
         }
-
-        if let Some(ref path) = args.path {
-            cmd.arg("--").arg(path);
+        if let Some(ref p) = args.path {
+            cmd.arg("--").arg(p);
         }
 
         info!(
-            "{DIM}\u{2699}  git diff {}{RESET}",
+            "{DIM}⚙  git diff {}{RESET}",
             cmd.get_args()
                 .map(|a| a.to_string_lossy())
                 .collect::<Vec<_>>()
                 .join(" ")
         );
-        if !self.policy.is_allowed(&Action::Execute, "git") {
-            return Err(ExecError::Message(
-                "execution denied for command: git".to_string(),
-            ));
-        }
 
         let output = cmd
             .output()
-            .map_err(|e| ExecError::Message(format!("git diff failed: {e}")))?;
+            .map_err(|e| ToolError::Message(format!("git diff failed: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let result = if stdout.is_empty() {
@@ -185,28 +178,14 @@ impl Tool for GitDiffTool {
         } else {
             stdout.to_string()
         };
-        let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
-        debug!(
-            "{DIM} {} \n{truncated}\n {} {RESET}",
-            bar_title("git diff"),
-            bar_line()
-        );
-        Ok(process_output(&result, args.offset, args.limit)
-            .map_err(|e| ExecError::Message(e))?)
+
+        finalize_output(&result, args.offset, args.limit, "git diff")
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct GitLogArgs {
-    #[schemars(description = "Number of commits to show (default: 20)")]
-    pub n: Option<usize>,
-    #[schemars(description = "Limit log to a specific file path")]
-    pub path: Option<String>,
-    #[schemars(description = "Line number to start reading from (0-based)")]
-    pub offset: Option<usize>,
-    #[schemars(description = "Maximum number of lines to return")]
-    pub limit: Option<usize>,
-}
+// ---------------------------------------------------------------------------
+// GitLogTool
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct GitLogTool {
@@ -224,10 +203,10 @@ impl Tool for GitLogTool {
 
     type Args = GitLogArgs;
     type Output = String;
-    type Error = ExecError;
+    type Error = ToolError;
 
     fn description(&self) -> String {
-        "Show git commit log (--oneline) with optional limit and path filter".to_string()
+        "Show git log (--oneline)".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -235,31 +214,28 @@ impl Tool for GitLogTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let mut cmd = std::process::Command::new("git");
-        cmd.arg("log");
-        cmd.arg("--oneline");
-        cmd.arg(format!("-n{}", args.n.unwrap_or(20)));
+        if !self.policy.is_allowed(&Action::Execute, "git") {
+            return Err(ToolError::Message("execution denied for: git".to_string()));
+        }
 
-        if let Some(ref path) = args.path {
-            cmd.arg("--").arg(path);
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("log").arg("--oneline");
+        cmd.arg(format!("-n{}", args.n.unwrap_or(20)));
+        if let Some(ref p) = args.path {
+            cmd.arg("--").arg(p);
         }
 
         info!(
-            "{DIM}\u{2699}  git log {}{RESET}",
+            "{DIM}⚙  git log {}{RESET}",
             cmd.get_args()
                 .map(|a| a.to_string_lossy())
                 .collect::<Vec<_>>()
                 .join(" ")
         );
-        if !self.policy.is_allowed(&Action::Execute, "git") {
-            return Err(ExecError::Message(
-                "execution denied for command: git".to_string(),
-            ));
-        }
 
         let output = cmd
             .output()
-            .map_err(|e| ExecError::Message(format!("git log failed: {e}")))?;
+            .map_err(|e| ToolError::Message(format!("git log failed: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let result = if stdout.is_empty() {
@@ -267,13 +243,7 @@ impl Tool for GitLogTool {
         } else {
             stdout.to_string()
         };
-        let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
-        debug!(
-            "{DIM} {} \n{truncated}\n {} {RESET}",
-            bar_title("git log"),
-            bar_line()
-        );
-        Ok(process_output(&result, args.offset, args.limit)
-            .map_err(|e| ExecError::Message(e))?)
+
+        finalize_output(&result, args.offset, args.limit, "git log")
     }
 }

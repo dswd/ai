@@ -1,11 +1,11 @@
 use ansi_color_constants::*;
-use log::{debug, info};
+use log::info;
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use super::{finalize_output, resolve_path, ToolError, MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES};
+use super::{finalize_output, resolve_path, ToolError};
 use crate::policy::{Action, Policy};
 
 // ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ impl Tool for WriteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}✏️  write {}{RESET}", args.path);
+        info!("{DIM}✏️ write {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = if path.exists() {
             resolve_path(&args.path, &self.policy, &Action::Write)?
@@ -185,7 +185,7 @@ impl Tool for ListDirTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}📂  list {}{RESET}", args.path);
+        info!("{DIM}📂 list {}{RESET}", args.path);
         let canonical = resolve_path(&args.path, &self.policy, &Action::Read)?;
 
         let entries: Vec<String> = std::fs::read_dir(&canonical)
@@ -238,7 +238,7 @@ impl Tool for ReplaceInFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}📝  edit {}{RESET}", args.path);
+        info!("{DIM}📝 edit {}{RESET}", args.path);
         let canonical = resolve_path(&args.path, &self.policy, &Action::Write)?;
 
         let content = std::fs::read_to_string(&canonical)
@@ -303,7 +303,7 @@ impl Tool for DeleteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}✂️  delete {}{RESET}", args.path);
+        info!("{DIM}✂️ delete {}{RESET}", args.path);
         let canonical = resolve_path(&args.path, &self.policy, &Action::Write)?;
 
         if canonical.is_dir() {
@@ -355,7 +355,7 @@ impl Tool for CreateDirectoryTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}📁  mkdir {}{RESET}", args.path);
+        info!("{DIM}📁 mkdir {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
 
         let canonical = if path.exists() {
