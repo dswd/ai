@@ -1,6 +1,7 @@
 use ansi_color_constants::*;
 use log::{debug, warn};
 use std::collections::HashMap;
+use std::io::{self, Write};
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,7 +68,7 @@ impl Policy {
                 PolicyRule::Deny(a, pattern) if a == action => {
                     if matches_pattern(target, pattern) {
                         warn!(
-                            "{DIM}\u{274C}  {:?} for {:?} (matched rule: deny {}){RESET}",
+                            "{RED}\u{274C}  {:?} for {:?} (matched rule: deny {}){RESET}",
                             action, target, pattern
                         );
                         return false;
@@ -78,9 +79,19 @@ impl Policy {
         }
 
         if self.ask {
-            //TODO: ask for permission
+            let mut stderr = io::stderr().lock();
+            let _ = stderr.write_all(format!("\u{2753}  Allow {:?} for {}? [y/N] ", action, target).as_bytes());
+            let _ = stderr.flush();
+            let mut answer = String::new();
+            if let Ok(_) = io::stdin().read_line(&mut answer) {
+                let trimmed = answer.trim().to_lowercase();
+                if trimmed == "y" || trimmed == "yes" {
+                    return true;
+                }
+            }
+            false
         } else {
-            warn!("{DIM}\u{274C}  {:?} for {:?} (no matching rule){RESET}", action, target);
+            warn!("{RED}\u{274C}  {:?} for {:?} (no matching rule){RESET}", action, target);
             false
         }
     }

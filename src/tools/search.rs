@@ -4,6 +4,7 @@ use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use crate::util::{bar_line, bar_title};
 
 use super::truncate;
 use crate::policy::{Action, Policy};
@@ -53,7 +54,7 @@ impl Tool for SearchContentTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!(
-            "{DIM}\u{2699}  search for {:?} in {}{RESET}",
+            "{DIM}🔎  search for {:?} in {}{RESET}",
             args.pattern, args.path
         );
         let root = PathBuf::from(&args.path);
@@ -119,7 +120,9 @@ impl Tool for SearchContentTool {
         };
         let truncated = truncate(&result, 20, 500);
         debug!(
-            "{DIM} ========== search results ========== \n{truncated}\n ============================== {RESET}"
+            "{DIM} {} \n{truncated}\n {} {RESET}",
+            bar_title("search results"),
+            bar_line()
         );
         Ok(result)
     }
@@ -280,7 +283,7 @@ impl Tool for FindFilesTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!(
-            "{DIM}\u{2699}  find {:?} in {}{RESET}",
+            "{DIM}🔎  find {:?} in {}{RESET}",
             args.pattern, args.path
         );
         let root = PathBuf::from(&args.path);
@@ -329,7 +332,9 @@ impl Tool for FindFilesTool {
         let result = results.join("\n");
         let truncated = truncate(&result, 20, 500);
         debug!(
-            "{DIM} ========== find files ========== \n{truncated}\n ============================== {RESET}"
+            "{DIM} {} \n{truncated}\n {} {RESET}",
+            bar_title("find files"),
+            bar_line()
         );
         Ok(result)
     }

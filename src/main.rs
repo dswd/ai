@@ -5,6 +5,7 @@ mod mcp;
 mod policy;
 mod session;
 mod tools;
+mod util;
 
 use clap::Parser;
 use cli::Cli;

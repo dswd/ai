@@ -1,9 +1,10 @@
 use ansi_color_constants::*;
-use log::{info, debug};
+use log::{debug, info};
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use crate::util::{bar_line, bar_title};
 
 use super::truncate;
 use crate::policy::{Action, Policy};
@@ -47,7 +48,7 @@ impl Tool for ReadFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}\u{2699}  read file {}{RESET}", args.path);
+        info!("{DIM}📄  read file {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -65,8 +66,9 @@ impl Tool for ReadFileTool {
             .map_err(|e| ToolExecError::Message(format!("cannot read file: {e}")))?;
         let truncated = truncate(&content, 20, 500);
         debug!(
-            "{DIM} ========== {} ========== \n{truncated}\n ============================== {RESET}",
-            args.path
+            "{DIM} {} \n{truncated}\n {} {RESET}",
+            bar_title(&args.path),
+            bar_line()
         );
         Ok(content)
     }
@@ -107,7 +109,7 @@ impl Tool for WriteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}\u{2699}  write file {}{RESET}", args.path);
+        info!("{DIM}✏️  write file {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = if path.exists() {
             path.canonicalize()
@@ -178,7 +180,7 @@ impl Tool for ListDirTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}\u{2699}  list dir {}{RESET}", args.path);
+        info!("{DIM}📂  list dir {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -213,8 +215,9 @@ impl Tool for ListDirTool {
         let result = entries.join("\n");
         let truncated = truncate(&result, 20, 500);
         debug!(
-            "{DIM} ========== {} ========== \n{truncated}\n ============================== {RESET}",
-            args.path
+            "{DIM} {} \n{truncated}\n {} {RESET}",
+            bar_title(&args.path),
+            bar_line()
         );
         Ok(result)
     }
@@ -260,7 +263,7 @@ impl Tool for ReplaceInFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}\u{2699}  edit file {}{RESET}", args.path);
+        info!("{DIM}📝  edit file {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -343,7 +346,7 @@ impl Tool for DeleteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}\u{2699}  delete file {}{RESET}", args.path);
+        info!("{DIM}✂️  delete file {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()

@@ -4,6 +4,7 @@ use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use crate::util::{bar_line, bar_title};
 
 use super::truncate;
 use crate::policy::{Action, Policy};
@@ -54,7 +55,7 @@ impl Tool for WebFetchTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}\u{2699}  fetch {}{RESET}", args.url);
+        info!("{DIM}🌐  fetch {}{RESET}", args.url);
         if args.url.is_empty() {
             return Err(WebError::Message("URL is required".to_string()));
         }
@@ -142,8 +143,9 @@ impl Tool for WebFetchTool {
         };
         let truncated = truncate(&result, 20, 500);
         debug!(
-            "{DIM} ========== {} ========== \n{truncated}\n ============================== {RESET}",
-            args.url
+            "{DIM} {} \n{truncated}\n {} {RESET}",
+            bar_title(&args.url),
+            bar_line()
         );
         Ok(result)
     }
@@ -185,7 +187,7 @@ impl Tool for WebSearchTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}\u{2699}  search web for {:?}{RESET}", args.query);
+        info!("{DIM}🌐  search web for {:?}{RESET}", args.query);
         if args.query.is_empty() {
             return Err(WebError::Message("query is required".to_string()));
         }
@@ -269,7 +271,9 @@ impl Tool for WebSearchTool {
         };
         let truncated = truncate(&result, 20, 500);
         debug!(
-            "{DIM} ========== search results ========== \n{truncated}\n ============================== {RESET}"
+            "{DIM} {} \n{truncated}\n {} {RESET}",
+            bar_title("search results"),
+            bar_line()
         );
         Ok(result)
     }

@@ -3,6 +3,7 @@ use log::{info, debug};
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use crate::util::{bar_line, bar_title};
 
 use super::truncate;
 use crate::policy::{Action, Policy};
@@ -48,7 +49,7 @@ impl Tool for ExecuteTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}\u{2699}  execute {}{RESET}", args.command);
+        info!("{DIM}🚀  execute {}{RESET}", args.command);
         let first_word = args
             .command
             .split_whitespace()
@@ -97,8 +98,9 @@ impl Tool for ExecuteTool {
 
         let truncated = truncate(&result, 20, 500);
         debug!(
-            "{DIM} ========== {} ========== \n{truncated}\n ============================== {RESET}",
-            args.command
+            "{DIM} {} \n{truncated}\n {} {RESET}",
+            bar_title(&args.command),
+            bar_line()
         );
         Ok(result)
     }
@@ -176,7 +178,9 @@ impl Tool for GitDiffTool {
         };
         let truncated = truncate(&result, 20, 500);
         debug!(
-            "{DIM} ========== git diff ========== \n{truncated}\n ============================== {RESET}"
+            "{DIM} {} \n{truncated}\n {} {RESET}",
+            bar_title("git diff"),
+            bar_line()
         );
         Ok(result)
     }
@@ -251,7 +255,9 @@ impl Tool for GitLogTool {
         };
         let truncated = truncate(&result, 20, 500);
         debug!(
-            "{DIM} ========== git log ========== \n{truncated}\n ============================== {RESET}"
+            "{DIM} {} \n{truncated}\n {} {RESET}",
+            bar_title("git log"),
+            bar_line()
         );
         Ok(result)
     }
