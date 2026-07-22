@@ -15,7 +15,7 @@ use rig_core::{
     agent::AgentBuilder,
     agent::{MultiTurnStreamItem, PromptResponse, StreamingResult},
     client::CompletionClient,
-    completion::{CompletionModel, Message},
+    completion::{CompletionModel, Message, Usage},
     providers,
     streaming::{StreamedAssistantContent, StreamingChat, StreamingPrompt},
     tool::server::ToolServer,
@@ -24,6 +24,7 @@ use session::Session;
 use log::{set_max_level, LevelFilter, Level, info, error};
 
 use std::io::Write;
+use std::time::Instant;
 use futures::StreamExt;
 
 #[tokio::main]
@@ -380,8 +381,10 @@ async fn run_oneshot<M: CompletionModel + 'static>(
     agent: rig_core::agent::Agent<M>,
     prompt: &str,
 ) -> anyhow::Result<()> {
+    let start = Instant::now();
     let mut stream = agent.stream_prompt(prompt).await;
-    stream_response(&mut stream).await?;
+    let response = stream_response(&mut stream).await?;
+    print_usage(&response.usage, start.elapsed());
     Ok(())
 }
 
@@ -401,6 +404,9 @@ async fn run_interactive<M: CompletionModel + 'static>(
         })
         .collect();
 
+    let start = Instant::now();
+    let mut total_usage = Usage::new();
+
     if let Some(text) = initial_prompt {
         session.add_message("user", &text);
         let hist = chat_history.clone();
@@ -412,6 +418,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
         match result {
             Ok(response) => {
                 session.add_message("assistant", &response.output);
+                total_usage = accumulate(&total_usage, &response.usage);
                 if let Some(messages) = response.messages {
                     chat_history.extend(messages);
                 }
@@ -435,6 +442,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
 
                 if trimmed == "/exit" || trimmed == "/quit" {
                     session.save(session_dir)?;
+                    print_usage(&total_usage, start.elapsed());
                     info!("Session saved: {}", session.name);
                     break;
                 }
@@ -487,6 +495,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
             }
             None => {
                 session.save(session_dir)?;
+                print_usage(&total_usage, start.elapsed());
                 info!("Session saved: {}", session.name);
                 break;
             }
@@ -494,4 +503,40 @@ async fn run_interactive<M: CompletionModel + 'static>(
     }
 
     Ok(())
+}
+
+fn accumulate(total: &Usage, usage: &Usage) -> Usage {
+    Usage {
+        input_tokens: total.input_tokens + usage.input_tokens,
+        output_tokens: total.output_tokens + usage.output_tokens,
+        total_tokens: total.total_tokens + usage.total_tokens,
+        cached_input_tokens: total.cached_input_tokens + usage.cached_input_tokens,
+        cache_creation_input_tokens: total.cache_creation_input_tokens + usage.cache_creation_input_tokens,
+        tool_use_prompt_tokens: total.tool_use_prompt_tokens + usage.tool_use_prompt_tokens,
+        reasoning_tokens: total.reasoning_tokens + usage.reasoning_tokens,
+    }
+}
+
+fn print_usage(usage: &Usage, elapsed: std::time::Duration) {
+    let secs = elapsed.as_secs_f64();
+    info!(
+        "\x1b[2m{total} tokens in {dur}  ({inp} in, {out} out, {reas} thinking)\x1b[0m",
+        total = usage.total_tokens,
+        inp = usage.input_tokens,
+        out = usage.output_tokens,
+        reas = usage.reasoning_tokens,
+        dur = format_duration(secs),
+    );
+}
+
+fn format_duration(secs: f64) -> String {
+    if secs < 1.0 {
+        format!("{:.0}ms", secs * 1000.0)
+    } else if secs < 60.0 {
+        format!("{secs:.1}s")
+    } else {
+        let m = (secs / 60.0) as u64;
+        let s = secs % 60.0;
+        format!("{m}m {s:.0}s")
+    }
 }
