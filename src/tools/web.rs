@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use crate::util::{bar_line, bar_title};
 
-use super::truncate;
+use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output};
 use crate::policy::{Action, Policy};
 
 #[derive(Debug, thiserror::Error)]
@@ -23,6 +23,10 @@ pub struct WebFetchArgs {
     pub format: Option<String>,
     #[schemars(description = "Optional timeout in seconds (max 120)")]
     pub timeout: Option<u64>,
+    #[schemars(description = "Line number to start reading from (0-based)")]
+    pub offset: Option<usize>,
+    #[schemars(description = "Maximum number of lines to return")]
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -141,13 +145,14 @@ impl Tool for WebFetchTool {
             "html" => body,
             _ => body,
         };
-        let truncated = truncate(&result, 20, 500);
+        let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
         debug!(
             "{DIM} {} \n{truncated}\n {} {RESET}",
             bar_title(&args.url),
             bar_line()
         );
-        Ok(result)
+        Ok(process_output(&result, args.offset, args.limit)
+            .map_err(|e| WebError::Message(e))?)
     }
 }
 
@@ -157,6 +162,10 @@ pub struct WebSearchArgs {
     pub query: String,
     #[schemars(description = "Number of results to return (default: 10, max: 20)")]
     pub num_results: Option<usize>,
+    #[schemars(description = "Line number to start reading from (0-based)")]
+    pub offset: Option<usize>,
+    #[schemars(description = "Maximum number of lines to return")]
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -269,12 +278,13 @@ impl Tool for WebSearchTool {
             );
             header + &results.join("\n")
         };
-        let truncated = truncate(&result, 20, 500);
+        let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
         debug!(
             "{DIM} {} \n{truncated}\n {} {RESET}",
             bar_title("search results"),
             bar_line()
         );
-        Ok(result)
+        Ok(process_output(&result, args.offset, args.limit)
+            .map_err(|e| WebError::Message(e))?)
     }
 }

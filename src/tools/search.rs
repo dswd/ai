@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use crate::util::{bar_line, bar_title};
 
-use super::truncate;
+use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output};
 use crate::policy::{Action, Policy};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -17,6 +17,10 @@ pub struct SearchContentArgs {
     pub pattern: String,
     #[schemars(description = "Optional comma-separated file extensions (e.g. '.rs,.toml')")]
     pub file_types: Option<String>,
+    #[schemars(description = "Line number to start reading from (0-based)")]
+    pub offset: Option<usize>,
+    #[schemars(description = "Maximum number of matches to return")]
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -118,13 +122,14 @@ impl Tool for SearchContentTool {
         } else {
             results.join("\n")
         };
-        let truncated = truncate(&result, 20, 500);
+        let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
         debug!(
             "{DIM} {} \n{truncated}\n {} {RESET}",
             bar_title("search results"),
             bar_line()
         );
-        Ok(result)
+        Ok(process_output(&result, args.offset, args.limit)
+            .map_err(|e| SearchError::Message(e))?)
     }
 }
 
@@ -252,6 +257,10 @@ pub struct FindFilesArgs {
     pub path: String,
     #[schemars(description = "Glob pattern (e.g. '**/*.rs', 'src/**/*.ts')")]
     pub pattern: String,
+    #[schemars(description = "Line number to start reading from (0-based)")]
+    pub offset: Option<usize>,
+    #[schemars(description = "Maximum number of files to return")]
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -319,7 +328,8 @@ impl Tool for FindFilesTool {
         if results.is_empty() {
             let result = "No files found.".to_string();
             debug!("{DIM}  \u{2192} {}{RESET}", result);
-            return Ok(result);
+            return Ok(process_output(&result, args.offset, args.limit)
+                .map_err(|e| SearchError::Message(e))?);
         }
 
         results.sort();
@@ -330,12 +340,13 @@ impl Tool for FindFilesTool {
         }
 
         let result = results.join("\n");
-        let truncated = truncate(&result, 20, 500);
+        let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
         debug!(
             "{DIM} {} \n{truncated}\n {} {RESET}",
             bar_title("find files"),
             bar_line()
         );
-        Ok(result)
+        Ok(process_output(&result, args.offset, args.limit)
+            .map_err(|e| SearchError::Message(e))?)
     }
 }

@@ -83,3 +83,68 @@ pub fn truncate_line(line: &str, max_len: usize) -> String {
         format!("{}... ({} total chars)", &line[..max_len], line.len())
     }
 }
+
+/// Apply line-based offset/limit to content, enforce hard output limits,
+/// and append total line count. Returns an error for invalid ranges.
+pub fn process_output(
+    raw: &str,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<String, String> {
+    let lines: Vec<&str> = raw.lines().collect();
+    let total_lines = lines.len();
+
+    let start = offset.unwrap_or(0);
+    if start > total_lines {
+        return Err(format!(
+            "offset {start} is out of range: input has {total_lines} lines (valid: 0..{total_lines})"
+        ));
+    }
+
+    let end = if let Some(n) = limit {
+        if n == 0 {
+            return Err("limit must be greater than 0".to_string());
+        }
+        (start + n).min(total_lines)
+    } else {
+        total_lines
+    };
+
+    let subset = &lines[start..end];
+    let mut result = subset.join("\n");
+
+    let ranged = start > 0 || end < total_lines;
+    let shown_lines = subset.len();
+
+    // apply hard caps
+    let capped = shown_lines > MAX_OUTPUT_LINES || result.len() > MAX_OUTPUT_CHARS;
+
+    if capped {
+        let mut capped_out = String::with_capacity(MAX_OUTPUT_CHARS + 200);
+        for line in subset.iter().take(MAX_OUTPUT_LINES) {
+            capped_out.push_str(line);
+            capped_out.push('\n');
+        }
+        if capped_out.len() > MAX_OUTPUT_CHARS {
+            capped_out.truncate(MAX_OUTPUT_CHARS);
+            if let Some(last_nl) = capped_out.rfind('\n') {
+                capped_out.truncate(last_nl + 1);
+            }
+        }
+        result = capped_out.trim_end_matches('\n').to_string();
+        result.push_str(&format!(
+            "\n\n[output capped at {MAX_OUTPUT_LINES} lines / {} kB — {total_lines} lines total; use offset/limit to read more]",
+            MAX_OUTPUT_CHARS / 1024
+        ));
+    } else if ranged {
+        result.push_str(&format!(
+            "\n\n({total_lines} lines total, showing {}..{})",
+            start + 1,
+            start + shown_lines
+        ));
+    } else {
+        result.push_str(&format!("\n\n({total_lines} lines total)"));
+    }
+
+    Ok(result)
+}

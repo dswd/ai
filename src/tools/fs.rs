@@ -6,13 +6,17 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use crate::util::{bar_line, bar_title};
 
-use super::truncate;
+use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output};
 use crate::policy::{Action, Policy};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ReadFileArgs {
     #[schemars(description = "Path to the file to read")]
     pub path: String,
+    #[schemars(description = "Line number to start reading from (0-based)")]
+    pub offset: Option<usize>,
+    #[schemars(description = "Maximum number of lines to return")]
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -64,13 +68,14 @@ impl Tool for ReadFileTool {
 
         let content = std::fs::read_to_string(&canonical)
             .map_err(|e| ToolExecError::Message(format!("cannot read file: {e}")))?;
-        let truncated = truncate(&content, 20, 500);
+        let truncated = truncate(&content, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
         debug!(
             "{DIM} {} \n{truncated}\n {} {RESET}",
             bar_title(&args.path),
             bar_line()
         );
-        Ok(content)
+        Ok(process_output(&content, args.offset, args.limit)
+            .map_err(|e| ToolExecError::Message(e))?)
     }
 }
 
@@ -151,6 +156,10 @@ impl Tool for WriteFileTool {
 pub struct ListDirArgs {
     #[schemars(description = "Path to the directory to list")]
     pub path: String,
+    #[schemars(description = "Line number to start listing from (0-based)")]
+    pub offset: Option<usize>,
+    #[schemars(description = "Maximum number of entries to return")]
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -213,13 +222,14 @@ impl Tool for ListDirTool {
             .collect();
 
         let result = entries.join("\n");
-        let truncated = truncate(&result, 20, 500);
+        let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
         debug!(
             "{DIM} {} \n{truncated}\n {} {RESET}",
             bar_title(&args.path),
             bar_line()
         );
-        Ok(result)
+        Ok(process_output(&result, args.offset, args.limit)
+            .map_err(|e| ToolExecError::Message(e))?)
     }
 }
 

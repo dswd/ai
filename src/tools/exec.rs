@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use crate::util::{bar_line, bar_title};
 
-use super::truncate;
+use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output};
 use crate::policy::{Action, Policy};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -14,6 +14,10 @@ pub struct ExecuteArgs {
     pub command: String,
     #[schemars(description = "Working directory for the command")]
     pub cwd: Option<String>,
+    #[schemars(description = "Line number to start reading from (0-based)")]
+    pub offset: Option<usize>,
+    #[schemars(description = "Maximum number of lines to return")]
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -96,13 +100,14 @@ impl Tool for ExecuteTool {
             result = format!("(exit code: {})", output.status.code().unwrap_or(-1));
         }
 
-        let truncated = truncate(&result, 20, 500);
+        let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
         debug!(
             "{DIM} {} \n{truncated}\n {} {RESET}",
             bar_title(&args.command),
             bar_line()
         );
-        Ok(result)
+        Ok(process_output(&result, args.offset, args.limit)
+            .map_err(|e| ExecError::Message(e))?)
     }
 }
 
@@ -112,6 +117,10 @@ pub struct GitDiffArgs {
     pub staged: Option<bool>,
     #[schemars(description = "Limit diff to a specific file path")]
     pub path: Option<String>,
+    #[schemars(description = "Line number to start reading from (0-based)")]
+    pub offset: Option<usize>,
+    #[schemars(description = "Maximum number of lines to return")]
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -176,13 +185,14 @@ impl Tool for GitDiffTool {
         } else {
             stdout.to_string()
         };
-        let truncated = truncate(&result, 20, 500);
+        let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
         debug!(
             "{DIM} {} \n{truncated}\n {} {RESET}",
             bar_title("git diff"),
             bar_line()
         );
-        Ok(result)
+        Ok(process_output(&result, args.offset, args.limit)
+            .map_err(|e| ExecError::Message(e))?)
     }
 }
 
@@ -192,6 +202,10 @@ pub struct GitLogArgs {
     pub n: Option<usize>,
     #[schemars(description = "Limit log to a specific file path")]
     pub path: Option<String>,
+    #[schemars(description = "Line number to start reading from (0-based)")]
+    pub offset: Option<usize>,
+    #[schemars(description = "Maximum number of lines to return")]
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -253,12 +267,13 @@ impl Tool for GitLogTool {
         } else {
             stdout.to_string()
         };
-        let truncated = truncate(&result, 20, 500);
+        let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
         debug!(
             "{DIM} {} \n{truncated}\n {} {RESET}",
             bar_title("git log"),
             bar_line()
         );
-        Ok(result)
+        Ok(process_output(&result, args.offset, args.limit)
+            .map_err(|e| ExecError::Message(e))?)
     }
 }
