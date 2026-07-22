@@ -1,21 +1,4 @@
 use std::io::{self, BufRead, Write};
-use std::sync::{Mutex, OnceLock};
-use rustyline::{Editor, history::DefaultHistory};
-
-fn editor() -> &'static Mutex<Editor<(), DefaultHistory>> {
-    static EDITOR: OnceLock<Mutex<Editor<(), DefaultHistory>>> = OnceLock::new();
-    EDITOR.get_or_init(|| {
-        let ed = Editor::<(), DefaultHistory>::new().expect("failed to create line editor");
-        Mutex::new(ed)
-    })
-}
-
-pub fn set_history(lines: &[String]) {
-    let mut ed = editor().lock().unwrap();
-    for line in lines {
-        let _ = ed.add_history_entry(line);
-    }
-}
 
 pub fn read_stdin() -> Option<String> {
     let stdin = io::stdin();
@@ -48,19 +31,21 @@ pub fn stderr_line(text: &str) {
 }
 
 pub fn read_user_input(prompt: &str) -> Option<String> {
-    let mut ed = editor().lock().unwrap();
-    match ed.readline(prompt) {
-        Ok(line) => {
+    let mut stdout = io::stdout().lock();
+    let _ = stdout.write_all(prompt.as_bytes());
+    let _ = stdout.flush();
+
+    let stdin = io::stdin();
+    let mut line = String::new();
+    match stdin.read_line(&mut line) {
+        Ok(0) => None,
+        Ok(_) => {
             let trimmed = line.trim().to_string();
             if trimmed.is_empty() {
-                return None;
+                None
+            } else {
+                Some(trimmed)
             }
-            let _ = ed.add_history_entry(&trimmed);
-            Some(trimmed)
-        }
-        Err(rustyline::error::ReadlineError::Interrupted)
-        | Err(rustyline::error::ReadlineError::Eof) => {
-            Some("/exit".to_string())
         }
         Err(_) => None,
     }
