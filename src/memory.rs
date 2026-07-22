@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use rand::Rng;
+use rand::RngExt;
 
 const MAX_ENTRIES: usize = 100;
 
@@ -44,9 +44,9 @@ impl Memory {
             return Err("Memory is full (max 100 entries). Delete some entries first.".to_string());
         }
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         loop {
-            let key: u16 = rng.gen_range(0u16..=u16::MAX);
+            let key: u16 = rng.random();
             let key_str = format!("{:04x}", key);
             if entries.contains_key(&key_str) {
                 continue;

@@ -131,19 +131,20 @@ impl Tool for WebFetchTool {
                 if content_type.contains("text/html") {
                     html2text::from_read(body.as_bytes(), 80)
                 } else {
-                    body
+                    Ok(body)
                 }
             }
             "markdown" => {
                 if content_type.contains("text/html") {
                     html2text::from_read(body.as_bytes(), 80)
                 } else {
-                    format!("```\n{body}\n```")
+                    Ok(format!("```\n{body}\n```"))
                 }
             }
-            "html" => body,
-            _ => body,
+            "html" => Ok(body),
+            _ => Ok(body),
         };
+        let result = result.map_err(|e| WebError::Message(format!("failed to convert: {e}")))?;
         let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
         debug!(
             "{DIM} {} \n{truncated}\n {} {RESET}",
