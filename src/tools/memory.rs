@@ -47,7 +47,7 @@ impl Tool for MemoryAddTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}\u{1F4BE} memory add '{}'{RESET}", args.data);
+        info!("{DIM}🧠 memory add '{}'{RESET}", args.data);
         match self.memory.add(args.data) {
             Ok(key) => {
                 info!("{DIM}  \u{2192} stored as {key}{RESET}");
@@ -94,7 +94,7 @@ impl Tool for MemoryDeleteTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}\u{1F5D1} memory delete {}{RESET}", args.key);
+        info!("{DIM}🗑️ memory delete {}{RESET}", args.key);
         match self.memory.delete(&args.key) {
             Ok(msg) => {
                 info!("{DIM}  \u{2192} {msg}{RESET}");

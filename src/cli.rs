@@ -170,6 +170,6 @@ impl Cli {
     }
 
     pub fn is_interactive(&self) -> bool {
-        self.interactive || self.session.is_some()
+        self.session.is_some()
     }
 }

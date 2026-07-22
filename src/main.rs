@@ -210,6 +210,10 @@ impl log::Log for ConsoleLogger {
     }
 }
 
+fn is_quiet() -> bool {
+    log::max_level() <= LevelFilter::Warn
+}
+
 fn load_config(cli: &Cli) -> anyhow::Result<Config> {
     if let Some(path) = &cli.config {
         Config::from_file(path)
@@ -413,12 +417,12 @@ async fn stream_response<R>(
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(
                 StreamedAssistantContent::Reasoning(reasoning),
-            )) => {
+            )) if !is_quiet() => {
                 output::stderr_line(&format!("{ITALICS}{BLUE}{}{RESET}", reasoning.display_text()));
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(
                 StreamedAssistantContent::ReasoningDelta { reasoning, .. },
-            )) => {
+            )) if !is_quiet() => {
                 output::stderr_push(&format!("{ITALICS}{BLUE}{reasoning}{RESET}"));
             }
             Ok(MultiTurnStreamItem::FinalResponse(resp)) => {
@@ -671,12 +675,16 @@ fn accumulate(total: &Usage, usage: &Usage) -> Usage {
 }
 
 fn print_usage(usage: &Usage, elapsed: std::time::Duration) {
+    if is_quiet() {
+        return;
+    }
     let secs = elapsed.as_secs_f64();
+    let out_visible = usage.output_tokens.saturating_sub(usage.reasoning_tokens);
     output::stderr_line(&format!(
         "{BOLD}📊 {total} tokens in {dur}  ({inp} in, {out} out, {reas} thinking){RESET}",
         total = fmt_tok(usage.total_tokens),
         inp = fmt_tok(usage.input_tokens),
-        out = fmt_tok(usage.output_tokens),
+        out = fmt_tok(out_visible),
         reas = fmt_tok(usage.reasoning_tokens),
         dur = format_duration(secs),
     ));
