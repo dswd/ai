@@ -16,7 +16,7 @@ use rig_core::{
     agent::AgentBuilder,
     agent::{MultiTurnStreamItem, PromptResponse, StreamingResult},
     client::CompletionClient,
-    completion::{CompletionModel, Message, Usage},
+    completion::{Chat, CompletionModel, Message, Usage},
     providers,
     streaming::{StreamedAssistantContent, StreamingChat, StreamingPrompt},
     tool::server::ToolServer,
@@ -141,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
             let agent = build_agent(model, &system_prompt, &policy, max_tokens, max_turns, tool_sets, thinking, memory.as_ref().map(Arc::clone));
 
             if is_interactive {
-                run_interactive(agent, &mut session, &session_dir, prompt_text).await?;
+                run_interactive(agent, &mut session, &session_dir, prompt_text, config.context_window).await?;
             } else if let Some(text) = prompt_text {
                 run_oneshot(agent, &text).await?;
             } else {
@@ -156,7 +156,7 @@ async fn main() -> anyhow::Result<()> {
             let agent = build_agent(model, &system_prompt, &policy, max_tokens, max_turns, tool_sets, thinking, memory.as_ref().map(Arc::clone));
 
             if is_interactive {
-                run_interactive(agent, &mut session, &session_dir, prompt_text).await?;
+                run_interactive(agent, &mut session, &session_dir, prompt_text, config.context_window).await?;
             } else if let Some(text) = prompt_text {
                 run_oneshot(agent, &text).await?;
             } else {
@@ -444,6 +444,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
     session: &mut Session,
     session_dir: &std::path::Path,
     initial_prompt: Option<String>,
+    context_window: Option<usize>,
 ) -> anyhow::Result<()> {
     let mut chat_history: Vec<Message> = session
         .messages
@@ -457,6 +458,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
 
     let start = Instant::now();
     let mut total_usage = Usage::new();
+    let mut last_input_tokens: u64 = 0;
 
     if let Some(text) = initial_prompt {
         session.add_message("user", &text);
@@ -468,6 +470,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
         }.await;
         match result {
             Ok(response) => {
+                last_input_tokens = response.usage.input_tokens;
                 session.add_message("assistant", &response.output);
                 total_usage = accumulate(&total_usage, &response.usage);
                 if let Some(messages) = response.messages {
@@ -483,7 +486,8 @@ async fn run_interactive<M: CompletionModel + 'static>(
     }
 
     loop {
-        let input = io::read_user_input("> ");
+        let prompt = format_interactive_prompt(last_input_tokens, context_window);
+        let input = io::read_user_input(&prompt);
         match input {
             Some(line) => {
                 let trimmed = line.trim();
@@ -502,7 +506,44 @@ async fn run_interactive<M: CompletionModel + 'static>(
                 if trimmed == "/clear" {
                     session.messages.clear();
                     chat_history.clear();
+                    last_input_tokens = 0;
                     io::stderr_line("[session cleared]");
+                    continue;
+                }
+
+                if trimmed == "/compact" {
+                    let old_count = chat_history.len();
+                    if old_count < 2 {
+                        io::stderr_line("[nothing to compact]");
+                        continue;
+                    }
+
+                    let compact_result = async {
+                        let mut hist = chat_history.clone();
+                        let result = agent
+                            .chat("Summarize this conversation concisely, preserving all important decisions, code changes, and user preferences. Return only the summary, no commentary.", &mut hist)
+                            .await
+                            .map_err(|e| anyhow::anyhow!("compact failed: {e}"));
+                        result
+                    }.await;
+
+                    match compact_result {
+                        Ok(summary) => {
+                            let est_tokens = summary.len() as u64 / 4;
+                            chat_history = vec![Message::user(format!("[Conversation summary: {summary}]"))];
+                            session.messages.clear();
+                            session.add_message("system", &summary);
+                            last_input_tokens = est_tokens;
+                            io::stderr_line(&format!(
+                                "[context compacted: {old_count} messages -> ~{t} tokens]",
+                                t = fmt_tok(est_tokens)
+                            ));
+                        }
+                        Err(e) => {
+                            error!("Compact error: {e}");
+                            io::stderr_line(&format!("Compact failed: {e}"));
+                        }
+                    }
                     continue;
                 }
 
@@ -518,7 +559,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
 
                 if trimmed == "/help" {
                     io::stderr_line(
-                        "Commands: /exit, /quit, /clear, /session, /tools, /help",
+                        "Commands: /exit, /quit, /clear, /compact, /session, /tools, /help",
                     );
                     continue;
                 }
@@ -533,6 +574,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
                 }.await;
                 match result {
                     Ok(response) => {
+                        last_input_tokens = response.usage.input_tokens;
                         session.add_message("assistant", &response.output);
                         total_usage = accumulate(&total_usage, &response.usage);
                         if let Some(messages) = response.messages {
@@ -556,6 +598,21 @@ async fn run_interactive<M: CompletionModel + 'static>(
     }
 
     Ok(())
+}
+
+fn format_interactive_prompt(last_input_tokens: u64, context_window: Option<usize>) -> String {
+    match context_window {
+        Some(window) if window > 0 && last_input_tokens > 0 => {
+            let percent = (last_input_tokens as f64 / window as f64) * 100.0;
+            let warning = if percent >= 75.0 { "\u{26A0}\u{FE0F} " } else { "" };
+            format!(
+                "{warning}[{inp}/{win}] > ",
+                inp = fmt_tok(last_input_tokens),
+                win = fmt_tok(window as u64),
+            )
+        }
+        _ => "> ".to_string(),
+    }
 }
 
 fn current_time() -> String {

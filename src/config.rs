@@ -17,6 +17,7 @@ pub struct Config {
     pub session_dir: Option<PathBuf>,
     pub policy: Option<PathBuf>,
     pub memory: Option<PathBuf>,
+    pub context_window: Option<usize>,
 }
 
 impl Default for Config {
@@ -32,6 +33,7 @@ impl Default for Config {
             session_dir: None,
             policy: None,
             memory: None,
+            context_window: None,
         }
     }
 }
