@@ -246,11 +246,13 @@ fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> {
     };
 
     for path in &cli.read {
-        policy.add_cli_rule(PolicyRule::Allow(Action::Read, path.clone()));
+        let resolved = policy::resolve_policy_pattern(path, &std::env::current_dir().unwrap_or_default());
+        policy.add_cli_rule(PolicyRule::Allow(Action::Read, resolved));
     }
     for path in &cli.write {
-        policy.add_cli_rule(PolicyRule::Allow(Action::Read, path.clone()));
-        policy.add_cli_rule(PolicyRule::Allow(Action::Write, path.clone()));
+        let resolved = policy::resolve_policy_pattern(path, &std::env::current_dir().unwrap_or_default());
+        policy.add_cli_rule(PolicyRule::Allow(Action::Read, resolved.clone()));
+        policy.add_cli_rule(PolicyRule::Allow(Action::Write, resolved));
     }
     for pat in &cli.execute {
         policy.add_cli_rule(PolicyRule::Allow(Action::Execute, pat.clone()));

@@ -2,7 +2,7 @@ use ansi_color_constants::*;
 use log::{debug, warn};
 use std::collections::HashMap;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -124,6 +124,88 @@ impl Policy {
     }
 }
 
+fn home_dir() -> PathBuf {
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn normalize_path_segments(raw: &str) -> String {
+    let segments: Vec<&str> = raw.split('/').filter(|s| !s.is_empty()).collect();
+    let mut out: Vec<&str> = Vec::new();
+    for seg in segments {
+        if seg == "." {
+            continue;
+        }
+        if seg == ".." {
+            out.pop();
+            continue;
+        }
+        out.push(seg);
+    }
+    if out.is_empty() {
+        return "/".to_string();
+    }
+    let mut result = String::with_capacity(raw.len());
+    // preserve leading slash
+    if raw.starts_with('/') {
+        result.push('/');
+    }
+    result.push_str(&out.join("/"));
+    result
+}
+
+/// Resolve a policy pattern: expand `~` and resolve relative paths
+/// against `relative_to`. Wildcards (`*`, `**`) are preserved.
+pub fn resolve_policy_pattern(pattern: &str, relative_to: &Path) -> String {
+    if pattern == "*" || pattern == "**" {
+        return pattern.to_string();
+    }
+
+    let (prefix, suffix) = split_at_wildcard(pattern);
+
+    let resolved = if prefix.starts_with('~') {
+        let home = home_dir();
+        let rest = &prefix[1..]; // strip ~
+        if rest.is_empty() {
+            // just "~"
+            home.to_string_lossy().to_string()
+        } else if rest.starts_with('/') {
+            // "~/path"
+            format!("{}{}", home.to_string_lossy(), rest)
+        } else {
+            // "~otheruser" – not expanded
+            pattern.to_string()
+        }
+    } else if prefix.starts_with('/') {
+        prefix.to_string()
+    } else {
+        // relative
+        let base = if relative_to.to_string_lossy().is_empty() {
+            PathBuf::from(".")
+        } else {
+            relative_to.to_path_buf()
+        };
+        base.join(&prefix).to_string_lossy().to_string()
+    };
+
+    let resolved = normalize_path_segments(&resolved);
+    if suffix.is_empty() {
+        resolved
+    } else if prefix.ends_with('/') && !resolved.ends_with('/') {
+        format!("{}/{}", resolved, suffix)
+    } else {
+        format!("{}{}", resolved, suffix)
+    }
+}
+
+fn split_at_wildcard(s: &str) -> (String, String) {
+    for (i, ch) in s.char_indices() {
+        if ch == '*' {
+            return (s[..i].to_string(), s[i..].to_string());
+        }
+    }
+    (s.to_string(), String::new())
+}
+
 fn parse_line(line: &str) -> Option<PolicyRule> {
     let parts: Vec<&str> = line.splitn(3, ' ').collect();
 
@@ -133,7 +215,7 @@ fn parse_line(line: &str) -> Option<PolicyRule> {
 
     let directive = parts[0].to_lowercase();
     let action_str = parts[1].to_lowercase();
-    let pattern = parts[2].to_string();
+    let raw_pattern = parts[2].to_string();
 
     let is_allow = match directive.as_str() {
         "allow" => true,
@@ -148,6 +230,11 @@ fn parse_line(line: &str) -> Option<PolicyRule> {
         "web-fetch" | "webfetch" => Action::WebFetch,
         "web-search" | "websearch" => Action::WebSearch,
         _ => return None,
+    };
+
+    let pattern = match action {
+        Action::Read | Action::Write => resolve_policy_pattern(&raw_pattern, &home_dir()),
+        _ => raw_pattern,
     };
 
     Some(if is_allow {
@@ -177,7 +264,10 @@ fn matches_pattern(target: &str, pattern: &str) -> bool {
             continue;
         }
 
-        if target == sub_pattern || target.starts_with(sub_pattern) {
+        // Path-segment-aware matching: /tmp matches /tmp or /tmp/... but not /tmpfile
+        if target == sub_pattern ||
+           target.starts_with(&format!("{sub_pattern}/"))
+        {
             return true;
         }
     }
@@ -259,5 +349,40 @@ mod tests {
             policy.is_allowed(&Action::Read, "/tmp/secret/public/readme.md"),
             "first match wins: allow /tmp/** matches before deny"
         );
+    }
+
+    #[test]
+    fn test_segment_aware_matching() {
+        let policy = Policy::parse("allow read /tmp");
+        // /tmp matches itself
+        assert!(policy.is_allowed(&Action::Read, "/tmp"));
+        // /tmp matches children via path separator
+        assert!(policy.is_allowed(&Action::Read, "/tmp/foo.txt"));
+        assert!(policy.is_allowed(&Action::Read, "/tmp/sub/file.txt"));
+        // /tmp does NOT match /tmpfile (prefix but not segment boundary)
+        assert!(!policy.is_allowed(&Action::Read, "/tmpfile"));
+        assert!(!policy.is_allowed(&Action::Read, "/tmp123/test.txt"));
+    }
+
+    #[test]
+    fn test_home_expansion_in_policy() {
+        let home = home_dir();
+        let home_str = home.to_string_lossy();
+        let policy = Policy::parse(&format!(
+            "deny read ~/projects/secret/**\nallow read ~/projects/**"
+        ));
+        let allowed_path = format!("{home_str}/projects/src/main.rs");
+        let denied_path = format!("{home_str}/projects/secret/key.txt");
+        assert!(policy.is_allowed(&Action::Read, &allowed_path));
+        assert!(!policy.is_allowed(&Action::Read, &denied_path));
+    }
+
+    #[test]
+    fn test_normalize_path_segments() {
+        assert_eq!(normalize_path_segments("/"), "/");
+        assert_eq!(normalize_path_segments("/foo/bar"), "/foo/bar");
+        assert_eq!(normalize_path_segments("/foo/./bar"), "/foo/bar");
+        assert_eq!(normalize_path_segments("/foo/../bar"), "/bar");
+        assert_eq!(normalize_path_segments("/a/b/../c/./d"), "/a/c/d");
     }
 }
