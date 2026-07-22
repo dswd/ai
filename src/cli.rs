@@ -31,6 +31,16 @@ pub struct Cli {
     pub session: Option<String>,
 
     #[arg(
+        short = 'm',
+        long = "memory",
+        help = "Enable persistent memory with optional FILE",
+        num_args = 0..=1,
+        value_name = "FILE",
+        default_missing_value = ""
+    )]
+    pub memory: Option<String>,
+
+    #[arg(
         short = 'c',
         long = "config",
         help = "Load configuration from FILE",
@@ -95,12 +105,12 @@ pub struct Cli {
     pub interactive: bool,
 
     #[arg(
-        short = 'm',
-        long = "mcp",
-        help = "Connect to MCP server (can be given multiple times)",
+        short = 't',
+        long = "tool",
+        help = "Connect to tool server (can be given multiple times)",
         value_name = "URL"
     )]
-    pub mcp: Vec<String>,
+    pub tool: Vec<String>,
 
     #[arg(
         short = 'y',

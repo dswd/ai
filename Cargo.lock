@@ -24,6 +24,7 @@ dependencies = [
  "htmd",
  "html2text",
  "log",
+ "rand 0.8.7",
  "regex",
  "reqwest",
  "rig-core",

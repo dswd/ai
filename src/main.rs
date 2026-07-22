@@ -1,7 +1,8 @@
 mod cli;
 mod config;
 mod io;
-mod mcp;
+mod memory;
+mod tool;
 mod policy;
 mod session;
 mod tools;
@@ -21,10 +22,12 @@ use rig_core::{
     tool::server::ToolServer,
 };
 use session::Session;
-use log::{set_max_level, LevelFilter, Level, info, error};
+use log::{error, info, set_max_level};
+use log::{Level, LevelFilter};
 use ansi_color_constants::*;
 
 use std::io::Write;
+use std::sync::Arc;
 use std::time::Instant;
 use futures::StreamExt;
 
@@ -51,7 +54,21 @@ async fn main() -> anyhow::Result<()> {
         });
 
     let now = current_time();
-    let system_prompt = format!("{system_prompt}\n\nCurrent time: {now}");
+    let mut system_prompt = format!("{system_prompt}\n\nCurrent time: {now}");
+
+    let memory = if let Some(memory_path) = &cli.memory {
+        let path = if memory_path.is_empty() {
+            config.memory_path_resolved()
+        } else {
+            std::path::PathBuf::from(memory_path)
+        };
+        let mem = Arc::new(memory::Memory::load(&path)?);
+        let md = mem.to_markdown();
+        system_prompt = format!("{system_prompt}\n\n{md}");
+        Some(mem)
+    } else {
+        None
+    };
 
     let model_name = config.model.clone();
     let max_tokens = cli.max_tokens.or(config.max_tokens);
@@ -111,8 +128,8 @@ async fn main() -> anyhow::Result<()> {
 
     let provider = config.provider.to_lowercase();
 
-    let mcp_tool_sets = if !cli.mcp.is_empty() {
-        mcp::connect_mcp_servers(&cli.mcp).await?
+    let tool_sets = if !cli.tool.is_empty() {
+        tool::connect_tool_servers(&cli.tool).await?
     } else {
         Vec::new()
     };
@@ -121,7 +138,7 @@ async fn main() -> anyhow::Result<()> {
         "openai" => {
             let client = openai_client(&config)?;
             let model = client.completion_model(&model_name);
-            let agent = build_agent(model, &system_prompt, &policy, max_tokens, max_turns, mcp_tool_sets, thinking);
+            let agent = build_agent(model, &system_prompt, &policy, max_tokens, max_turns, tool_sets, thinking, memory.as_ref().map(Arc::clone));
 
             if is_interactive {
                 run_interactive(agent, &mut session, &session_dir, prompt_text).await?;
@@ -136,7 +153,7 @@ async fn main() -> anyhow::Result<()> {
         "anthropic" => {
             let client = anthropic_client(&config)?;
             let model = client.completion_model(&model_name);
-            let agent = build_agent(model, &system_prompt, &policy, max_tokens, max_turns, mcp_tool_sets, thinking);
+            let agent = build_agent(model, &system_prompt, &policy, max_tokens, max_turns, tool_sets, thinking, memory.as_ref().map(Arc::clone));
 
             if is_interactive {
                 run_interactive(agent, &mut session, &session_dir, prompt_text).await?;
@@ -301,8 +318,9 @@ fn build_agent<M: CompletionModel + 'static>(
     policy: &Policy,
     max_tokens: Option<usize>,
     max_turns: usize,
-    mcp_tool_sets: Vec<mcp::McpToolSet>,
+    tool_sets: Vec<tool::ToolSet>,
     thinking: Option<usize>,
+    memory: Option<Arc<memory::Memory>>,
 ) -> rig_core::agent::Agent<M> {
     let mut server = ToolServer::new()
         .tool(tools::fs::ReadFileTool::new(policy.clone()))
@@ -320,7 +338,13 @@ fn build_agent<M: CompletionModel + 'static>(
         .tool(tools::web::WebFetchTool::new(policy.clone()))
         .tool(tools::web::WebSearchTool::new(policy.clone()));
 
-    for set in mcp_tool_sets {
+    if let Some(ref mem) = memory {
+        server = server
+            .tool(tools::memory::MemoryAddTool::new(Arc::clone(mem)))
+            .tool(tools::memory::MemoryDeleteTool::new(Arc::clone(mem)));
+    }
+
+    for set in tool_sets {
         for tool in set.tools {
             server = server.rmcp_tool(tool, set.sink.clone());
         }
@@ -351,19 +375,42 @@ fn build_agent<M: CompletionModel + 'static>(
 async fn stream_response<R>(
     stream: &mut StreamingResult<R>,
 ) -> anyhow::Result<PromptResponse> {
+    let mut last_chunk: Option<ChunkKind> = None;
     while let Some(item) = stream.next().await {
         match item {
             Ok(MultiTurnStreamItem::StreamAssistantItem(
                 StreamedAssistantContent::Text(text),
             )) => {
+                if last_chunk == Some(ChunkKind::Reasoning) {
+                    eprintln!();
+                }
+                last_chunk = Some(ChunkKind::Text);
                 print!("{}", text.text);
                 let _ = std::io::stdout().flush();
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(
                 StreamedAssistantContent::Reasoning(reasoning),
             )) => {
-                let reasoning = reasoning.display_text();
-                eprintln!("\x1b[90;3m{reasoning}\x1b[0m");
+                //if log_enabled!(Level::Info) {
+                    if last_chunk == Some(ChunkKind::Text) {
+                        eprintln!();
+                    }
+                    last_chunk = Some(ChunkKind::Reasoning);
+                    let reasoning = reasoning.display_text();
+                    eprintln!("{ITALICS}{BLUE}{reasoning}{RESET}");
+                //}
+            }
+            Ok(MultiTurnStreamItem::StreamAssistantItem(
+                StreamedAssistantContent::ReasoningDelta { reasoning, .. },
+            )) => {
+                //if log_enabled!(Level::Info) {
+                    if last_chunk == Some(ChunkKind::Text) {
+                        eprintln!();
+                    }
+                    last_chunk = Some(ChunkKind::Reasoning);
+                    eprint!("{ITALICS}{BLUE}{reasoning}{RESET}");
+                    let _ = std::io::stderr().flush();
+                //}
             }
             Ok(MultiTurnStreamItem::FinalResponse(resp)) => {
                 println!();
@@ -377,6 +424,9 @@ async fn stream_response<R>(
     }
     Err(anyhow::anyhow!("no final response"))
 }
+
+#[derive(Clone, Copy, PartialEq)]
+enum ChunkKind { Text, Reasoning }
 
 async fn run_oneshot<M: CompletionModel + 'static>(
     agent: rig_core::agent::Agent<M>,
@@ -560,13 +610,23 @@ fn accumulate(total: &Usage, usage: &Usage) -> Usage {
 fn print_usage(usage: &Usage, elapsed: std::time::Duration) {
     let secs = elapsed.as_secs_f64();
     eprintln!(
-        "{BOLD} 📊{total} tokens in {dur}  ({inp} in, {out} out, {reas} thinking){RESET}",
-        total = usage.total_tokens,
-        inp = usage.input_tokens,
-        out = usage.output_tokens,
-        reas = usage.reasoning_tokens,
+        "{BOLD}📊 {total} tokens in {dur}  ({inp} in, {out} out, {reas} thinking){RESET}",
+        total = fmt_tok(usage.total_tokens),
+        inp = fmt_tok(usage.input_tokens),
+        out = fmt_tok(usage.output_tokens),
+        reas = fmt_tok(usage.reasoning_tokens),
         dur = format_duration(secs),
     );
+}
+
+fn fmt_tok(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}m", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
 }
 
 fn format_duration(secs: f64) -> String {

@@ -16,6 +16,7 @@ pub struct Config {
     pub thinking: Option<usize>,
     pub session_dir: Option<PathBuf>,
     pub policy: Option<PathBuf>,
+    pub memory: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -30,6 +31,7 @@ impl Default for Config {
             thinking: None,
             session_dir: None,
             policy: None,
+            memory: None,
         }
     }
 }
@@ -61,5 +63,11 @@ impl Config {
         self.session_dir
             .clone()
             .unwrap_or_else(|| dirs::data_local_dir().unwrap_or_else(|| PathBuf::from(".")).join("ai").join("sessions"))
+    }
+
+    pub fn memory_path_resolved(&self) -> PathBuf {
+        self.memory
+            .clone()
+            .unwrap_or_else(|| dirs::data_local_dir().unwrap_or_else(|| PathBuf::from(".")).join("ai").join("memory.json"))
     }
 }
