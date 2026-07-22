@@ -1,12 +1,12 @@
+use ansi_color_constants::*;
+use log::{info, debug};
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tracing::{debug, info, level_enabled, Level};
 
 use super::truncate;
 use crate::policy::{Action, Policy};
-use std::io::Write;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SearchContentArgs {
@@ -52,7 +52,10 @@ impl Tool for SearchContentTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("\u{2699}  search for {:?} in {}", args.pattern, args.path);
+        info!(
+            "{DIM}\u{2699}  search for {:?} in {}{RESET}",
+            args.pattern, args.path
+        );
         let root = PathBuf::from(&args.path);
         let canonical_root = root
             .canonicalize()
@@ -74,7 +77,12 @@ impl Tool for SearchContentTool {
         let exts: Vec<&str> = args
             .file_types
             .as_ref()
-            .map(|ft| ft.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect())
+            .map(|ft| {
+                ft.split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
             .unwrap_or_default();
 
         let mut results = Vec::new();
@@ -110,10 +118,9 @@ impl Tool for SearchContentTool {
             results.join("\n")
         };
         let truncated = truncate(&result, 20, 500);
-        if level_enabled!(Level::DEBUG) {
-            let _ = writeln!(std::io::stderr(), "\x1b[34m  search \u{2192}\n{truncated}\x1b[0m");
-        }
-        debug!("  search \u{2192}\n{truncated}");
+        debug!(
+            "{DIM} ========== search results ========== \n{truncated}\n ============================== {RESET}"
+        );
         Ok(result)
     }
 }
@@ -128,13 +135,10 @@ fn search_file(
     max_matches: usize,
 ) -> Result<(), SearchError> {
     if !exts.is_empty() {
-        let name = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy();
-        let matches_ext = exts.iter().any(|ext| {
-            name.to_lowercase().ends_with(&ext.to_lowercase())
-        });
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        let matches_ext = exts
+            .iter()
+            .any(|ext| name.to_lowercase().ends_with(&ext.to_lowercase()));
         if !matches_ext {
             return Ok(());
         }
@@ -163,12 +167,7 @@ fn search_file(
             return Ok(());
         }
         if pattern.is_match(line) {
-            results.push(format!(
-                "{}:{}: {}",
-                path.display(),
-                line_num + 1,
-                line
-            ));
+            results.push(format!("{}:{}: {}", path.display(), line_num + 1, line));
             *count += 1;
         }
     }
@@ -206,9 +205,26 @@ fn walk_dir(
         }
 
         if path.is_dir() {
-            walk_dir(root, &path, pattern, exts, max_file_size, results, count, max_matches)?;
+            walk_dir(
+                root,
+                &path,
+                pattern,
+                exts,
+                max_file_size,
+                results,
+                count,
+                max_matches,
+            )?;
         } else if path.is_file() {
-            search_file(&path, pattern, exts, max_file_size, results, count, max_matches)?;
+            search_file(
+                &path,
+                pattern,
+                exts,
+                max_file_size,
+                results,
+                count,
+                max_matches,
+            )?;
         }
     }
 
@@ -217,14 +233,11 @@ fn walk_dir(
 
 fn is_binary_filename(name: &str) -> bool {
     const BINARY_EXTS: &[&str] = &[
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp",
-        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-        ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar",
-        ".exe", ".dll", ".so", ".dylib", ".o", ".a", ".lib",
-        ".bin", ".dat", ".class", ".pyc", ".pyo", ".wasm",
-        ".mp3", ".mp4", ".avi", ".mov", ".mkv", ".wav", ".flac",
-        ".ttf", ".otf", ".woff", ".woff2", ".eot",
-        ".db", ".sqlite", ".sqlite3", ".mdb",
+        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".pdf", ".doc", ".docx", ".xls",
+        ".xlsx", ".ppt", ".pptx", ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".exe",
+        ".dll", ".so", ".dylib", ".o", ".a", ".lib", ".bin", ".dat", ".class", ".pyc", ".pyo",
+        ".wasm", ".mp3", ".mp4", ".avi", ".mov", ".mkv", ".wav", ".flac", ".ttf", ".otf", ".woff",
+        ".woff2", ".eot", ".db", ".sqlite", ".sqlite3", ".mdb",
     ];
     let lower = name.to_lowercase();
     BINARY_EXTS.iter().any(|ext| lower.ends_with(ext))
@@ -266,7 +279,10 @@ impl Tool for FindFilesTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("\u{2699}  find {:?} in {}", args.pattern, args.path);
+        info!(
+            "{DIM}\u{2699}  find {:?} in {}{RESET}",
+            args.pattern, args.path
+        );
         let root = PathBuf::from(&args.path);
         let canonical_root = root
             .canonicalize()
@@ -299,13 +315,7 @@ impl Tool for FindFilesTool {
 
         if results.is_empty() {
             let result = "No files found.".to_string();
-            let truncated = truncate(&result, 20, 500);
-            if level_enabled!(Level::DEBUG) {
-        if level_enabled!(Level::DEBUG) {
-            let _ = writeln!(std::io::stderr(), "\x1b[34m  find \u{2192}\n{truncated}\x1b[0m");
-        }
-            }
-            debug!("  find \u{2192}\n{truncated}");
+            debug!("{DIM}  \u{2192} {}{RESET}", result);
             return Ok(result);
         }
 
@@ -318,8 +328,9 @@ impl Tool for FindFilesTool {
 
         let result = results.join("\n");
         let truncated = truncate(&result, 20, 500);
-        let _ = writeln!(std::io::stderr(), "\x1b[34m  find \u{2192}\n{truncated}\x1b[0m");
-        debug!("  find \u{2192}\n{truncated}");
+        debug!(
+            "{DIM} ========== find files ========== \n{truncated}\n ============================== {RESET}"
+        );
         Ok(result)
     }
 }

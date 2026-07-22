@@ -1,8 +1,8 @@
+use ansi_color_constants::*;
+use log::{info, debug};
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, level_enabled, Level};
-use std::io::Write;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ThinkArgs {
@@ -44,11 +44,8 @@ impl Tool for ThinkTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("\u{1F9E0}  \x1b[3m{}\x1b[0m", args.thought);
-        if level_enabled!(Level::DEBUG) {
-            let _ = writeln!(std::io::stderr(), "\x1b[90m  think \u{2192} {} chars\x1b[0m", args.thought.len());
-        }
-        debug!("  think \u{2192} {} chars", args.thought.len());
+        info!("{DIM}\u{1F9E0}  \x1b[3m{}{RESET}", args.thought);
+        debug!("{DIM}  \u{2192} {} chars{RESET}", args.thought.len());
         Ok(args.thought)
     }
 }

@@ -1,12 +1,12 @@
+use ansi_color_constants::*;
+use log::{info, debug};
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tracing::{debug, info, level_enabled, Level};
 
 use super::truncate;
 use crate::policy::{Action, Policy};
-use std::io::Write;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WebError {
@@ -54,7 +54,7 @@ impl Tool for WebFetchTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("\u{2699}  fetch {}", args.url);
+        info!("{DIM}\u{2699}  fetch {}{RESET}", args.url);
         if args.url.is_empty() {
             return Err(WebError::Message("URL is required".to_string()));
         }
@@ -65,10 +65,7 @@ impl Tool for WebFetchTool {
             ));
         }
 
-        if !self
-            .policy
-            .is_allowed(&Action::WebFetch, &args.url)
-        {
+        if !self.policy.is_allowed(&Action::WebFetch, &args.url) {
             return Err(WebError::Message(format!(
                 "web fetch access denied for: {}",
                 args.url
@@ -133,8 +130,9 @@ impl Tool for WebFetchTool {
             }
             "markdown" => {
                 if content_type.contains("text/html") {
-                    htmd::convert(&body)
-                        .map_err(|e| WebError::Message(format!("failed to convert HTML to markdown: {e}")))?
+                    htmd::convert(&body).map_err(|e| {
+                        WebError::Message(format!("failed to convert HTML to markdown: {e}"))
+                    })?
                 } else {
                     format!("```\n{body}\n```")
                 }
@@ -143,10 +141,10 @@ impl Tool for WebFetchTool {
             _ => body,
         };
         let truncated = truncate(&result, 20, 500);
-        if level_enabled!(Level::DEBUG) {
-            let _ = writeln!(std::io::stderr(), "\x1b[34m  fetch \u{2192}\n{truncated}\x1b[0m");
-        }
-        debug!("  fetch \u{2192}\n{truncated}");
+        debug!(
+            "{DIM} ========== {} ========== \n{truncated}\n ============================== {RESET}",
+            args.url
+        );
         Ok(result)
     }
 }
@@ -187,15 +185,12 @@ impl Tool for WebSearchTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("\u{2699}  search web for {:?}", args.query);
+        info!("{DIM}\u{2699}  search web for {:?}{RESET}", args.query);
         if args.query.is_empty() {
             return Err(WebError::Message("query is required".to_string()));
         }
 
-        if !self
-            .policy
-            .is_allowed(&Action::WebSearch, &args.query)
-        {
+        if !self.policy.is_allowed(&Action::WebSearch, &args.query) {
             return Err(WebError::Message(format!(
                 "web search access denied for: {}",
                 args.query
@@ -248,15 +243,17 @@ impl Tool for WebSearchTool {
 
         for i in 0..count {
             let title = links[i].text().collect::<String>().trim().to_string();
-            let url = links[i]
-                .value()
-                .attr("href")
-                .unwrap_or("")
-                .to_string();
+            let url = links[i].value().attr("href").unwrap_or("").to_string();
             let snippet = snippets[i].text().collect::<String>().trim().to_string();
 
             if !url.is_empty() && !title.is_empty() {
-                results.push(format!("{}. {}\n   URL: {}\n   {}\n", i + 1, title, url, snippet));
+                results.push(format!(
+                    "{}. {}\n   URL: {}\n   {}\n",
+                    i + 1,
+                    title,
+                    url,
+                    snippet
+                ));
             }
         }
 
@@ -271,10 +268,9 @@ impl Tool for WebSearchTool {
             header + &results.join("\n")
         };
         let truncated = truncate(&result, 20, 500);
-        if level_enabled!(Level::DEBUG) {
-            let _ = writeln!(std::io::stderr(), "\x1b[34m  search web \u{2192}\n{truncated}\x1b[0m");
-        }
-        debug!("  search web \u{2192}\n{truncated}");
+        debug!(
+            "{DIM} ========== search results ========== \n{truncated}\n ============================== {RESET}"
+        );
         Ok(result)
     }
 }

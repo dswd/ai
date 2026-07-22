@@ -1,4 +1,4 @@
-use tracing::{debug, info};
+use log::{debug, info};
 use tracing_subscriber::EnvFilter;
 
 fn main() {

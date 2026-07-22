@@ -1,11 +1,11 @@
+use ansi_color_constants::*;
+use log::{info, debug};
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, level_enabled, Level};
 
 use super::truncate;
 use crate::policy::{Action, Policy};
-use std::io::Write;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ExecuteArgs {
@@ -48,7 +48,7 @@ impl Tool for ExecuteTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("\u{2699}  execute {}", args.command);
+        info!("{DIM}\u{2699}  execute {}{RESET}", args.command);
         let first_word = args
             .command
             .split_whitespace()
@@ -96,10 +96,10 @@ impl Tool for ExecuteTool {
         }
 
         let truncated = truncate(&result, 20, 500);
-        if level_enabled!(Level::DEBUG) {
-            let _ = writeln!(std::io::stderr(), "\x1b[34m  execute \u{2192}\n{truncated}\x1b[0m");
-        }
-        debug!("  execute \u{2192}\n{truncated}");
+        debug!(
+            "{DIM} ========== {} ========== \n{truncated}\n ============================== {RESET}",
+            args.command
+        );
         Ok(result)
     }
 }
@@ -131,8 +131,7 @@ impl Tool for GitDiffTool {
     type Error = ExecError;
 
     fn description(&self) -> String {
-        "Show git diff of working tree changes. Set staged=true to show staged changes."
-            .to_string()
+        "Show git diff of working tree changes. Set staged=true to show staged changes.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -151,10 +150,18 @@ impl Tool for GitDiffTool {
         if let Some(ref path) = args.path {
             cmd.arg("--").arg(path);
         }
-        
-        info!("\u{2699}  git diff {}", cmd.get_args().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
+
+        info!(
+            "{DIM}\u{2699}  git diff {}{RESET}",
+            cmd.get_args()
+                .map(|a| a.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
         if !self.policy.is_allowed(&Action::Execute, "git") {
-            return Err(ExecError::Message("execution denied for command: git".to_string()));
+            return Err(ExecError::Message(
+                "execution denied for command: git".to_string(),
+            ));
         }
 
         let output = cmd
@@ -168,10 +175,9 @@ impl Tool for GitDiffTool {
             stdout.to_string()
         };
         let truncated = truncate(&result, 20, 500);
-        if level_enabled!(Level::DEBUG) {
-            let _ = writeln!(std::io::stderr(), "\x1b[34m  git diff \u{2192}\n{truncated}\x1b[0m");
-        }
-        debug!("  git diff \u{2192}\n{truncated}");
+        debug!(
+            "{DIM} ========== git diff ========== \n{truncated}\n ============================== {RESET}"
+        );
         Ok(result)
     }
 }
@@ -220,9 +226,17 @@ impl Tool for GitLogTool {
             cmd.arg("--").arg(path);
         }
 
-        info!("\u{2699}  git log {}", cmd.get_args().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
+        info!(
+            "{DIM}\u{2699}  git log {}{RESET}",
+            cmd.get_args()
+                .map(|a| a.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
         if !self.policy.is_allowed(&Action::Execute, "git") {
-            return Err(ExecError::Message("execution denied for command: git".to_string()));
+            return Err(ExecError::Message(
+                "execution denied for command: git".to_string(),
+            ));
         }
 
         let output = cmd
@@ -236,10 +250,9 @@ impl Tool for GitLogTool {
             stdout.to_string()
         };
         let truncated = truncate(&result, 20, 500);
-        if level_enabled!(Level::DEBUG) {
-            let _ = writeln!(std::io::stderr(), "\x1b[34m  git log \u{2192}\n{truncated}\x1b[0m");
-        }
-        debug!("  git log \u{2192}\n{truncated}");
+        debug!(
+            "{DIM} ========== git log ========== \n{truncated}\n ============================== {RESET}"
+        );
         Ok(result)
     }
 }

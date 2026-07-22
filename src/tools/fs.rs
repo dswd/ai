@@ -1,9 +1,9 @@
+use ansi_color_constants::*;
+use log::{info, debug};
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 use std::path::PathBuf;
-use tracing::{debug, info, level_enabled, Level};
 
 use super::truncate;
 use crate::policy::{Action, Policy};
@@ -47,7 +47,7 @@ impl Tool for ReadFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("\u{2699}  read file {}", args.path);
+        info!("{DIM}\u{2699}  read file {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -64,10 +64,10 @@ impl Tool for ReadFileTool {
         let content = std::fs::read_to_string(&canonical)
             .map_err(|e| ToolExecError::Message(format!("cannot read file: {e}")))?;
         let truncated = truncate(&content, 20, 500);
-        if level_enabled!(Level::DEBUG) {
-            let _ = writeln!(std::io::stderr(), "\x1b[34m  read file \u{2192}\n{truncated}\x1b[0m");
-        }
-        debug!("  read file \u{2192}\n{truncated}");
+        debug!(
+            "{DIM} ========== {} ========== \n{truncated}\n ============================== {RESET}",
+            args.path
+        );
         Ok(content)
     }
 }
@@ -107,7 +107,7 @@ impl Tool for WriteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("\u{2699}  write file {}", args.path);
+        info!("{DIM}\u{2699}  write file {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = if path.exists() {
             path.canonicalize()
@@ -140,11 +140,7 @@ impl Tool for WriteFileTool {
             .map_err(|e| ToolExecError::Message(format!("cannot write file: {e}")))?;
 
         let result = format!("Successfully wrote to {}", args.path);
-        let truncated = truncate(&result, 20, 500);
-        if level_enabled!(Level::DEBUG) {
-            let _ = writeln!(std::io::stderr(), "\x1b[34m  write file \u{2192} {truncated}\x1b[0m");
-        }
-        debug!("  write file \u{2192} {truncated}");
+        debug!("{DIM}  \u{2192} {}{RESET}", result);
         Ok(result)
     }
 }
@@ -182,7 +178,7 @@ impl Tool for ListDirTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("\u{2699}  list dir {}", args.path);
+        info!("{DIM}\u{2699}  list dir {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -216,10 +212,10 @@ impl Tool for ListDirTool {
 
         let result = entries.join("\n");
         let truncated = truncate(&result, 20, 500);
-        if level_enabled!(Level::DEBUG) {
-            let _ = writeln!(std::io::stderr(), "\x1b[34m  list dir \u{2192}\n{truncated}\x1b[0m");
-        }
-        debug!("  list dir \u{2192}\n{truncated}");
+        debug!(
+            "{DIM} ========== {} ========== \n{truncated}\n ============================== {RESET}",
+            args.path
+        );
         Ok(result)
     }
 }
@@ -264,7 +260,7 @@ impl Tool for ReplaceInFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("\u{2699}  edit file {}", args.path);
+        info!("{DIM}\u{2699}  edit file {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -306,15 +302,8 @@ impl Tool for ReplaceInFileTool {
         std::fs::write(&canonical, &new_content)
             .map_err(|e| ToolExecError::Message(format!("cannot write file: {e}")))?;
 
-        let result = format!(
-            "Successfully replaced in {} (1 occurrence)",
-            args.path
-        );
-        let truncated = truncate(&result, 20, 500);
-        if level_enabled!(Level::DEBUG) {
-            let _ = writeln!(std::io::stderr(), "\x1b[34m  edit file \u{2192} {truncated}\x1b[0m");
-        }
-        debug!("  edit file \u{2192} {truncated}");
+        let result = format!("Successfully replaced in {} (1 occurrence)", args.path);
+        debug!("{DIM}  \u{2192} {}{RESET}", result);
         Ok(result)
     }
 }
@@ -354,7 +343,7 @@ impl Tool for DeleteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("\u{2699}  delete file {}", args.path);
+        info!("{DIM}\u{2699}  delete file {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -370,9 +359,8 @@ impl Tool for DeleteFileTool {
 
         let result = if canonical.is_dir() {
             if args.recursive.unwrap_or(false) {
-                std::fs::remove_dir_all(&canonical).map_err(|e| {
-                    ToolExecError::Message(format!("cannot delete directory: {e}"))
-                })?;
+                std::fs::remove_dir_all(&canonical)
+                    .map_err(|e| ToolExecError::Message(format!("cannot delete directory: {e}")))?;
                 format!("Deleted directory: {}", args.path)
             } else {
                 return Err(ToolExecError::Message(format!(
@@ -385,11 +373,7 @@ impl Tool for DeleteFileTool {
                 .map_err(|e| ToolExecError::Message(format!("cannot delete file: {e}")))?;
             format!("Deleted file: {}", args.path)
         };
-        let truncated = truncate(&result, 20, 500);
-        if level_enabled!(Level::DEBUG) {
-            let _ = writeln!(std::io::stderr(), "\x1b[34m  delete file \u{2192} {truncated}\x1b[0m");
-        }
-        debug!("  delete file \u{2192} {truncated}");
+        debug!("{DIM}  \u{2192} {}{RESET}", result);
         Ok(result)
     }
 }
@@ -427,7 +411,7 @@ impl Tool for CreateDirectoryTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("\u{2699}  create dir {}", args.path);
+        info!("{DIM}\u{2699}  create dir {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
 
         let canonical = if path.exists() {
@@ -438,9 +422,7 @@ impl Tool for CreateDirectoryTool {
                 if parent.exists() {
                     parent
                         .canonicalize()
-                        .map_err(|e| {
-                            ToolExecError::Message(format!("cannot resolve parent: {e}"))
-                        })?
+                        .map_err(|e| ToolExecError::Message(format!("cannot resolve parent: {e}")))?
                         .join(path.file_name().unwrap_or_default())
                 } else {
                     path.clone()
@@ -462,11 +444,7 @@ impl Tool for CreateDirectoryTool {
             .map_err(|e| ToolExecError::Message(format!("cannot create directory: {e}")))?;
 
         let result = format!("Created directory: {}", args.path);
-        let truncated = truncate(&result, 20, 500);
-        if level_enabled!(Level::DEBUG) {
-            let _ = writeln!(std::io::stderr(), "\x1b[34m  create dir \u{2192} {truncated}\x1b[0m");
-        }
-        debug!("  create dir \u{2192} {truncated}");
+        debug!("{DIM}  \u{2192} {}{RESET}", result);
         Ok(result)
     }
 }

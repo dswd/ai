@@ -3,7 +3,7 @@ use rmcp::{
     service::{ServerSink, ServiceExt},
     transport::streamable_http_client::StreamableHttpClientTransport,
 };
-use tracing::info;
+use log::{info, error};
 
 pub struct McpToolSet {
     #[allow(dead_code)]
@@ -33,13 +33,13 @@ async fn connect_one(url: &str) -> anyhow::Result<McpToolSet> {
     let service = client_info
         .serve(transport)
         .await
-        .inspect_err(|e| tracing::error!("MCP connection error: {:?}", e))?;
+        .inspect_err(|e| error!("MCP connection error: {:?}", e))?;
 
     let tools = service
         .peer()
         .list_all_tools()
         .await
-        .inspect_err(|e| tracing::error!("MCP list_tools error: {:?}", e))?;
+        .inspect_err(|e| error!("MCP list_tools error: {:?}", e))?;
 
     info!("Found {} tools on MCP server: {url}", tools.len());
 

@@ -16,15 +16,16 @@ use rig_core::{
     client::CompletionClient,
     completion::{CompletionModel, Message},
     providers,
-    streaming::{StreamedAssistantContent, StreamedUserContent, StreamingChat, StreamingPrompt},
+    streaming::{StreamedAssistantContent, StreamingChat, StreamingPrompt},
     tool::server::ToolServer,
 };
 use session::Session;
-use tracing::{debug, error, info};
-use tracing_subscriber::EnvFilter;
+use log::{set_max_level, LevelFilter, Level, info, error};
 
 use std::io::Write;
 use futures::StreamExt;
+
+
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -92,10 +93,6 @@ async fn main() -> anyhow::Result<()> {
         io::read_stdin()
     };
 
-    if let Some(text) = prompt_text.as_ref() {
-        debug!("Prompt: {text}");
-    }
-
     let provider = config.provider.to_lowercase();
 
     let mcp_tool_sets = if !cli.mcp.is_empty() {
@@ -146,24 +143,37 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn setup_logging(verbose: bool, quiet: bool) {
-    let filter = if verbose {
-        EnvFilter::new("ai=debug,warn")
+    let level = if verbose {
+        LevelFilter::Debug
     } else if quiet {
-        EnvFilter::new("ai=warn,error")
+        LevelFilter::Warn
     } else {
-        EnvFilter::new("ai=info,warn")
+        LevelFilter::Info
     };
+    set_max_level(level);
+    log::set_logger(&ConsoleLogger).expect("logger already set");
+}
 
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_target(false)
-        .with_level(false)
-        .with_line_number(false)
-        .with_file(false)
-        .without_time()
-        .with_ansi(true)
-        .with_env_filter(filter)
-        .init();
+struct ConsoleLogger;
+
+impl log::Log for ConsoleLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        if metadata.target().starts_with("ai::") {
+            metadata.level() <= log::max_level()
+        } else {
+            metadata.level() <= Level::Warn
+        }
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            eprintln!("{}", record.args());
+        }
+    }
+
+    fn flush(&self) {
+        let _ = std::io::stderr().flush();
+    }
 }
 
 fn load_config(cli: &Cli) -> anyhow::Result<Config> {
@@ -233,6 +243,8 @@ fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> {
         policy.add_cli_rule(PolicyRule::Allow(Action::WebFetch, "**".to_string()));
         policy.add_cli_rule(PolicyRule::Allow(Action::WebSearch, "**".to_string()));
     }
+
+    policy.ask = cli.interactive;
 
     Ok(policy)
 }
@@ -323,57 +335,23 @@ fn build_agent<M: CompletionModel + 'static>(
 async fn stream_response<R>(
     stream: &mut StreamingResult<R>,
 ) -> anyhow::Result<PromptResponse> {
-    let mut final_response = None;
-    let mut had_tool_calls = false;
     while let Some(item) = stream.next().await {
         match item {
             Ok(MultiTurnStreamItem::StreamAssistantItem(
                 StreamedAssistantContent::Text(text),
             )) => {
-                if had_tool_calls {
-                    eprintln!();
-                    had_tool_calls = false;
-                }
                 print!("{}", text.text);
                 let _ = std::io::stdout().flush();
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(
                 StreamedAssistantContent::Reasoning(reasoning),
             )) => {
-                if had_tool_calls {
-                    eprintln!();
-                    had_tool_calls = false;
-                }
                 let reasoning = reasoning.display_text();
-                print!("\x1b[90;3m{reasoning}\x1b[0m");
-                let _ = std::io::stdout().flush();
-            }
-            Ok(MultiTurnStreamItem::ToolExecutionStart {
-                tool_call,
-                ..
-            }) => {
-                had_tool_calls = true;
-                print!("\n\u{2699}  {}", tool_call.function.name);
-                let _ = std::io::stdout().flush();
-            }
-            Ok(MultiTurnStreamItem::StreamUserItem(
-                StreamedUserContent::ToolResult { tool_result, .. },
-            )) => {
-                if tracing::level_enabled!(tracing::Level::DEBUG) {
-                    let output = tool_result.content.iter()
-                        .filter_map(|c| match c {
-                            rig_core::completion::message::ToolResultContent::Text(t) => Some(t.text.as_str()),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .join("");
-                    let truncated = tools::truncate(&output, 10, 300);
-                    print!("\x1b[34m\n  \u{2192} {}\x1b[0m\n", truncated.replace('\n', "\n  "));
-                    let _ = std::io::stdout().flush();
-                }
+                eprintln!("\x1b[90;3m{reasoning}\x1b[0m");
             }
             Ok(MultiTurnStreamItem::FinalResponse(resp)) => {
-                final_response = Some(resp);
+                println!();
+                return Ok(resp);
             }
             Err(e) => {
                 eprintln!("\nError: {e}");
@@ -381,7 +359,7 @@ async fn stream_response<R>(
             _ => {}
         }
     }
-    final_response.ok_or_else(|| anyhow::anyhow!("no final response"))
+    Err(anyhow::anyhow!("no final response"))
 }
 
 async fn run_oneshot<M: CompletionModel + 'static>(
@@ -389,8 +367,7 @@ async fn run_oneshot<M: CompletionModel + 'static>(
     prompt: &str,
 ) -> anyhow::Result<()> {
     let mut stream = agent.stream_prompt(prompt).await;
-    let response = stream_response(&mut stream).await?;
-    debug!("Response: {}", response.output);
+    stream_response(&mut stream).await?;
     Ok(())
 }
 
@@ -424,7 +401,6 @@ async fn run_interactive<M: CompletionModel + 'static>(
                 if let Some(messages) = response.messages {
                     chat_history.extend(messages);
                 }
-                debug!("Response: {}", response.output);
                 session.save(session_dir)?;
             }
             Err(e) => {
@@ -487,7 +463,6 @@ async fn run_interactive<M: CompletionModel + 'static>(
                         if let Some(messages) = response.messages {
                             chat_history.extend(messages);
                         }
-                        debug!("Response: {}", response.output);
                         session.save(session_dir)?;
                     }
                     Err(e) => {

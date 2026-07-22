@@ -1,6 +1,7 @@
+use ansi_color_constants::*;
+use log::{debug, warn};
 use std::collections::HashMap;
 use std::path::Path;
-use tracing::{debug, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -21,6 +22,7 @@ pub enum PolicyRule {
 pub struct Policy {
     rules: Vec<PolicyRule>,
     cli_rules: Vec<PolicyRule>,
+    pub ask: bool,
 }
 
 impl Policy {
@@ -40,6 +42,7 @@ impl Policy {
         Self {
             rules,
             cli_rules: Vec::new(),
+            ask: false,
         }
     }
 
@@ -50,20 +53,12 @@ impl Policy {
     pub fn is_allowed(&self, action: &Action, target: &str) -> bool {
         let combined: Vec<&PolicyRule> = self.cli_rules.iter().chain(self.rules.iter()).collect();
 
-        if combined.is_empty() {
-            warn!(
-                "\u{274C}  {:?} for {:?} (no rules defined)",
-                action, target
-            );
-            return false;
-        }
-
         for rule in &combined {
             match rule {
                 PolicyRule::Allow(a, pattern) if a == action => {
                     if matches_pattern(target, pattern) {
                         debug!(
-                            "\u{2705}  {:?} for {:?} (matched rule: allow {})",
+                            "{DIM}\u{2705}  {:?} for {:?} (matched rule: allow {}){RESET}",
                             action, target, pattern
                         );
                         return true;
@@ -72,7 +67,7 @@ impl Policy {
                 PolicyRule::Deny(a, pattern) if a == action => {
                     if matches_pattern(target, pattern) {
                         warn!(
-                            "\u{274C}  {:?} for {:?} (matched rule: deny {})",
+                            "{DIM}\u{274C}  {:?} for {:?} (matched rule: deny {}){RESET}",
                             action, target, pattern
                         );
                         return false;
@@ -82,11 +77,12 @@ impl Policy {
             }
         }
 
-        warn!(
-            "\u{274C}  {:?} for {:?} (no matching rule)",
-            action, target
-        );
-        false
+        if self.ask {
+            //TODO: ask for permission
+        } else {
+            warn!("{DIM}\u{274C}  {:?} for {:?} (no matching rule){RESET}", action, target);
+            false
+        }
     }
 
     #[allow(dead_code)]
