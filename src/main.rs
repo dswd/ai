@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod io;
 mod memory;
+mod output;
 mod tool;
 mod policy;
 mod session;
@@ -200,7 +201,7 @@ impl log::Log for ConsoleLogger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            eprintln!("{}", record.args());
+            output::stderr_line(&format!("{}", record.args()));
         }
     }
 
@@ -403,58 +404,35 @@ fn build_agent<M: CompletionModel + 'static>(
 async fn stream_response<R>(
     stream: &mut StreamingResult<R>,
 ) -> anyhow::Result<PromptResponse> {
-    let mut last_chunk: Option<ChunkKind> = None;
     while let Some(item) = stream.next().await {
         match item {
             Ok(MultiTurnStreamItem::StreamAssistantItem(
                 StreamedAssistantContent::Text(text),
             )) => {
-                if last_chunk == Some(ChunkKind::Reasoning) {
-                    eprintln!();
-                }
-                last_chunk = Some(ChunkKind::Text);
-                print!("{}", text.text);
-                let _ = std::io::stdout().flush();
+                output::stdout_push(&text.text);
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(
                 StreamedAssistantContent::Reasoning(reasoning),
             )) => {
-                //if log_enabled!(Level::Info) {
-                    if last_chunk == Some(ChunkKind::Text) {
-                        eprintln!();
-                    }
-                    last_chunk = Some(ChunkKind::Reasoning);
-                    let reasoning = reasoning.display_text();
-                    eprintln!("{ITALICS}{BLUE}{reasoning}{RESET}");
-                //}
+                output::stderr_line(&format!("{ITALICS}{BLUE}{}{RESET}", reasoning.display_text()));
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(
                 StreamedAssistantContent::ReasoningDelta { reasoning, .. },
             )) => {
-                //if log_enabled!(Level::Info) {
-                    if last_chunk == Some(ChunkKind::Text) {
-                        eprintln!();
-                    }
-                    last_chunk = Some(ChunkKind::Reasoning);
-                    eprint!("{ITALICS}{BLUE}{reasoning}{RESET}");
-                    let _ = std::io::stderr().flush();
-                //}
+                output::stderr_push(&format!("{ITALICS}{BLUE}{reasoning}{RESET}"));
             }
             Ok(MultiTurnStreamItem::FinalResponse(resp)) => {
-                println!();
+                output::stdout_finish();
                 return Ok(resp);
             }
             Err(e) => {
-                eprintln!("\nError: {e}");
+                output::stderr_line(&format!("Error: {e}"));
             }
             _ => {}
         }
     }
     Err(anyhow::anyhow!("no final response"))
 }
-
-#[derive(Clone, Copy, PartialEq)]
-enum ChunkKind { Text, Reasoning }
 
 async fn run_oneshot<M: CompletionModel + 'static>(
     agent: rig_core::agent::Agent<M>,
@@ -527,7 +505,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
                     session.save(session_dir)?;
                     print_usage(&total_usage, start.elapsed());
                     info!("Session saved: {}", session.name);
-                    let _ = writeln!(std::io::stderr(), "  resume: ai -s {}", session.name);
+                    output::stderr_line(&format!("  resume: ai -s {}", session.name));
                     break;
                 }
 
@@ -694,14 +672,14 @@ fn accumulate(total: &Usage, usage: &Usage) -> Usage {
 
 fn print_usage(usage: &Usage, elapsed: std::time::Duration) {
     let secs = elapsed.as_secs_f64();
-    eprintln!(
+    output::stderr_line(&format!(
         "{BOLD}📊 {total} tokens in {dur}  ({inp} in, {out} out, {reas} thinking){RESET}",
         total = fmt_tok(usage.total_tokens),
         inp = fmt_tok(usage.input_tokens),
         out = fmt_tok(usage.output_tokens),
         reas = fmt_tok(usage.reasoning_tokens),
         dur = format_duration(secs),
-    );
+    ));
 }
 
 fn fmt_tok(n: u64) -> String {

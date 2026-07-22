@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead};
 use std::sync::{Mutex, OnceLock};
 use rustyline::{Editor, history::DefaultHistory};
 
@@ -34,15 +34,8 @@ pub fn read_stdin() -> Option<String> {
     }
 }
 
-pub fn print_stderr(text: &str) {
-    let mut stderr = io::stderr().lock();
-    let _ = stderr.write_all(text.as_bytes());
-    let _ = stderr.flush();
-}
-
 pub fn stderr_line(text: &str) {
-    print_stderr(text);
-    print_stderr("\n");
+    crate::output::stderr_line(text);
 }
 
 pub fn read_user_input(prompt: &str) -> Option<String> {
