@@ -1,5 +1,6 @@
 mod cli;
 mod config;
+mod init;
 mod io;
 mod memory;
 mod output;
@@ -40,7 +41,13 @@ async fn main() -> anyhow::Result<()> {
 
     setup_logging(cli.verbose, cli.quiet);
 
-    let mut config = load_config(&cli)?;
+    if let Some(ref init_path) = cli.init {
+        init::run(Some(init_path.clone()))?;
+        return Ok(());
+    }
+
+    let vanilla = cli.is_vanilla();
+    let mut config = load_config(&cli, vanilla)?;
     apply_cli_overrides(&cli, &mut config);
 
     let system_prompt = cli
@@ -204,6 +211,7 @@ fn cmd_list_sessions(dir: &std::path::Path) -> anyhow::Result<()> {
             println!("{name}");
         }
     }
+
     Ok(())
 }
 
@@ -256,13 +264,16 @@ fn is_quiet() -> bool {
     log::max_level() <= LevelFilter::Warn
 }
 
-fn load_config(cli: &Cli) -> anyhow::Result<Config> {
+fn load_config(cli: &Cli, vanilla: bool) -> anyhow::Result<Config> {
     if let Some(path) = &cli.config {
         Config::from_file(path)
     } else if let Some(default_path) = Config::default_path() {
         if default_path.exists() {
             Config::from_file(&default_path)
         } else {
+            if vanilla {
+                output::stderr_line("No config found. Run `ai --init` to create one.");
+            }
             Ok(Config::default())
         }
     } else {
@@ -508,6 +519,18 @@ async fn run_interactive<M: CompletionModel + 'static>(
         })
         .collect();
 
+    if chat_history.len() >= 2 {
+        let last_user = session.messages.iter().rev().find(|m| m.role == "user");
+        let last_assistant = session.messages.iter().rev().find(|m| m.role == "assistant");
+        if let Some(msg) = last_user {
+            output::stderr_line(&format!("> {}", msg.content));
+        }
+        if let Some(msg) = last_assistant {
+            output::stdout_push(&msg.content);
+            output::stdout_finish();
+        }
+    }
+
     let start = Instant::now();
     let mut total_usage = Usage::new();
     let mut last_input_tokens: u64 = 0;
@@ -548,10 +571,6 @@ async fn run_interactive<M: CompletionModel + 'static>(
                 }
 
                 if trimmed == "/exit" || trimmed == "/quit" {
-                    session.save(session_dir)?;
-                    print_usage(&total_usage, start.elapsed());
-                    info!("Session saved: {}", session.name);
-                    output::stderr_line(&format!("  resume: ai -s {}", session.name));
                     break;
                 }
 
@@ -641,12 +660,16 @@ async fn run_interactive<M: CompletionModel + 'static>(
                 }
             }
             None => {
-                session.save(session_dir)?;
-                print_usage(&total_usage, start.elapsed());
-                info!("Session saved: {}, resume: ai -s {}", session.name, session.name);
                 break;
             }
         }
+    }
+
+    if !session.messages.is_empty() {
+        session.save(session_dir)?;
+        print_usage(&total_usage, start.elapsed());
+        info!("Session saved: {}", session.name);
+        output::stderr_line(&format!("  resume: ai -s {}", session.name));
     }
 
     Ok(())

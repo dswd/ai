@@ -151,6 +151,15 @@ pub struct Cli {
     pub list: bool,
 
     #[arg(
+        long = "init",
+        help = "Initialize config interactively",
+        value_name = "FILE",
+        num_args = 0..=1,
+        default_missing_value = ""
+    )]
+    pub init: Option<String>,
+
+    #[arg(
         long = "delete",
         help = "Delete a session by NAME",
         value_name = "NAME"
@@ -185,5 +194,31 @@ impl Cli {
 
     pub fn is_interactive(&self) -> bool {
         self.session.is_some()
+    }
+
+    pub fn is_vanilla(&self) -> bool {
+        self.prompt.is_empty()
+            && self.system.is_none()
+            && self.session.is_none()
+            && self.memory.is_none()
+            && self.config.is_none()
+            && self.read.is_empty()
+            && self.write.is_empty()
+            && self.execute.is_empty()
+            && !self.web
+            && self.web_fetch.is_empty()
+            && self.web_search.is_empty()
+            && self.policy.is_none()
+            && !self.interactive
+            && self.tool.is_empty()
+            && !self.yolo
+            && self.max_tokens.is_none()
+            && self.max_turns == 100
+            && self.thinking.is_none()
+            && !self.verbose
+            && !self.quiet
+            && self.init.is_none()
+            && !self.list
+            && self.delete.is_none()
     }
 }
