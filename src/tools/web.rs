@@ -59,7 +59,7 @@ impl Tool for WebFetchTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}🌐  fetch {}{RESET}", args.url);
+        info!("{DIM}🌐 fetch {}{RESET}", args.url);
         if args.url.is_empty() {
             return Err(WebError::Message("URL is required".to_string()));
         }
@@ -196,7 +196,7 @@ impl Tool for WebSearchTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}🌐  search web for {:?}{RESET}", args.query);
+        info!("{DIM}🌐 search web for {:?}{RESET}", args.query);
         if args.query.is_empty() {
             return Err(WebError::Message("query is required".to_string()));
         }

@@ -58,7 +58,7 @@ impl Tool for SearchContentTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!(
-            "{DIM}🔎  search for {:?} in {}{RESET}",
+            "{DIM}🔎 search for {:?} in {}{RESET}",
             args.pattern, args.path
         );
         let root = PathBuf::from(&args.path);
@@ -292,7 +292,7 @@ impl Tool for FindFilesTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!(
-            "{DIM}🔎  find {:?} in {}{RESET}",
+            "{DIM}🔎 find {:?} in {}{RESET}",
             args.pattern, args.path
         );
         let root = PathBuf::from(&args.path);

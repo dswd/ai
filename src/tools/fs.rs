@@ -52,7 +52,7 @@ impl Tool for ReadFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}📄  read file {}{RESET}", args.path);
+        info!("{DIM}📄 read file {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -189,7 +189,7 @@ impl Tool for ListDirTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}📂  list dir {}{RESET}", args.path);
+        info!("{DIM}📂 list dir {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -273,7 +273,7 @@ impl Tool for ReplaceInFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}📝  edit file {}{RESET}", args.path);
+        info!("{DIM}📝 edit file {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -356,7 +356,7 @@ impl Tool for DeleteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}✂️  delete file {}{RESET}", args.path);
+        info!("{DIM}✂️ delete file {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -424,7 +424,7 @@ impl Tool for CreateDirectoryTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}\u{2699}  create dir {}{RESET}", args.path);
+        info!("{DIM}📁 create dir {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
 
         let canonical = if path.exists() {

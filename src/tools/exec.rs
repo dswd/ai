@@ -53,7 +53,7 @@ impl Tool for ExecuteTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}🚀  execute {}{RESET}", args.command);
+        info!("{DIM}🚀 execute {}{RESET}", args.command);
         let first_word = args
             .command
             .split_whitespace()
@@ -163,7 +163,7 @@ impl Tool for GitDiffTool {
         }
 
         info!(
-            "{DIM}\u{2699}  git diff {}{RESET}",
+            "{DIM}\u{2699} git diff {}{RESET}",
             cmd.get_args()
                 .map(|a| a.to_string_lossy())
                 .collect::<Vec<_>>()
@@ -245,7 +245,7 @@ impl Tool for GitLogTool {
         }
 
         info!(
-            "{DIM}\u{2699}  git log {}{RESET}",
+            "{DIM}\u{2699} git log {}{RESET}",
             cmd.get_args()
                 .map(|a| a.to_string_lossy())
                 .collect::<Vec<_>>()
