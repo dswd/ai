@@ -7,6 +7,7 @@ use crate::util::{bar_line, bar_title};
 
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output, fmt_offset_limit};
 use crate::policy::{Action, Policy};
+use regex::Regex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ExecuteArgs {
@@ -37,6 +38,16 @@ impl ExecuteTool {
     }
 }
 
+fn commands_in_string(command: &str) -> Vec<String> {
+    let re = Regex::new(r"&&|\|\||[|;&]").unwrap();
+    re.split(command)
+        .filter_map(|seg| {
+            let word = seg.split_whitespace().next()?;
+            if word.is_empty() { None } else { Some(word.to_string()) }
+        })
+        .collect()
+}
+
 impl Tool for ExecuteTool {
     const NAME: &'static str = "execute";
 
@@ -54,17 +65,16 @@ impl Tool for ExecuteTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!("{DIM}🚀 execute {}{}{RESET}", args.command, fmt_offset_limit(args.offset, args.limit));
-        let first_word = args
-            .command
-            .split_whitespace()
-            .next()
-            .unwrap_or(&args.command);
-
-        if !self.policy.is_allowed(&Action::Execute, first_word) {
-            return Err(ExecError::Message(format!(
-                "execution denied for command: {}",
-                first_word
-            )));
+        let commands = commands_in_string(&args.command);
+        if commands.is_empty() {
+            return Err(ExecError::Message("no command found in execution string".to_string()));
+        }
+        for cmd in &commands {
+            if !self.policy.is_allowed(&Action::Execute, cmd) {
+                return Err(ExecError::Message(format!(
+                    "execution denied for command: {cmd}"
+                )));
+            }
         }
 
         let mut cmd = if cfg!(target_os = "windows") {
