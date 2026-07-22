@@ -4,26 +4,55 @@ use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use crate::util::{bar_line, bar_title};
 
-use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output};
+use super::{finalize_output, resolve_path, ToolError, MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES};
 use crate::policy::{Action, Policy};
+
+// ---------------------------------------------------------------------------
+// Args structs
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ReadFileArgs {
-    #[schemars(description = "Path to the file to read")]
     pub path: String,
-    #[schemars(description = "Line number to start reading from (0-based)")]
     pub offset: Option<usize>,
-    #[schemars(description = "Maximum number of lines to return")]
     pub limit: Option<usize>,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum ToolExecError {
-    #[error("{0}")]
-    Message(String),
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WriteFileArgs {
+    pub path: String,
+    pub content: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ListDirArgs {
+    pub path: String,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ReplaceInFileArgs {
+    pub path: String,
+    pub old_str: String,
+    pub new_str: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteFileArgs {
+    pub path: String,
+    pub recursive: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CreateDirectoryArgs {
+    pub path: String,
+}
+
+// ---------------------------------------------------------------------------
+// ReadFileTool
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct ReadFileTool {
@@ -41,10 +70,10 @@ impl Tool for ReadFileTool {
 
     type Args = ReadFileArgs;
     type Output = String;
-    type Error = ToolExecError;
+    type Error = ToolError;
 
     fn description(&self) -> String {
-        "Read the contents of a file at the given path".to_string()
+        "Read a file".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -52,40 +81,17 @@ impl Tool for ReadFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}📄  read file {}{RESET}", args.path);
-        let path = PathBuf::from(&args.path);
-        let canonical = path
-            .canonicalize()
-            .map_err(|e| ToolExecError::Message(format!("cannot resolve path: {e}")))?;
-        let canonical_str = canonical.to_string_lossy();
-
-        if !self.policy.is_allowed(&Action::Read, &canonical_str) {
-            return Err(ToolExecError::Message(format!(
-                "read access denied for: {}",
-                args.path
-            )));
-        }
-
+        info!("{DIM}📄  read {}{RESET}", args.path);
+        let canonical = resolve_path(&args.path, &self.policy, &Action::Read)?;
         let content = std::fs::read_to_string(&canonical)
-            .map_err(|e| ToolExecError::Message(format!("cannot read file: {e}")))?;
-        let truncated = truncate(&content, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
-        debug!(
-            "{DIM} {} \n{truncated}\n {} {RESET}",
-            bar_title(&args.path),
-            bar_line()
-        );
-        Ok(process_output(&content, args.offset, args.limit)
-            .map_err(|e| ToolExecError::Message(e))?)
+            .map_err(|e| ToolError::Message(format!("cannot read: {e}")))?;
+        finalize_output(&content, args.offset, args.limit, &args.path)
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct WriteFileArgs {
-    #[schemars(description = "Path to the file to write")]
-    pub path: String,
-    #[schemars(description = "Content to write to the file")]
-    pub content: String,
-}
+// ---------------------------------------------------------------------------
+// WriteFileTool
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct WriteFileTool {
@@ -103,10 +109,10 @@ impl Tool for WriteFileTool {
 
     type Args = WriteFileArgs;
     type Output = String;
-    type Error = ToolExecError;
+    type Error = ToolError;
 
     fn description(&self) -> String {
-        "Write content to a file at the given path. Creates or overwrites the file.".to_string()
+        "Write content to a file (creates/overwrites)".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -114,53 +120,43 @@ impl Tool for WriteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}✏️  write file {}{RESET}", args.path);
+        info!("{DIM}✏️  write {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = if path.exists() {
-            path.canonicalize()
-                .map_err(|e| ToolExecError::Message(format!("cannot resolve path: {e}")))?
+            resolve_path(&args.path, &self.policy, &Action::Write)?
         } else {
-            if let Some(parent) = path.parent() {
-                parent
-                    .canonicalize()
-                    .map_err(|e| ToolExecError::Message(format!("cannot resolve parent: {e}")))?
-                    .join(path.file_name().unwrap_or_default())
-            } else {
-                path.clone()
+            let parent = path.parent().ok_or_else(|| {
+                ToolError::Message("cannot determine parent directory".to_string())
+            })?;
+            let canonical_parent = parent
+                .canonicalize()
+                .map_err(|e| ToolError::Message(format!("cannot resolve parent: {e}")))?;
+            if !self
+                .policy
+                .is_allowed(&Action::Write, &canonical_parent.to_string_lossy())
+            {
+                return Err(ToolError::Message(format!("write access denied for: {}", args.path)));
             }
+            canonical_parent.join(path.file_name().unwrap_or_default())
         };
-        let canonical_str = canonical.to_string_lossy();
-
-        if !self.policy.is_allowed(&Action::Write, &canonical_str) {
-            return Err(ToolExecError::Message(format!(
-                "write access denied for: {}",
-                args.path
-            )));
-        }
 
         if let Some(parent) = canonical.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| ToolExecError::Message(format!("cannot create parent dirs: {e}")))?;
+                .map_err(|e| ToolError::Message(format!("cannot create dirs: {e}")))?;
         }
 
         std::fs::write(&canonical, &args.content)
-            .map_err(|e| ToolExecError::Message(format!("cannot write file: {e}")))?;
+            .map_err(|e| ToolError::Message(format!("cannot write: {e}")))?;
 
-        let result = format!("Successfully wrote to {}", args.path);
-        debug!("{DIM}  \u{2192} {}{RESET}", result);
-        Ok(result)
+        let msg = format!("Wrote to {}", args.path);
+        info!("  → {msg}");
+        Ok(msg)
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ListDirArgs {
-    #[schemars(description = "Path to the directory to list")]
-    pub path: String,
-    #[schemars(description = "Line number to start listing from (0-based)")]
-    pub offset: Option<usize>,
-    #[schemars(description = "Maximum number of entries to return")]
-    pub limit: Option<usize>,
-}
+// ---------------------------------------------------------------------------
+// ListDirTool
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct ListDirTool {
@@ -178,10 +174,10 @@ impl Tool for ListDirTool {
 
     type Args = ListDirArgs;
     type Output = String;
-    type Error = ToolExecError;
+    type Error = ToolError;
 
     fn description(&self) -> String {
-        "List files and directories at the given path".to_string()
+        "List files and directories".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -189,59 +185,31 @@ impl Tool for ListDirTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}📂  list dir {}{RESET}", args.path);
-        let path = PathBuf::from(&args.path);
-        let canonical = path
-            .canonicalize()
-            .map_err(|e| ToolExecError::Message(format!("cannot resolve path: {e}")))?;
-        let canonical_str = canonical.to_string_lossy();
-
-        if !self.policy.is_allowed(&Action::Read, &canonical_str) {
-            return Err(ToolExecError::Message(format!(
-                "read access denied for: {}",
-                args.path
-            )));
-        }
+        info!("{DIM}📂  list {}{RESET}", args.path);
+        let canonical = resolve_path(&args.path, &self.policy, &Action::Read)?;
 
         let entries: Vec<String> = std::fs::read_dir(&canonical)
-            .map_err(|e| ToolExecError::Message(format!("cannot read dir: {e}")))?
+            .map_err(|e| ToolError::Message(format!("cannot read dir: {e}")))?
             .filter_map(|entry| {
                 entry.ok().map(|e| {
-                    let ftype = e.file_type().ok().map_or('?', |ft| {
-                        if ft.is_dir() {
-                            'd'
-                        } else if ft.is_symlink() {
-                            'l'
-                        } else {
-                            'f'
-                        }
-                    });
-                    format!("{ftype} {}", e.file_name().to_string_lossy())
+                    let ft = match e.file_type() {
+                        Ok(t) if t.is_dir() => 'd',
+                        Ok(t) if t.is_symlink() => 'l',
+                        _ => 'f',
+                    };
+                    format!("{ft} {}", e.file_name().to_string_lossy())
                 })
             })
             .collect();
 
         let result = entries.join("\n");
-        let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
-        debug!(
-            "{DIM} {} \n{truncated}\n {} {RESET}",
-            bar_title(&args.path),
-            bar_line()
-        );
-        Ok(process_output(&result, args.offset, args.limit)
-            .map_err(|e| ToolExecError::Message(e))?)
+        finalize_output(&result, args.offset, args.limit, &args.path)
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ReplaceInFileArgs {
-    #[schemars(description = "Path to the file to modify")]
-    pub path: String,
-    #[schemars(description = "Exact string to replace")]
-    pub old_str: String,
-    #[schemars(description = "Replacement string")]
-    pub new_str: String,
-}
+// ---------------------------------------------------------------------------
+// ReplaceInFileTool
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct ReplaceInFileTool {
@@ -259,13 +227,10 @@ impl Tool for ReplaceInFileTool {
 
     type Args = ReplaceInFileArgs;
     type Output = String;
-    type Error = ToolExecError;
+    type Error = ToolError;
 
     fn description(&self) -> String {
-        "Replace a specific string in a file with a new string. \
-         The old_str must match exactly once in the file. \
-         Use this for surgical edits instead of overwriting the entire file."
-            .to_string()
+        "Replace a string in a file (must match exactly once)".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -273,61 +238,43 @@ impl Tool for ReplaceInFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}📝  edit file {}{RESET}", args.path);
-        let path = PathBuf::from(&args.path);
-        let canonical = path
-            .canonicalize()
-            .map_err(|e| ToolExecError::Message(format!("cannot resolve path: {e}")))?;
-        let canonical_str = canonical.to_string_lossy();
-
-        if !self.policy.is_allowed(&Action::Write, &canonical_str) {
-            return Err(ToolExecError::Message(format!(
-                "write access denied for: {}",
-                args.path
-            )));
-        }
+        info!("{DIM}📝  edit {}{RESET}", args.path);
+        let canonical = resolve_path(&args.path, &self.policy, &Action::Write)?;
 
         let content = std::fs::read_to_string(&canonical)
-            .map_err(|e| ToolExecError::Message(format!("cannot read file: {e}")))?;
+            .map_err(|e| ToolError::Message(format!("cannot read: {e}")))?;
 
         if args.old_str.is_empty() {
-            return Err(ToolExecError::Message(
-                "old_str must not be empty".to_string(),
-            ));
+            return Err(ToolError::Message("old_str must not be empty".to_string()));
         }
 
         let count = content.matches(&args.old_str).count();
         if count == 0 {
-            return Err(ToolExecError::Message(format!(
-                "old_str not found in file: {}",
+            return Err(ToolError::Message(format!(
+                "old_str not found in: {}",
                 args.path
             )));
         }
         if count > 1 {
-            return Err(ToolExecError::Message(format!(
-                "old_str found {} times in file (must be unique): {}",
-                count, args.path
+            return Err(ToolError::Message(format!(
+                "old_str found {count}x in {} (must be unique)",
+                args.path
             )));
         }
 
         let new_content = content.replacen(&args.old_str, &args.new_str, 1);
-
         std::fs::write(&canonical, &new_content)
-            .map_err(|e| ToolExecError::Message(format!("cannot write file: {e}")))?;
+            .map_err(|e| ToolError::Message(format!("cannot write: {e}")))?;
 
-        let result = format!("Successfully replaced in {} (1 occurrence)", args.path);
-        debug!("{DIM}  \u{2192} {}{RESET}", result);
-        Ok(result)
+        let msg = format!("Replaced 1 occurrence in {}", args.path);
+        info!("  → {msg}");
+        Ok(msg)
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct DeleteFileArgs {
-    #[schemars(description = "Path to the file or directory to delete")]
-    pub path: String,
-    #[schemars(description = "If deleting a directory, remove recursively")]
-    pub recursive: Option<bool>,
-}
+// ---------------------------------------------------------------------------
+// DeleteFileTool
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct DeleteFileTool {
@@ -345,10 +292,10 @@ impl Tool for DeleteFileTool {
 
     type Args = DeleteFileArgs;
     type Output = String;
-    type Error = ToolExecError;
+    type Error = ToolError;
 
     fn description(&self) -> String {
-        "Delete a file or directory at the given path".to_string()
+        "Delete a file or directory".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -356,46 +303,30 @@ impl Tool for DeleteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}✂️  delete file {}{RESET}", args.path);
-        let path = PathBuf::from(&args.path);
-        let canonical = path
-            .canonicalize()
-            .map_err(|e| ToolExecError::Message(format!("cannot resolve path: {e}")))?;
-        let canonical_str = canonical.to_string_lossy();
+        info!("{DIM}✂️  delete {}{RESET}", args.path);
+        let canonical = resolve_path(&args.path, &self.policy, &Action::Write)?;
 
-        if !self.policy.is_allowed(&Action::Write, &canonical_str) {
-            return Err(ToolExecError::Message(format!(
-                "write access denied for: {}",
-                args.path
-            )));
-        }
-
-        let result = if canonical.is_dir() {
-            if args.recursive.unwrap_or(false) {
-                std::fs::remove_dir_all(&canonical)
-                    .map_err(|e| ToolExecError::Message(format!("cannot delete directory: {e}")))?;
-                format!("Deleted directory: {}", args.path)
-            } else {
-                return Err(ToolExecError::Message(format!(
-                    "{} is a directory. Set recursive=true to delete it.",
+        if canonical.is_dir() {
+            if !args.recursive.unwrap_or(false) {
+                return Err(ToolError::Message(format!(
+                    "{} is a dir; set recursive=true to delete",
                     args.path
                 )));
             }
+            std::fs::remove_dir_all(&canonical)
+                .map_err(|e| ToolError::Message(format!("cannot delete dir: {e}")))?;
+            Ok(format!("Deleted dir: {}", args.path))
         } else {
             std::fs::remove_file(&canonical)
-                .map_err(|e| ToolExecError::Message(format!("cannot delete file: {e}")))?;
-            format!("Deleted file: {}", args.path)
-        };
-        debug!("{DIM}  \u{2192} {}{RESET}", result);
-        Ok(result)
+                .map_err(|e| ToolError::Message(format!("cannot delete file: {e}")))?;
+            Ok(format!("Deleted file: {}", args.path))
+        }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct CreateDirectoryArgs {
-    #[schemars(description = "Directory path to create")]
-    pub path: String,
-}
+// ---------------------------------------------------------------------------
+// CreateDirectoryTool
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct CreateDirectoryTool {
@@ -413,10 +344,10 @@ impl Tool for CreateDirectoryTool {
 
     type Args = CreateDirectoryArgs;
     type Output = String;
-    type Error = ToolExecError;
+    type Error = ToolError;
 
     fn description(&self) -> String {
-        "Create a directory and any missing parent directories (like mkdir -p)".to_string()
+        "Create a directory (mkdir -p)".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -424,40 +355,37 @@ impl Tool for CreateDirectoryTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}\u{2699}  create dir {}{RESET}", args.path);
+        info!("{DIM}📁  mkdir {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
 
         let canonical = if path.exists() {
-            path.canonicalize()
-                .map_err(|e| ToolExecError::Message(format!("cannot resolve path: {e}")))?
+            resolve_path(&args.path, &self.policy, &Action::Write)?
         } else {
-            if let Some(parent) = path.parent() {
-                if parent.exists() {
-                    parent
-                        .canonicalize()
-                        .map_err(|e| ToolExecError::Message(format!("cannot resolve parent: {e}")))?
-                        .join(path.file_name().unwrap_or_default())
-                } else {
-                    path.clone()
+            let parent = path.parent().ok_or_else(|| {
+                ToolError::Message("cannot determine parent dir".to_string())
+            })?;
+            if parent.exists() {
+                let cp = parent
+                    .canonicalize()
+                    .map_err(|e| ToolError::Message(format!("cannot resolve parent: {e}")))?;
+                if !self
+                    .policy
+                    .is_allowed(&Action::Write, &cp.to_string_lossy())
+                {
+                    return Err(ToolError::Message(format!(
+                        "write access denied for: {}",
+                        args.path
+                    )));
                 }
+                cp.join(path.file_name().unwrap_or_default())
             } else {
                 path.clone()
             }
         };
-        let canonical_str = canonical.to_string_lossy();
-
-        if !self.policy.is_allowed(&Action::Write, &canonical_str) {
-            return Err(ToolExecError::Message(format!(
-                "write access denied for: {}",
-                args.path
-            )));
-        }
 
         std::fs::create_dir_all(&canonical)
-            .map_err(|e| ToolExecError::Message(format!("cannot create directory: {e}")))?;
+            .map_err(|e| ToolError::Message(format!("cannot create dir: {e}")))?;
 
-        let result = format!("Created directory: {}", args.path);
-        debug!("{DIM}  \u{2192} {}{RESET}", result);
-        Ok(result)
+        Ok(format!("Created dir: {}", args.path))
     }
 }

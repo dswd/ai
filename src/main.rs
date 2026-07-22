@@ -91,6 +91,18 @@ async fn main() -> anyhow::Result<()> {
         )
     };
 
+    if is_interactive {
+        let user_lines: Vec<String> = session
+            .messages
+            .iter()
+            .filter(|m| m.role == "user")
+            .map(|m| m.content.clone())
+            .collect();
+        if !user_lines.is_empty() {
+            io::set_history(&user_lines);
+        }
+    }
+
     let prompt_text = if let Some(text) = cli.prompt_text() {
         Some(text)
     } else {

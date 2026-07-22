@@ -25,6 +25,7 @@ serde_yaml = "0.9.34"
 htmd = "0.1"
 html2text = "0.6"
 reqwest = "0.13"
+rustyline = { version = "15", default-features = false, features = ["custom-bindings"] }
 scraper = "0.22"
 thiserror = "2.0.19"
 tokio = { version = "1.53.1", features = ["full"] }
