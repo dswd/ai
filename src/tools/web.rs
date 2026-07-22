@@ -4,6 +4,7 @@ use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use regex::Regex;
 use crate::util::{bar_line, bar_title};
 
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output, fmt_offset_limit};
@@ -135,9 +136,7 @@ impl Tool for WebFetchTool {
             }
             "markdown" => {
                 if content_type.contains("text/html") {
-                    htmd::convert(&body).map_err(|e| {
-                        WebError::Message(format!("failed to convert HTML to markdown: {e}"))
-                    })?
+                    html2text::from_read(body.as_bytes(), 80)
                 } else {
                     format!("```\n{body}\n```")
                 }
@@ -239,23 +238,27 @@ impl Tool for WebSearchTool {
             .await
             .map_err(|e| WebError::Message(format!("failed to read search response: {e}")))?;
 
-        let document = scraper::Html::parse_document(&body);
+        let re_link = Regex::new(r#"class="result__a"\s+href="([^"]+)"[^>]*>([^<]+)"#)
+            .map_err(|e| WebError::Message(format!("regex error: {e}")))?;
+        let re_snippet = Regex::new(r#"class="result__snippet"[^>]*>(.+?)</a>"#)
+            .map_err(|e| WebError::Message(format!("regex error: {e}")))?;
 
-        let result_links = scraper::Selector::parse(".result__a")
-            .map_err(|e| WebError::Message(format!("failed to parse selector: {e}")))?;
-        let result_snippets = scraper::Selector::parse(".result__snippet")
-            .map_err(|e| WebError::Message(format!("failed to parse selector: {e}")))?;
-
-        let links: Vec<_> = document.select(&result_links).collect();
-        let snippets: Vec<_> = document.select(&result_snippets).collect();
+        let links: Vec<(&str, &str)> = re_link
+            .captures_iter(&body)
+            .map(|c| (c.get(1).unwrap().as_str(), c.get(2).unwrap().as_str()))
+            .collect();
+        let snippets: Vec<&str> = re_snippet
+            .captures_iter(&body)
+            .map(|c| c.get(1).unwrap().as_str())
+            .collect();
 
         let mut results = Vec::new();
         let count = links.len().min(snippets.len()).min(num_results);
 
         for i in 0..count {
-            let title = links[i].text().collect::<String>().trim().to_string();
-            let url = links[i].value().attr("href").unwrap_or("").to_string();
-            let snippet = snippets[i].text().collect::<String>().trim().to_string();
+            let url = links[i].0;
+            let title = links[i].1.trim();
+            let snippet = snippets[i].trim();
 
             if !url.is_empty() && !title.is_empty() {
                 results.push(format!(
