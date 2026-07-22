@@ -112,7 +112,7 @@ impl Tool for WriteFileTool {
     type Error = ToolError;
 
     fn description(&self) -> String {
-        "Write full content to a file (creates/overwrites). Prefer replace_in_file if possible.".to_string()
+        "Write content to a file (creates/overwrites)".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -230,7 +230,7 @@ impl Tool for ReplaceInFileTool {
     type Error = ToolError;
 
     fn description(&self) -> String {
-        "Replace part of a file (must match exactly once).".to_string()
+        "Replace a string in a file (must match exactly once)".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
