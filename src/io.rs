@@ -1,4 +1,4 @@
-use std::io::{self, BufRead};
+use std::io;
 use std::sync::{Mutex, OnceLock};
 use rustyline::{Editor, history::DefaultHistory};
 
@@ -17,20 +17,25 @@ pub fn load_session_history(lines: &[String]) {
     }
 }
 
-pub fn read_stdin() -> Option<String> {
+pub async fn read_stdin_async() -> Option<String> {
     let stdin = io::stdin();
     if std::io::IsTerminal::is_terminal(&stdin) {
         return None;
     }
-    let mut lines = Vec::new();
-    let reader = io::BufReader::new(stdin.lock());
-    for line in reader.lines().map_while(Result::ok) {
-        lines.push(line);
-    }
-    if lines.is_empty() {
-        None
-    } else {
-        Some(lines.join("\n"))
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut buffer = Vec::new();
+        let mut stdin = io::stdin().lock();
+        let _ = stdin.read_to_end(&mut buffer);
+        let _ = tx.send(buffer);
+    });
+    match tokio::time::timeout(std::time::Duration::from_secs(2), rx).await {
+        Ok(Ok(buffer)) if !buffer.is_empty() => {
+            let text = String::from_utf8_lossy(&buffer).trim().to_string();
+            if text.is_empty() { None } else { Some(text) }
+        }
+        _ => None,
     }
 }
 

@@ -137,10 +137,13 @@ async fn main() -> anyhow::Result<()> {
         io::load_session_history(&user_lines);
     }
 
-    let prompt_text = if let Some(text) = cli.prompt_text() {
-        Some(text)
-    } else {
-        io::read_stdin()
+    let cli_prompt = cli.prompt_text();
+    let stdin_prompt = io::read_stdin_async().await;
+    let prompt_text = match (cli_prompt, stdin_prompt) {
+        (Some(a), Some(b)) => Some(format!("{a}\n\n{b}")),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
     };
 
     let provider = config.provider.to_lowercase();
