@@ -314,6 +314,7 @@ fn anthropic_client(config: &Config) -> anyhow::Result<providers::anthropic::Cli
     Ok(builder.build()?)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_agent<M: CompletionModel + 'static>(
     model: M,
     system_prompt: &str,
@@ -547,11 +548,11 @@ async fn run_interactive<M: CompletionModel + 'static>(
 
                     let compact_result = async {
                         let mut hist = chat_history.clone();
-                        let result = agent
+                        
+                        agent
                             .chat("Summarize this conversation concisely, preserving all important decisions, code changes, and user preferences. Return only the summary, no commentary.", &mut hist)
                             .await
-                            .map_err(|e| anyhow::anyhow!("compact failed: {e}"));
-                        result
+                            .map_err(|e| anyhow::anyhow!("compact failed: {e}"))
                     }.await;
 
                     match compact_result {

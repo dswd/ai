@@ -128,8 +128,8 @@ impl Tool for SearchContentTool {
             bar_title("search results"),
             bar_line()
         );
-        Ok(process_output(&result, args.offset, args.limit)
-            .map_err(|e| SearchError::Message(e))?)
+        process_output(&result, args.offset, args.limit)
+            .map_err(SearchError::Message)
     }
 }
 
@@ -183,6 +183,7 @@ fn search_file(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments, clippy::only_used_in_recursion)]
 fn walk_dir(
     root: &std::path::Path,
     dir: &std::path::Path,
@@ -202,11 +203,10 @@ fn walk_dir(
         let path = entry.path();
         let name = path.file_name().unwrap_or_default().to_string_lossy();
 
-        if name.starts_with('.') {
-            if name != "." && name != ".." && name != ".cargo" {
+        if name.starts_with('.')
+            && name != "." && name != ".." && name != ".cargo" {
                 continue;
             }
-        }
 
         if name == "node_modules" || name == "target" || name == ".git" {
             continue;
@@ -328,8 +328,8 @@ impl Tool for FindFilesTool {
         if results.is_empty() {
             let result = "No files found.".to_string();
             debug!("{DIM}  \u{2192} {}{RESET}", result);
-            return Ok(process_output(&result, args.offset, args.limit)
-                .map_err(|e| SearchError::Message(e))?);
+            return process_output(&result, args.offset, args.limit)
+                .map_err(SearchError::Message);
         }
 
         results.sort();
@@ -346,7 +346,7 @@ impl Tool for FindFilesTool {
             bar_title("find files"),
             bar_line()
         );
-        Ok(process_output(&result, args.offset, args.limit)
-            .map_err(|e| SearchError::Message(e))?)
+        process_output(&result, args.offset, args.limit)
+            .map_err(SearchError::Message)
     }
 }

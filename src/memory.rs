@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use rand::Rng;
-use serde_json;
 
 const MAX_ENTRIES: usize = 100;
 

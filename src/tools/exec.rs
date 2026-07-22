@@ -106,8 +106,8 @@ impl Tool for ExecuteTool {
             bar_title(&args.command),
             bar_line()
         );
-        Ok(process_output(&result, args.offset, args.limit)
-            .map_err(|e| ExecError::Message(e))?)
+        process_output(&result, args.offset, args.limit)
+            .map_err(ExecError::Message)
     }
 }
 
@@ -191,8 +191,8 @@ impl Tool for GitDiffTool {
             bar_title("git diff"),
             bar_line()
         );
-        Ok(process_output(&result, args.offset, args.limit)
-            .map_err(|e| ExecError::Message(e))?)
+        process_output(&result, args.offset, args.limit)
+            .map_err(ExecError::Message)
     }
 }
 
@@ -273,7 +273,7 @@ impl Tool for GitLogTool {
             bar_title("git log"),
             bar_line()
         );
-        Ok(process_output(&result, args.offset, args.limit)
-            .map_err(|e| ExecError::Message(e))?)
+        process_output(&result, args.offset, args.limit)
+            .map_err(ExecError::Message)
     }
 }

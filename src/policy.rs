@@ -37,7 +37,7 @@ impl Policy {
             .lines()
             .map(|l| l.trim())
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .filter_map(|l| parse_line(l))
+            .filter_map(parse_line)
             .collect();
 
         Self {
@@ -56,24 +56,22 @@ impl Policy {
 
         for rule in &combined {
             match rule {
-                PolicyRule::Allow(a, pattern) if a == action => {
-                    if matches_pattern(target, pattern) {
+                PolicyRule::Allow(a, pattern) if a == action
+                    && matches_pattern(target, pattern) => {
                         debug!(
                             "{DIM}\u{2705}  {:?} for {:?} (matched rule: allow {}){RESET}",
                             action, target, pattern
                         );
                         return true;
                     }
-                }
-                PolicyRule::Deny(a, pattern) if a == action => {
-                    if matches_pattern(target, pattern) {
+                PolicyRule::Deny(a, pattern) if a == action
+                    && matches_pattern(target, pattern) => {
                         warn!(
                             "{RED}\u{274C}  {:?} for {:?} (matched rule: deny {}){RESET}",
                             action, target, pattern
                         );
                         return false;
                     }
-                }
                 _ => {}
             }
         }
@@ -83,7 +81,7 @@ impl Policy {
             let _ = stderr.write_all(format!("\u{2753}  Allow {:?} for {}? [y/N] ", action, target).as_bytes());
             let _ = stderr.flush();
             let mut answer = String::new();
-            if let Ok(_) = io::stdin().read_line(&mut answer) {
+            if io::stdin().read_line(&mut answer).is_ok() {
                 let trimmed = answer.trim().to_lowercase();
                 if trimmed == "y" || trimmed == "yes" {
                     return true;
@@ -162,9 +160,9 @@ pub fn resolve_policy_pattern(pattern: &str, relative_to: &Path) -> String {
 
     let (prefix, suffix) = split_at_wildcard(pattern);
 
-    let resolved = if prefix.starts_with('~') {
+    let resolved = if let Some(rest) = prefix.strip_prefix('~') {
         let home = home_dir();
-        let rest = &prefix[1..]; // strip ~
+        // strip ~
         if rest.is_empty() {
             // just "~"
             home.to_string_lossy().to_string()
@@ -256,11 +254,10 @@ fn matches_pattern(target: &str, pattern: &str) -> bool {
         }
 
         if sub_pattern.contains('*') {
-            if let Ok(matcher) = glob::Pattern::new(sub_pattern) {
-                if matcher.matches(target) {
+            if let Ok(matcher) = glob::Pattern::new(sub_pattern)
+                && matcher.matches(target) {
                     return true;
                 }
-            }
             continue;
         }
 

@@ -24,10 +24,8 @@ pub fn read_stdin() -> Option<String> {
     }
     let mut lines = Vec::new();
     let reader = io::BufReader::new(stdin.lock());
-    for line in reader.lines() {
-        if let Ok(line) = line {
-            lines.push(line);
-        }
+    for line in reader.lines().map_while(Result::ok) {
+        lines.push(line);
     }
     if lines.is_empty() {
         None

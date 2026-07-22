@@ -151,8 +151,8 @@ impl Tool for WebFetchTool {
             bar_title(&args.url),
             bar_line()
         );
-        Ok(process_output(&result, args.offset, args.limit)
-            .map_err(|e| WebError::Message(e))?)
+        process_output(&result, args.offset, args.limit)
+            .map_err(WebError::Message)
     }
 }
 
@@ -284,7 +284,7 @@ impl Tool for WebSearchTool {
             bar_title("search results"),
             bar_line()
         );
-        Ok(process_output(&result, args.offset, args.limit)
-            .map_err(|e| WebError::Message(e))?)
+        process_output(&result, args.offset, args.limit)
+            .map_err(WebError::Message)
     }
 }

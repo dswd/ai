@@ -32,6 +32,7 @@ pub fn truncate(s: &str, max_lines: usize, max_chars: usize) -> String {
 /// and `MAX_OUTPUT_CHARS` bytes. Appends a notice with totals if truncated.
 /// Also applies an optional per-call `max_lines` / `max_chars` if they are
 /// stricter than the global limits.
+#[allow(dead_code)]
 pub fn enforce_output_limits(
     s: &str,
     call_max_lines: Option<usize>,
@@ -77,6 +78,7 @@ pub fn enforce_output_limits(
 }
 
 /// Truncate a single line to `max_len` chars for display.
+#[allow(dead_code)]
 pub fn truncate_line(line: &str, max_len: usize) -> String {
     if line.len() <= max_len {
         line.to_string()

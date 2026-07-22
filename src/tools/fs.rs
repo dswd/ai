@@ -74,8 +74,8 @@ impl Tool for ReadFileTool {
             bar_title(&args.path),
             bar_line()
         );
-        Ok(process_output(&content, args.offset, args.limit)
-            .map_err(|e| ToolExecError::Message(e))?)
+        process_output(&content, args.offset, args.limit)
+            .map_err(ToolExecError::Message)
     }
 }
 
@@ -228,8 +228,8 @@ impl Tool for ListDirTool {
             bar_title(&args.path),
             bar_line()
         );
-        Ok(process_output(&result, args.offset, args.limit)
-            .map_err(|e| ToolExecError::Message(e))?)
+        process_output(&result, args.offset, args.limit)
+            .map_err(ToolExecError::Message)
     }
 }
 
