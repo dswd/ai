@@ -395,9 +395,7 @@ mod tests {
     fn test_home_expansion_in_policy() {
         let home = home_dir();
         let home_str = home.to_string_lossy();
-        let policy = Policy::parse(
-            "deny read ~/projects/secret/**\nallow read ~/projects/**"
-        );
+        let policy = Policy::parse("deny read ~/projects/secret/**\nallow read ~/projects/**");
         let allowed_path = format!("{home_str}/projects/src/main.rs");
         let denied_path = format!("{home_str}/projects/secret/key.txt");
         assert!(policy.is_allowed(&Action::Read, &allowed_path));
