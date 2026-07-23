@@ -69,9 +69,10 @@ impl Session {
             let entry = entry?;
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "json")
-                && let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                    names.push(name.to_string());
-                }
+                && let Some(name) = path.file_stem().and_then(|s| s.to_str())
+            {
+                names.push(name.to_string());
+            }
         }
         names.sort();
         Ok(names)

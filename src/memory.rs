@@ -15,8 +15,8 @@ pub struct Memory {
 impl Memory {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let entries = if path.exists() {
-            let content =
-                std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("reading memory file {}: {e}", path.display()))?;
+            let content = std::fs::read_to_string(path)
+                .map_err(|e| anyhow::anyhow!("reading memory file {}: {e}", path.display()))?;
             serde_json::from_str(&content)
                 .map_err(|e| anyhow::anyhow!("parsing memory file {}: {e}", path.display()))?
         } else {
@@ -53,7 +53,8 @@ impl Memory {
             }
             entries.insert(key_str.clone(), data);
             drop(entries);
-            self.save().map_err(|e| format!("failed to save memory: {e}"))?;
+            self.save()
+                .map_err(|e| format!("failed to save memory: {e}"))?;
             return Ok(key_str);
         }
     }
@@ -63,7 +64,8 @@ impl Memory {
         match entries.remove(key) {
             Some(_) => {
                 drop(entries);
-                self.save().map_err(|e| format!("failed to save memory: {e}"))?;
+                self.save()
+                    .map_err(|e| format!("failed to save memory: {e}"))?;
                 Ok(format!("Deleted memory entry '{key}'."))
             }
             None => Err(format!("No memory entry with key '{key}'.")),

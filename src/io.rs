@@ -1,6 +1,6 @@
+use rustyline::{Editor, history::DefaultHistory};
 use std::io;
 use std::sync::{Mutex, OnceLock};
-use rustyline::{Editor, history::DefaultHistory};
 
 fn editor() -> &'static Mutex<Editor<(), DefaultHistory>> {
     static EDITOR: OnceLock<Mutex<Editor<(), DefaultHistory>>> = OnceLock::new();
@@ -49,9 +49,7 @@ pub fn read_user_input(prompt: &str) -> Option<String> {
             Some(trimmed)
         }
         Err(rustyline::error::ReadlineError::Interrupted)
-        | Err(rustyline::error::ReadlineError::Eof) => {
-            Some("/exit".to_string())
-        }
+        | Err(rustyline::error::ReadlineError::Eof) => Some("/exit".to_string()),
         Err(_) => None,
     }
 }

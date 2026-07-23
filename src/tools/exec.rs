@@ -1,11 +1,11 @@
+use crate::util::{bar_line, bar_title};
 use ansi_color_constants::*;
-use log::{info, debug};
+use log::{debug, info};
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use crate::util::{bar_line, bar_title};
 
-use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output, fmt_offset_limit};
+use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::policy::{Action, Policy};
 use regex::Regex;
 
@@ -43,7 +43,11 @@ fn commands_in_string(command: &str) -> Vec<String> {
     re.split(command)
         .filter_map(|seg| {
             let word = seg.split_whitespace().next()?;
-            if word.is_empty() { None } else { Some(word.to_string()) }
+            if word.is_empty() {
+                None
+            } else {
+                Some(word.to_string())
+            }
         })
         .collect()
 }
@@ -64,10 +68,16 @@ impl Tool for ExecuteTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}🚀 execute {}{}{RESET}", args.command, fmt_offset_limit(args.offset, args.limit));
+        info!(
+            "{DIM}🚀 execute {}{}{RESET}",
+            args.command,
+            fmt_offset_limit(args.offset, args.limit)
+        );
         let commands = commands_in_string(&args.command);
         if commands.is_empty() {
-            return Err(ExecError::Message("no command found in execution string".to_string()));
+            return Err(ExecError::Message(
+                "no command found in execution string".to_string(),
+            ));
         }
         for cmd in &commands {
             if !self.policy.is_allowed(&Action::Execute, cmd) {
@@ -116,7 +126,6 @@ impl Tool for ExecuteTool {
             bar_title(&args.command),
             bar_line()
         );
-        process_output(&result, args.offset, args.limit)
-            .map_err(ExecError::Message)
+        process_output(&result, args.offset, args.limit).map_err(ExecError::Message)
     }
 }

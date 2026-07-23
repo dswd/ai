@@ -1,12 +1,12 @@
+use crate::util::{bar_line, bar_title};
 use ansi_color_constants::*;
-use log::{info, debug};
+use log::{debug, info};
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use crate::util::{bar_line, bar_title};
 
-use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output, fmt_offset_limit};
+use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::policy::{Action, Policy};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -59,7 +59,9 @@ impl Tool for SearchContentTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!(
             "{DIM}🔎 search for {:?} in {}{}{RESET}",
-            args.pattern, args.path, fmt_offset_limit(args.offset, args.limit)
+            args.pattern,
+            args.path,
+            fmt_offset_limit(args.offset, args.limit)
         );
         let root = PathBuf::from(&args.path);
         let canonical_root = root
@@ -128,8 +130,7 @@ impl Tool for SearchContentTool {
             bar_title("search results"),
             bar_line()
         );
-        process_output(&result, args.offset, args.limit)
-            .map_err(SearchError::Message)
+        process_output(&result, args.offset, args.limit).map_err(SearchError::Message)
     }
 }
 
@@ -203,10 +204,9 @@ fn walk_dir(
         let path = entry.path();
         let name = path.file_name().unwrap_or_default().to_string_lossy();
 
-        if name.starts_with('.')
-            && name != "." && name != ".." && name != ".cargo" {
-                continue;
-            }
+        if name.starts_with('.') && name != "." && name != ".." && name != ".cargo" {
+            continue;
+        }
 
         if name == "node_modules" || name == "target" || name == ".git" {
             continue;
@@ -293,7 +293,9 @@ impl Tool for FindFilesTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!(
             "{DIM}🔎 find {:?} in {}{}{RESET}",
-            args.pattern, args.path, fmt_offset_limit(args.offset, args.limit)
+            args.pattern,
+            args.path,
+            fmt_offset_limit(args.offset, args.limit)
         );
         let root = PathBuf::from(&args.path);
         let canonical_root = root
@@ -328,8 +330,7 @@ impl Tool for FindFilesTool {
         if results.is_empty() {
             let result = "No files found.".to_string();
             debug!("{DIM}  \u{2192} {}{RESET}", result);
-            return process_output(&result, args.offset, args.limit)
-                .map_err(SearchError::Message);
+            return process_output(&result, args.offset, args.limit).map_err(SearchError::Message);
         }
 
         results.sort();
@@ -346,7 +347,6 @@ impl Tool for FindFilesTool {
             bar_title("find files"),
             bar_line()
         );
-        process_output(&result, args.offset, args.limit)
-            .map_err(SearchError::Message)
+        process_output(&result, args.offset, args.limit).map_err(SearchError::Message)
     }
 }

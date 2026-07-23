@@ -143,11 +143,7 @@ pub struct Cli {
     )]
     pub thinking: Option<usize>,
 
-    #[arg(
-        short = 'l',
-        long = "list",
-        help = "List all saved sessions"
-    )]
+    #[arg(short = 'l', long = "list", help = "List all saved sessions")]
     pub list: bool,
 
     #[arg(

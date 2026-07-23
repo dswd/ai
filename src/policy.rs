@@ -57,29 +57,33 @@ impl Policy {
 
         for rule in &combined {
             match rule {
-                PolicyRule::Allow(a, pattern) if a == action
-                    && matches_pattern(&target_norm, pattern) => {
-                        debug!(
-                            "{DIM}\u{2705} {:?} for {:?} (matched rule: allow {}){RESET}",
-                            action, target_norm, pattern
-                        );
-                        return true;
-                    }
-                PolicyRule::Deny(a, pattern) if a == action
-                    && matches_pattern(&target_norm, pattern) => {
-                        warn!(
-                            "{RED}\u{274C} {:?} for {:?} (matched rule: deny {}){RESET}",
-                            action, target_norm, pattern
-                        );
-                        return false;
-                    }
+                PolicyRule::Allow(a, pattern)
+                    if a == action && matches_pattern(&target_norm, pattern) =>
+                {
+                    debug!(
+                        "{DIM}\u{2705} {:?} for {:?} (matched rule: allow {}){RESET}",
+                        action, target_norm, pattern
+                    );
+                    return true;
+                }
+                PolicyRule::Deny(a, pattern)
+                    if a == action && matches_pattern(&target_norm, pattern) =>
+                {
+                    warn!(
+                        "{RED}\u{274C} {:?} for {:?} (matched rule: deny {}){RESET}",
+                        action, target_norm, pattern
+                    );
+                    return false;
+                }
                 _ => {}
             }
         }
 
         if self.ask {
             let mut stderr = io::stderr().lock();
-            let _ = stderr.write_all(format!("\u{2753} Allow {:?} for {}? [y/N] ", action, target_norm).as_bytes());
+            let _ = stderr.write_all(
+                format!("\u{2753} Allow {:?} for {}? [y/N] ", action, target_norm).as_bytes(),
+            );
             let _ = stderr.flush();
             let mut answer = String::new();
             if io::stdin().read_line(&mut answer).is_ok() {
@@ -90,7 +94,10 @@ impl Policy {
             }
             false
         } else {
-            warn!("{RED}\u{274C} {:?} for {:?} (no matching rule){RESET}", action, target_norm);
+            warn!(
+                "{RED}\u{274C} {:?} for {:?} (no matching rule){RESET}",
+                action, target_norm
+            );
             false
         }
     }
@@ -154,7 +161,11 @@ fn normalize_path_segments(raw: &str) -> String {
             return normalize_path_separators(raw);
         }
         let has_root = raw.starts_with('/') || raw.len() >= 2 && raw.as_bytes()[1] == b':';
-        return if has_root { "/".to_string() } else { ".".to_string() };
+        return if has_root {
+            "/".to_string()
+        } else {
+            ".".to_string()
+        };
     }
     let mut result = String::with_capacity(normalized.len());
     let has_leading_slash = normalized.starts_with('/');
@@ -275,16 +286,15 @@ fn matches_pattern(target: &str, pattern: &str) -> bool {
 
         if pat_norm.contains('*') {
             if let Ok(matcher) = glob::Pattern::new(&pat_norm)
-                && matcher.matches(&target_norm) {
-                    return true;
-                }
+                && matcher.matches(&target_norm)
+            {
+                return true;
+            }
             continue;
         }
 
         // Path-segment-aware matching: /tmp matches /tmp or /tmp/... but not /tmpfile
-        if target_norm == pat_norm ||
-           target_norm.starts_with(&format!("{pat_norm}/"))
-        {
+        if target_norm == pat_norm || target_norm.starts_with(&format!("{pat_norm}/")) {
             return true;
         }
     }
@@ -385,9 +395,9 @@ mod tests {
     fn test_home_expansion_in_policy() {
         let home = home_dir();
         let home_str = home.to_string_lossy();
-        let policy = Policy::parse(&format!(
+        let policy = Policy::parse(
             "deny read ~/projects/secret/**\nallow read ~/projects/**"
-        ));
+        );
         let allowed_path = format!("{home_str}/projects/src/main.rs");
         let denied_path = format!("{home_str}/projects/secret/key.txt");
         assert!(policy.is_allowed(&Action::Read, &allowed_path));

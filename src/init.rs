@@ -29,35 +29,20 @@ fn default_models(provider: &str) -> Vec<String> {
             "claude-3-5-sonnet-20241022".into(),
             "claude-3-5-haiku-20241022".into(),
         ],
-        "ollama" => vec![
-            "llama3.2".into(),
-            "qwen3".into(),
-            "deepseek-r1".into(),
-        ],
+        "ollama" => vec!["llama3.2".into(), "qwen3".into(), "deepseek-r1".into()],
         "groq" => vec![
             "llama-3.3-70b-versatile".into(),
             "mixtral-8x7b-32768".into(),
         ],
-        "deepseek" => vec![
-            "deepseek-chat".into(),
-            "deepseek-reasoner".into(),
-        ],
-        "google" => vec![
-            "gemini-2.5-flash".into(),
-            "gemini-2.5-pro".into(),
-        ],
-        "mistral" => vec![
-            "mistral-large-latest".into(),
-            "mistral-small-latest".into(),
-        ],
+        "deepseek" => vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
+        "google" => vec!["gemini-2.5-flash".into(), "gemini-2.5-pro".into()],
+        "mistral" => vec!["mistral-large-latest".into(), "mistral-small-latest".into()],
         "openrouter" => vec![
             "openai/gpt-4o".into(),
             "openai/gpt-4.1".into(),
             "anthropic/claude-sonnet-4".into(),
         ],
-        "xai" => vec![
-            "grok-3".into(),
-        ],
+        "xai" => vec!["grok-3".into()],
         _ => vec![],
     }
 }
@@ -123,7 +108,11 @@ pub fn run(target_path: Option<String>) -> anyhow::Result<()> {
         .allow_empty(true)
         .default(String::new())
         .interact_text()?;
-    let api_base = if api_base.is_empty() { None } else { Some(api_base) };
+    let api_base = if api_base.is_empty() {
+        None
+    } else {
+        Some(api_base)
+    };
 
     // Step 4: Model
     let mut models = default_models(&provider);
@@ -154,7 +143,11 @@ pub fn run(target_path: Option<String>) -> anyhow::Result<()> {
     println!("  ─────────────────────────────");
     println!("  Provider:      {provider}");
     if let Some(ref key) = api_key {
-        let display = if key.starts_with("env:") { key.to_string() } else { "****".to_string() };
+        let display = if key.starts_with("env:") {
+            key.to_string()
+        } else {
+            "****".to_string()
+        };
         println!("  API key:       {display}");
     } else {
         println!("  API key:       (none)");

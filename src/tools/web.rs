@@ -1,13 +1,13 @@
+use crate::util::{bar_line, bar_title};
 use ansi_color_constants::*;
-use log::{info, debug};
+use log::{debug, info};
+use regex::Regex;
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use regex::Regex;
-use crate::util::{bar_line, bar_title};
 
-use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output, fmt_offset_limit};
+use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::policy::{Action, Policy};
 
 #[derive(Debug, thiserror::Error)]
@@ -60,7 +60,11 @@ impl Tool for WebFetchTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}🌐 fetch {}{}{RESET}", args.url, fmt_offset_limit(args.offset, args.limit));
+        info!(
+            "{DIM}🌐 fetch {}{}{RESET}",
+            args.url,
+            fmt_offset_limit(args.offset, args.limit)
+        );
         if args.url.is_empty() {
             return Err(WebError::Message("URL is required".to_string()));
         }
@@ -151,8 +155,7 @@ impl Tool for WebFetchTool {
             bar_title(&args.url),
             bar_line()
         );
-        process_output(&result, args.offset, args.limit)
-            .map_err(WebError::Message)
+        process_output(&result, args.offset, args.limit).map_err(WebError::Message)
     }
 }
 
@@ -196,7 +199,11 @@ impl Tool for WebSearchTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}🌐 search web for {:?}{}{RESET}", args.query, fmt_offset_limit(args.offset, args.limit));
+        info!(
+            "{DIM}🌐 search web for {:?}{}{RESET}",
+            args.query,
+            fmt_offset_limit(args.offset, args.limit)
+        );
         if args.query.is_empty() {
             return Err(WebError::Message("query is required".to_string()));
         }
@@ -288,7 +295,6 @@ impl Tool for WebSearchTool {
             bar_title("search results"),
             bar_line()
         );
-        process_output(&result, args.offset, args.limit)
-            .map_err(WebError::Message)
+        process_output(&result, args.offset, args.limit).map_err(WebError::Message)
     }
 }

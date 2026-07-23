@@ -1,9 +1,9 @@
+use log::{error, info};
 use rmcp::{
     model::{ClientCapabilities, ClientInfo, Implementation},
     service::{ServerSink, ServiceExt},
     transport::streamable_http_client::StreamableHttpClientTransport,
 };
-use log::{info, error};
 
 pub struct ToolSet {
     #[allow(dead_code)]

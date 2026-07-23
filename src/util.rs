@@ -9,5 +9,5 @@ pub fn bar_line() -> String {
 }
 
 pub fn bar_title(title: &str) -> String {
-    format!("{} {} {}", bar(10), title, bar(80 -12 -title.len()))
+    format!("{} {} {}", bar(10), title, bar(80 - 12 - title.len()))
 }

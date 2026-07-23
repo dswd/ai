@@ -1,5 +1,5 @@
 use ansi_color_constants::*;
-use log::{info, debug};
+use log::{debug, info};
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

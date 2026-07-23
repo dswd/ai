@@ -4,15 +4,18 @@ mod init;
 mod io;
 mod memory;
 mod output;
-mod tool;
 mod policy;
 mod session;
+mod tool;
 mod tools;
 mod util;
 
+use ansi_color_constants::*;
 use clap::Parser;
 use cli::Cli;
 use config::Config;
+use log::{Level, LevelFilter};
+use log::{error, info, set_max_level};
 use policy::{Action, Policy, PolicyRule};
 use rig_core::{
     agent::AgentBuilder,
@@ -24,16 +27,11 @@ use rig_core::{
     tool::server::ToolServer,
 };
 use session::Session;
-use log::{error, info, set_max_level};
-use log::{Level, LevelFilter};
-use ansi_color_constants::*;
 
+use futures::StreamExt;
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Instant;
-use futures::StreamExt;
-
-
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -158,37 +156,63 @@ async fn main() -> anyhow::Result<()> {
         "openai" => {
             let client = openai_client(&config)?;
             let model = client.completion_model(&model_name);
-            let agent = build_agent(model, &system_prompt, &policy, max_tokens, max_turns, tool_sets, thinking, memory.as_ref().map(Arc::clone));
+            let agent = build_agent(
+                model,
+                &system_prompt,
+                &policy,
+                max_tokens,
+                max_turns,
+                tool_sets,
+                thinking,
+                memory.as_ref().map(Arc::clone),
+            );
 
             if is_interactive {
-                run_interactive(agent, &mut session, &session_dir, prompt_text, config.context_window).await?;
+                run_interactive(
+                    agent,
+                    &mut session,
+                    &session_dir,
+                    prompt_text,
+                    config.context_window,
+                )
+                .await?;
             } else if let Some(text) = prompt_text {
                 run_oneshot(agent, &text).await?;
             } else {
-                anyhow::bail!(
-                    "No prompt provided. Pass a prompt argument or pipe text to stdin."
-                );
+                anyhow::bail!("No prompt provided. Pass a prompt argument or pipe text to stdin.");
             }
         }
         "anthropic" => {
             let client = anthropic_client(&config)?;
             let model = client.completion_model(&model_name);
-            let agent = build_agent(model, &system_prompt, &policy, max_tokens, max_turns, tool_sets, thinking, memory.as_ref().map(Arc::clone));
+            let agent = build_agent(
+                model,
+                &system_prompt,
+                &policy,
+                max_tokens,
+                max_turns,
+                tool_sets,
+                thinking,
+                memory.as_ref().map(Arc::clone),
+            );
 
             if is_interactive {
-                run_interactive(agent, &mut session, &session_dir, prompt_text, config.context_window).await?;
+                run_interactive(
+                    agent,
+                    &mut session,
+                    &session_dir,
+                    prompt_text,
+                    config.context_window,
+                )
+                .await?;
             } else if let Some(text) = prompt_text {
                 run_oneshot(agent, &text).await?;
             } else {
-                anyhow::bail!(
-                    "No prompt provided. Pass a prompt argument or pipe text to stdin."
-                );
+                anyhow::bail!("No prompt provided. Pass a prompt argument or pipe text to stdin.");
             }
         }
         _ => {
-            anyhow::bail!(
-                "Unsupported provider: {provider}. Supported: openai, anthropic"
-            );
+            anyhow::bail!("Unsupported provider: {provider}. Supported: openai, anthropic");
         }
     }
 
@@ -307,11 +331,13 @@ fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> {
     };
 
     for path in &cli.read {
-        let resolved = policy::resolve_policy_pattern(path, &std::env::current_dir().unwrap_or_default());
+        let resolved =
+            policy::resolve_policy_pattern(path, &std::env::current_dir().unwrap_or_default());
         policy.add_cli_rule(PolicyRule::Allow(Action::Read, resolved));
     }
     for path in &cli.write {
-        let resolved = policy::resolve_policy_pattern(path, &std::env::current_dir().unwrap_or_default());
+        let resolved =
+            policy::resolve_policy_pattern(path, &std::env::current_dir().unwrap_or_default());
         policy.add_cli_rule(PolicyRule::Allow(Action::Read, resolved.clone()));
         policy.add_cli_rule(PolicyRule::Allow(Action::Write, resolved));
     }
@@ -411,8 +437,7 @@ fn build_agent<M: CompletionModel + 'static>(
     }
 
     if can_exec {
-        server = server
-            .tool(tools::exec::ExecuteTool::new(policy.clone()));
+        server = server.tool(tools::exec::ExecuteTool::new(policy.clone()));
     }
 
     if can_web_fetch {
@@ -459,20 +484,19 @@ fn build_agent<M: CompletionModel + 'static>(
     }
 }
 
-async fn stream_response<R>(
-    stream: &mut StreamingResult<R>,
-) -> anyhow::Result<PromptResponse> {
+async fn stream_response<R>(stream: &mut StreamingResult<R>) -> anyhow::Result<PromptResponse> {
     while let Some(item) = stream.next().await {
         match item {
-            Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::Text(text),
-            )) => {
+            Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text))) => {
                 output::stdout_push(&text.text);
             }
-            Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::Reasoning(reasoning),
-            )) if !is_quiet() => {
-                output::stderr_line(&format!("{ITALICS}{BLUE}{}{RESET}", reasoning.display_text()));
+            Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(
+                reasoning,
+            ))) if !is_quiet() => {
+                output::stderr_line(&format!(
+                    "{ITALICS}{BLUE}{}{RESET}",
+                    reasoning.display_text()
+                ));
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(
                 StreamedAssistantContent::ReasoningDelta { reasoning, .. },
@@ -522,7 +546,11 @@ async fn run_interactive<M: CompletionModel + 'static>(
 
     if chat_history.len() >= 2 {
         let last_user = session.messages.iter().rev().find(|m| m.role == "user");
-        let last_assistant = session.messages.iter().rev().find(|m| m.role == "assistant");
+        let last_assistant = session
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.role == "assistant");
         if let Some(msg) = last_user {
             output::stderr_line(&format!("> {}", msg.content));
         }
@@ -543,7 +571,8 @@ async fn run_interactive<M: CompletionModel + 'static>(
             let mut stream = agent.stream_chat(&text, hist).await;
             let response = stream_response(&mut stream).await?;
             Ok::<_, anyhow::Error>(response)
-        }.await;
+        }
+        .await;
         match result {
             Ok(response) => {
                 last_input_tokens = response.usage.input_tokens;
@@ -592,7 +621,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
 
                     let compact_result = async {
                         let mut hist = chat_history.clone();
-                        
+
                         agent
                             .chat("Summarize this conversation concisely, preserving all important decisions, code changes, and user preferences. Return only the summary, no commentary.", &mut hist)
                             .await
@@ -602,7 +631,8 @@ async fn run_interactive<M: CompletionModel + 'static>(
                     match compact_result {
                         Ok(summary) => {
                             let est_tokens = summary.len() as u64 / 4;
-                            chat_history = vec![Message::user(format!("[Conversation summary: {summary}]"))];
+                            chat_history =
+                                vec![Message::user(format!("[Conversation summary: {summary}]"))];
                             session.messages.clear();
                             session.add_message("system", &summary);
                             last_input_tokens = est_tokens;
@@ -643,7 +673,8 @@ async fn run_interactive<M: CompletionModel + 'static>(
                     let mut stream = agent.stream_chat(trimmed, hist).await;
                     let response = stream_response(&mut stream).await?;
                     Ok::<_, anyhow::Error>(response)
-                }.await;
+                }
+                .await;
                 match result {
                     Ok(response) => {
                         last_input_tokens = response.usage.input_tokens;
@@ -680,7 +711,11 @@ fn format_interactive_prompt(last_input_tokens: u64, context_window: Option<usiz
     match context_window {
         Some(window) if window > 0 && last_input_tokens > 0 => {
             let percent = (last_input_tokens as f64 / window as f64) * 100.0;
-            let warning = if percent >= 75.0 { "\u{26A0}\u{FE0F} " } else { "" };
+            let warning = if percent >= 75.0 {
+                "\u{26A0}\u{FE0F} "
+            } else {
+                ""
+            };
             format!(
                 "{warning}[{inp}/{win}] > ",
                 inp = fmt_tok(last_input_tokens),
@@ -693,7 +728,9 @@ fn format_interactive_prompt(last_input_tokens: u64, context_window: Option<usiz
 
 fn current_time() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let dur = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     let total_secs = dur.as_secs();
     let day_secs = total_secs % 86400;
     let h = day_secs / 3600;
@@ -708,7 +745,9 @@ fn days_to_date(days: u64) -> (u64, u64, u64) {
     let mut y = 1970i64;
     loop {
         let diy: i64 = if leap(y) { 366 } else { 365 };
-        if d < diy { break; }
+        if d < diy {
+            break;
+        }
         d -= diy;
         y += 1;
     }
@@ -717,7 +756,9 @@ fn days_to_date(days: u64) -> (u64, u64, u64) {
     let mut m = 0u64;
     for (i, &days_in_month) in md.iter().enumerate() {
         let limit = if i == 1 { feb } else { days_in_month };
-        if d < limit as i64 { break; }
+        if d < limit as i64 {
+            break;
+        }
         d -= limit as i64;
         m = i as u64 + 1;
     }
@@ -734,7 +775,8 @@ fn accumulate(total: &Usage, usage: &Usage) -> Usage {
         output_tokens: total.output_tokens + usage.output_tokens,
         total_tokens: total.total_tokens + usage.total_tokens,
         cached_input_tokens: total.cached_input_tokens + usage.cached_input_tokens,
-        cache_creation_input_tokens: total.cache_creation_input_tokens + usage.cache_creation_input_tokens,
+        cache_creation_input_tokens: total.cache_creation_input_tokens
+            + usage.cache_creation_input_tokens,
         tool_use_prompt_tokens: total.tool_use_prompt_tokens + usage.tool_use_prompt_tokens,
         reasoning_tokens: total.reasoning_tokens + usage.reasoning_tokens,
     }

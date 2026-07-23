@@ -1,12 +1,12 @@
+use crate::util::{bar_line, bar_title};
 use ansi_color_constants::*;
 use log::{debug, info};
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use crate::util::{bar_line, bar_title};
 
-use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, truncate, process_output, fmt_offset_limit};
+use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::policy::{Action, Policy};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -52,7 +52,11 @@ impl Tool for ReadFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}📄 read file {}{}{RESET}", args.path, fmt_offset_limit(args.offset, args.limit));
+        info!(
+            "{DIM}📄 read file {}{}{RESET}",
+            args.path,
+            fmt_offset_limit(args.offset, args.limit)
+        );
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -74,8 +78,7 @@ impl Tool for ReadFileTool {
             bar_title(&args.path),
             bar_line()
         );
-        process_output(&content, args.offset, args.limit)
-            .map_err(ToolExecError::Message)
+        process_output(&content, args.offset, args.limit).map_err(ToolExecError::Message)
     }
 }
 
@@ -189,7 +192,11 @@ impl Tool for ListDirTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}📂 list dir {}{}{RESET}", args.path, fmt_offset_limit(args.offset, args.limit));
+        info!(
+            "{DIM}📂 list dir {}{}{RESET}",
+            args.path,
+            fmt_offset_limit(args.offset, args.limit)
+        );
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -228,8 +235,7 @@ impl Tool for ListDirTool {
             bar_title(&args.path),
             bar_line()
         );
-        process_output(&result, args.offset, args.limit)
-            .map_err(ToolExecError::Message)
+        process_output(&result, args.offset, args.limit).map_err(ToolExecError::Message)
     }
 }
 
