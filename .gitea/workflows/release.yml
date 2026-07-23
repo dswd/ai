@@ -4,9 +4,95 @@ on:
   push:
     tags: ['v*']
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
+  build:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            binary: ai-linux-amd64
+            native: true
+
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            binary: ai-linux-arm64
+            native: false
+            cross-packages: gcc-aarch64-linux-gnu
+            linker: aarch64-linux-gnu-gcc
+
+          - target: x86_64-pc-windows-gnu
+            os: ubuntu-latest
+            binary: ai-windows-amd64.exe
+            native: false
+            cross-packages: mingw-w64
+            linker: x86_64-w64-mingw32-gcc
+
+          - target: x86_64-apple-darwin
+            os: ubuntu-latest
+            binary: ai-macos-intel
+            native: false
+            skip: true
+
+          - target: aarch64-apple-darwin
+            os: ubuntu-latest
+            binary: ai-macos-silicon
+            native: false
+            skip: true
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compile toolchain
+        if: ${{ !matrix.native && !matrix.skip }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ${{ matrix.cross-packages }}
+
+      - name: Build (native)
+        if: ${{ matrix.native }}
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build (cross)
+        if: ${{ !matrix.native && !matrix.skip }}
+        run: |
+          case "${{ matrix.target }}" in
+            aarch64-unknown-linux-gnu)
+              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="${{ matrix.linker }}"
+              ;;
+            x86_64-pc-windows-gnu)
+              export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${{ matrix.linker }}"
+              ;;
+          esac
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Rename artifact
+        if: ${{ !matrix.skip }}
+        run: |
+          exe=${{ contains(matrix.binary, '.exe') && '.exe' || '' }}
+          cp "target/${{ matrix.target }}/release/ai${exe}" "${{ matrix.binary }}"
+
+      - uses: actions/upload-artifact@v3
+        if: ${{ !matrix.skip }}
+        with:
+          name: ${{ matrix.binary }}
+          path: ${{ matrix.binary }}
+          retention-days: 90
+
   release:
     name: Create Release
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -15,28 +101,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set tag variables
-        run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          echo "TAG=$TAG" >> $GITHUB_ENV
+      - name: Set tag
+        run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
-      - name: Wait for build artifacts
-        run: |
-          for i in $(seq 1 30); do
-            echo "Polling for artifacts (attempt $i/30)..."
-            if curl -sf \
-              "$GITHUB_SERVER_URL/api/v1/repos/$GITHUB_REPOSITORY/actions/artifacts" \
-              -H "Authorization: token $GITHUB_TOKEN" | grep -q '"id"'; then
-              echo "Artifacts found."
-              break
-            fi
-            sleep 10
-          done
-
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v3
         with:
           path: artifacts
-          pattern: 'ai-*'
 
       - name: Generate changelog
         run: |
@@ -72,12 +142,14 @@ jobs:
 
       - name: Upload assets to release
         run: |
-          for file in $(find artifacts -type f); do
-            NAME=$(basename "$file")
-            echo "Uploading $NAME..."
-            curl -fsS -X POST \
-              "$GITHUB_SERVER_URL/api/v1/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$NAME" \
-              -H "Authorization: token $GITHUB_TOKEN" \
-              -H "Content-Type: application/octet-stream" \
-              --data-binary "@$file"
+          for dir in artifacts/*/; do
+            find "$dir" -maxdepth 1 -type f | while read -r file; do
+              NAME=$(basename "$file")
+              echo "Uploading $NAME..."
+              curl -fsS -X POST \
+                "$GITHUB_SERVER_URL/api/v1/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$NAME" \
+                -H "Authorization: token $GITHUB_TOKEN" \
+                -H "Content-Type: application/octet-stream" \
+                --data-binary "@$file"
+            done
           done
