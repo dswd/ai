@@ -124,9 +124,9 @@ jobs:
           if [ -z "$BODY" ] || [ "$BODY" = '""' ] || [ "$BODY" = '"\n"' ]; then
             BODY='"Release '"$TAG"'"'
           fi
-
+          echo "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases"
           curl -fsS -X POST \
-            "$GITHUB_SERVER_URL/api/v1/repos/$GITHUB_REPOSITORY/releases" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases" \
             -H "Authorization: token $GITHUB_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{
@@ -146,8 +146,9 @@ jobs:
             find "$dir" -maxdepth 1 -type f | while read -r file; do
               NAME=$(basename "$file")
               echo "Uploading $NAME..."
+              echo "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$NAME"
               curl -fsS -X POST \
-                "$GITHUB_SERVER_URL/api/v1/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$NAME" \
+                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$NAME" \
                 -H "Authorization: token $GITHUB_TOKEN" \
                 -H "Content-Type: application/octet-stream" \
                 --data-binary "@$file"
