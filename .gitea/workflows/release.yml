@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set tag variables
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          echo "TAG=$TAG" >> $GITHUB_ENV
+
+      - name: Wait for build artifacts
+        run: |
+          for i in $(seq 1 30); do
+            echo "Polling for artifacts (attempt $i/30)..."
+            if curl -sf \
+              "$GITHUB_SERVER_URL/api/v1/repos/$GITHUB_REPOSITORY/actions/artifacts" \
+              -H "Authorization: token $GITHUB_TOKEN" | grep -q '"id"'; then
+              echo "Artifacts found."
+              break
+            fi
+            sleep 10
+          done
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: 'ai-*'
+
+      - name: Generate changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            git log --oneline --no-merges "$PREV_TAG..HEAD" > changelog.txt
+          else
+            git log --oneline --no-merges > changelog.txt
+          fi
+          cat changelog.txt
+
+      - name: Create Gitea Release
+        run: |
+          BODY=$(cat changelog.txt | jq -Rs .)
+          if [ -z "$BODY" ] || [ "$BODY" = '""' ] || [ "$BODY" = '"\n"' ]; then
+            BODY='"Release '"$TAG"'"'
+          fi
+
+          curl -fsS -X POST \
+            "$GITHUB_SERVER_URL/api/v1/repos/$GITHUB_REPOSITORY/releases" \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"tag_name\": \"$TAG\",
+              \"name\": \"$TAG\",
+              \"body\": ${BODY},
+              \"draft\": false,
+              \"prerelease\": ${{ contains(env.TAG, '-rc') || contains(env.TAG, '-beta') || contains(env.TAG, '-alpha') }}
+            }" > release.json
+
+          cat release.json
+          echo "RELEASE_ID=$(jq -r '.id' release.json)" >> $GITHUB_ENV
+
+      - name: Upload assets to release
+        run: |
+          for file in $(find artifacts -type f); do
+            NAME=$(basename "$file")
+            echo "Uploading $NAME..."
+            curl -fsS -X POST \
+              "$GITHUB_SERVER_URL/api/v1/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$NAME" \
+              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$file"
+          done
