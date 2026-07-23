@@ -52,23 +52,24 @@ impl Policy {
     }
 
     pub fn is_allowed(&self, action: &Action, target: &str) -> bool {
+        let target_norm = normalize_path_separators(target);
         let combined: Vec<&PolicyRule> = self.cli_rules.iter().chain(self.rules.iter()).collect();
 
         for rule in &combined {
             match rule {
                 PolicyRule::Allow(a, pattern) if a == action
-                    && matches_pattern(target, pattern) => {
+                    && matches_pattern(&target_norm, pattern) => {
                         debug!(
                             "{DIM}\u{2705} {:?} for {:?} (matched rule: allow {}){RESET}",
-                            action, target, pattern
+                            action, target_norm, pattern
                         );
                         return true;
                     }
                 PolicyRule::Deny(a, pattern) if a == action
-                    && matches_pattern(target, pattern) => {
+                    && matches_pattern(&target_norm, pattern) => {
                         warn!(
                             "{RED}\u{274C} {:?} for {:?} (matched rule: deny {}){RESET}",
-                            action, target, pattern
+                            action, target_norm, pattern
                         );
                         return false;
                     }
@@ -78,7 +79,7 @@ impl Policy {
 
         if self.ask {
             let mut stderr = io::stderr().lock();
-            let _ = stderr.write_all(format!("\u{2753} Allow {:?} for {}? [y/N] ", action, target).as_bytes());
+            let _ = stderr.write_all(format!("\u{2753} Allow {:?} for {}? [y/N] ", action, target_norm).as_bytes());
             let _ = stderr.flush();
             let mut answer = String::new();
             if io::stdin().read_line(&mut answer).is_ok() {
@@ -89,7 +90,7 @@ impl Policy {
             }
             false
         } else {
-            warn!("{RED}\u{274C} {:?} for {:?} (no matching rule){RESET}", action, target);
+            warn!("{RED}\u{274C} {:?} for {:?} (no matching rule){RESET}", action, target_norm);
             false
         }
     }
@@ -126,8 +127,17 @@ fn home_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
+fn normalize_path_separators(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        out.push(if ch == '\\' { '/' } else { ch });
+    }
+    out
+}
+
 fn normalize_path_segments(raw: &str) -> String {
-    let segments: Vec<&str> = raw.split('/').filter(|s| !s.is_empty()).collect();
+    let normalized = normalize_path_separators(raw);
+    let segments: Vec<&str> = normalized.split('/').filter(|s| !s.is_empty()).collect();
     let mut out: Vec<&str> = Vec::new();
     for seg in segments {
         if seg == "." {
@@ -140,12 +150,20 @@ fn normalize_path_segments(raw: &str) -> String {
         out.push(seg);
     }
     if out.is_empty() {
-        return "/".to_string();
+        if raw.starts_with("\\\\?\\") || raw.starts_with("//?/") {
+            return normalize_path_separators(raw);
+        }
+        let has_root = raw.starts_with('/') || raw.len() >= 2 && raw.as_bytes()[1] == b':';
+        return if has_root { "/".to_string() } else { ".".to_string() };
     }
-    let mut result = String::with_capacity(raw.len());
-    // preserve leading slash
-    if raw.starts_with('/') {
-        result.push('/');
+    let mut result = String::with_capacity(normalized.len());
+    let has_leading_slash = normalized.starts_with('/');
+    if has_leading_slash || (normalized.len() >= 2 && normalized.as_bytes()[1] == b':') {
+        if !has_leading_slash {
+            result.push_str(&normalized[..2]);
+        } else {
+            result.push('/');
+        }
     }
     result.push_str(&out.join("/"));
     result
@@ -158,31 +176,32 @@ pub fn resolve_policy_pattern(pattern: &str, relative_to: &Path) -> String {
         return pattern.to_string();
     }
 
-    let (prefix, suffix) = split_at_wildcard(pattern);
+    let pattern = normalize_path_separators(pattern);
+
+    let (prefix, suffix) = split_at_wildcard(&pattern);
 
     let resolved = if let Some(rest) = prefix.strip_prefix('~') {
         let home = home_dir();
-        // strip ~
+        let home_str = normalize_path_separators(&home.to_string_lossy());
         if rest.is_empty() {
-            // just "~"
-            home.to_string_lossy().to_string()
+            home_str
         } else if rest.starts_with('/') {
-            // "~/path"
-            format!("{}{}", home.to_string_lossy(), rest)
+            format!("{}{}", home_str, rest)
         } else {
-            // "~otheruser" – not expanded
             pattern.to_string()
         }
     } else if prefix.starts_with('/') {
         prefix.to_string()
+    } else if prefix.len() >= 2 && prefix.as_bytes()[1] == b':' {
+        prefix.to_string()
     } else {
-        // relative
-        let base = if relative_to.to_string_lossy().is_empty() {
-            PathBuf::from(".")
+        let relative_str = normalize_path_separators(&relative_to.to_string_lossy());
+        let base = if relative_str.is_empty() {
+            String::from(".")
         } else {
-            relative_to.to_path_buf()
+            relative_str
         };
-        base.join(&prefix).to_string_lossy().to_string()
+        format!("{}/{}", base, prefix)
     };
 
     let resolved = normalize_path_segments(&resolved);
@@ -247,23 +266,26 @@ fn matches_pattern(target: &str, pattern: &str) -> bool {
         return true;
     }
 
+    let target_norm = normalize_path_separators(target);
+
     for sub_pattern in pattern.split(',') {
         let sub_pattern = sub_pattern.trim();
         if sub_pattern.is_empty() {
             continue;
         }
+        let pat_norm = normalize_path_separators(sub_pattern);
 
-        if sub_pattern.contains('*') {
-            if let Ok(matcher) = glob::Pattern::new(sub_pattern)
-                && matcher.matches(target) {
+        if pat_norm.contains('*') {
+            if let Ok(matcher) = glob::Pattern::new(&pat_norm)
+                && matcher.matches(&target_norm) {
                     return true;
                 }
             continue;
         }
 
         // Path-segment-aware matching: /tmp matches /tmp or /tmp/... but not /tmpfile
-        if target == sub_pattern ||
-           target.starts_with(&format!("{sub_pattern}/"))
+        if target_norm == pat_norm ||
+           target_norm.starts_with(&format!("{pat_norm}/"))
         {
             return true;
         }
