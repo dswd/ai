@@ -190,9 +190,7 @@ pub fn resolve_policy_pattern(pattern: &str, relative_to: &Path) -> String {
         } else {
             pattern.to_string()
         }
-    } else if prefix.starts_with('/') {
-        prefix.to_string()
-    } else if prefix.len() >= 2 && prefix.as_bytes()[1] == b':' {
+    } else if prefix.starts_with('/') || prefix.len() >= 2 && prefix.as_bytes()[1] == b':' {
         prefix.to_string()
     } else {
         let relative_str = normalize_path_separators(&relative_to.to_string_lossy());

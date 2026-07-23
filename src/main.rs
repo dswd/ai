@@ -412,9 +412,7 @@ fn build_agent<M: CompletionModel + 'static>(
 
     if can_exec {
         server = server
-            .tool(tools::exec::ExecuteTool::new(policy.clone()))
-            .tool(tools::exec::GitDiffTool::new(policy.clone()))
-            .tool(tools::exec::GitLogTool::new(policy.clone()));
+            .tool(tools::exec::ExecuteTool::new(policy.clone()));
     }
 
     if can_web_fetch {

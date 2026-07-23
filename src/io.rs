@@ -22,16 +22,10 @@ pub async fn read_stdin_async() -> Option<String> {
     if std::io::IsTerminal::is_terminal(&stdin) {
         return None;
     }
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    std::thread::spawn(move || {
-        use std::io::Read;
-        let mut buffer = Vec::new();
-        let mut stdin = io::stdin().lock();
-        let _ = stdin.read_to_end(&mut buffer);
-        let _ = tx.send(buffer);
-    });
-    match tokio::time::timeout(std::time::Duration::from_secs(2), rx).await {
-        Ok(Ok(buffer)) if !buffer.is_empty() => {
+    use tokio::io::AsyncReadExt;
+    let mut buffer = Vec::new();
+    match tokio::io::stdin().read_to_end(&mut buffer).await {
+        Ok(_) if !buffer.is_empty() => {
             let text = String::from_utf8_lossy(&buffer).trim().to_string();
             if text.is_empty() { None } else { Some(text) }
         }

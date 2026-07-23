@@ -38,6 +38,7 @@ tokio = { version = "1.53.1", features = [
     "sync",
     "time",
     "io-util",
+    "io-std",
 ] }
 urlencoding = "2"
 ansi_color_constants = "4.0.0"
