@@ -17,7 +17,7 @@ pub struct Cli {
     #[arg(help = "Prompt text (if absent, read from stdin)")]
     pub prompt: Vec<String>,
 
-    #[arg(long = "system", help = "Set the system prompt")]
+    #[arg(long = "system", help = "Set the system prompt", value_name = "PROMPT", require_equals = true)]
     pub system: Option<String>,
 
     #[arg(
@@ -26,7 +26,8 @@ pub struct Cli {
         help = "Start an interactive session (or continue one given NAME), implies -i",
         num_args = 0..=1,
         value_name = "NAME",
-        default_missing_value = ""
+        default_missing_value = "",
+        require_equals = true,
     )]
     pub session: Option<String>,
 
@@ -36,7 +37,8 @@ pub struct Cli {
         help = "Enable persistent memory with optional FILE",
         num_args = 0..=1,
         value_name = "FILE",
-        default_missing_value = ""
+        default_missing_value = "",
+        require_equals = true,
     )]
     pub memory: Option<String>,
 
@@ -44,7 +46,8 @@ pub struct Cli {
         short = 'c',
         long = "config",
         help = "Load configuration from FILE",
-        value_name = "FILE"
+        value_name = "FILE",
+        require_equals = true,
     )]
     pub config: Option<PathBuf>,
 
@@ -52,7 +55,8 @@ pub struct Cli {
         short = 'r',
         long = "read",
         help = "Allow read-only access to PATH",
-        value_name = "PATH"
+        value_name = "PATH",
+        require_equals = true,
     )]
     pub read: Vec<String>,
 
@@ -60,7 +64,8 @@ pub struct Cli {
         short = 'w',
         long = "write",
         help = "Allow read/write access to PATH",
-        value_name = "PATH"
+        value_name = "PATH",
+        require_equals = true,
     )]
     pub write: Vec<String>,
 
@@ -68,7 +73,8 @@ pub struct Cli {
         short = 'x',
         long = "execute",
         help = "Allow execution of PATTERN",
-        value_name = "PATTERN"
+        value_name = "PATTERN",
+        require_equals = true,
     )]
     pub execute: Vec<String>,
 
@@ -78,14 +84,16 @@ pub struct Cli {
     #[arg(
         long = "web-fetch",
         help = "Allow web fetch for matching URL pattern",
-        value_name = "PATTERN"
+        value_name = "PATTERN",
+        require_equals = true,
     )]
     pub web_fetch: Vec<String>,
 
     #[arg(
         long = "web-search",
         help = "Allow web search with matching query pattern",
-        value_name = "PATTERN"
+        value_name = "PATTERN",
+        require_equals = true,
     )]
     pub web_search: Vec<String>,
 
@@ -93,7 +101,8 @@ pub struct Cli {
         short = 'p',
         long = "policy",
         help = "Load policy from FILE",
-        value_name = "FILE"
+        value_name = "FILE",
+        require_equals = true,
     )]
     pub policy: Option<PathBuf>,
 
@@ -108,7 +117,8 @@ pub struct Cli {
         short = 't',
         long = "tool",
         help = "Connect to tool server (can be given multiple times)",
-        value_name = "URL"
+        value_name = "URL",
+        require_equals = true,
     )]
     pub tool: Vec<String>,
 
@@ -122,7 +132,8 @@ pub struct Cli {
     #[arg(
         long = "max-tokens",
         help = "Set the maximum number of tokens",
-        value_name = "N"
+        value_name = "N",
+        require_equals = true,
     )]
     pub max_tokens: Option<usize>,
 
@@ -130,7 +141,8 @@ pub struct Cli {
         long = "max-turns",
         help = "Set the maximum number of agent turns (tool call rounds)",
         value_name = "N",
-        default_value = "100"
+        default_value = "100",
+        require_equals = true,
     )]
     pub max_turns: usize,
 
@@ -139,7 +151,8 @@ pub struct Cli {
         help = "Enable extended thinking (budget in tokens, default: 16000)",
         num_args = 0..=1,
         value_name = "TOKENS",
-        default_missing_value = "16000"
+        default_missing_value = "16000",
+        require_equals = true,
     )]
     pub thinking: Option<usize>,
 
@@ -151,14 +164,16 @@ pub struct Cli {
         help = "Initialize config interactively",
         value_name = "FILE",
         num_args = 0..=1,
-        default_missing_value = ""
+        default_missing_value = "",
+        require_equals = true,
     )]
     pub init: Option<String>,
 
     #[arg(
         long = "delete",
         help = "Delete a session by NAME",
-        value_name = "NAME"
+        value_name = "NAME",
+        require_equals = true,
     )]
     pub delete: Option<String>,
 
