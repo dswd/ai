@@ -4,10 +4,14 @@ use log::{debug, info};
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::process::Stdio;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::policy::{Action, Policy};
 use regex::Regex;
+use tokio::time::timeout;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ExecuteArgs {
@@ -19,6 +23,8 @@ pub struct ExecuteArgs {
     pub offset: Option<usize>,
     #[schemars(description = "Maximum number of lines to return")]
     pub limit: Option<usize>,
+    #[schemars(description = "Optional timeout in seconds (max 300, default 30)")]
+    pub timeout: Option<u64>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -101,9 +107,49 @@ impl Tool for ExecuteTool {
             cmd.current_dir(cwd);
         }
 
-        let output = cmd
-            .output()
+        let timeout_secs = args.timeout.unwrap_or(30).min(300);
+
+        let child = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|e| ExecError::Message(format!("execution failed: {e}")))?;
+
+        let child = Arc::new(Mutex::new(Some(child)));
+        let child_for_task = child.clone();
+
+        let result = timeout(
+            Duration::from_secs(timeout_secs),
+            tokio::task::spawn_blocking(move || {
+                child_for_task
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .unwrap()
+                    .wait_with_output()
+            }),
+        )
+        .await;
+
+        let output = match result {
+            Ok(Ok(Ok(out))) => out,
+            Ok(Ok(Err(e))) => {
+                return Err(ExecError::Message(format!("execution failed: {e}")));
+            }
+            Ok(Err(e)) => {
+                return Err(ExecError::Message(format!("join error: {e}")));
+            }
+            Err(_elapsed) => {
+                let mut guard = child.lock().unwrap();
+                if let Some(mut c) = guard.take() {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+                return Err(ExecError::Message(format!(
+                    "execution timed out after {timeout_secs}s"
+                )));
+            }
+        };
 
         let mut result = String::new();
         if !output.stdout.is_empty() {
