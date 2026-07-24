@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ai — Supercharge your terminal</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="gradient-bg"></div>
+
+<nav>
+  <div class="logo">ai<span>.</span></div>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#pricing">Pricing</a>
+    <a href="#providers">Providers</a>
+    <a href="docs.html">Docs</a>
+  </div>
+  <a href="https://github.com/dswd/ai" class="nav-cta" target="_blank" rel="noopener">GitHub</a>
+</nav>
+
+<section class="hero">
+  <h1>Your terminal, <span class="gradient-text">supercharged</span></h1>
+  <p>An AI copilot that lives in your CLI. Reads and writes files, runs commands, searches the web&mdash;all from a single prompt.</p>
+</section>
+
+<div class="demo">
+  <div class="demo-track">
+    <div class="demo-slides" id="demo-slides">
+      <div class="demo-slide">
+        <div class="demo-bar">
+          <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+          <div class="demo-url">debug — ai</div>
+        </div>
+        <div class="demo-body">
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai -w=./src/** "find the bug in the login handler and fix it"</span></div>
+          <div class="demo-line"><span class="think">Scanning auth.rs for the login handler... The issue is in the token validation on line 142 — the expiry check is inverted.</span></div>
+          <div class="demo-line"><span class="tool">&#9881; read_file src/auth.rs:130-155</span></div>
+          <div class="demo-line"><span class="tool">&#9999; replace_in_file src/auth.rs</span></div>
+          <div class="demo-line"><span class="out">Fixed: changed `if now &lt; expiry` to `if now &gt; expiry`. Tokens will now correctly expire.</span></div>
+          <div class="demo-line"><span class="tool">&#128202; (1.9k, 800, 400)</span></div>
+        </div>
+      </div>
+      <div class="demo-slide">
+        <div class="demo-bar">
+          <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+          <div class="demo-url">refactor — ai</div>
+        </div>
+        <div class="demo-body">
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai -w=./src/** "add request logging middleware"</span></div>
+          <div class="demo-line"><span class="think">Checking the existing middleware chain to find the right insertion point...</span></div>
+          <div class="demo-line"><span class="tool">&#9881; read_file src/middleware/mod.rs</span></div>
+          <div class="demo-line"><span class="tool">&#9999; replace_in_file src/middleware/mod.rs</span></div>
+          <div class="demo-line"><span class="tool">&#x2712; write_file src/middleware/logger.rs</span></div>
+          <div class="demo-line"><span class="out">Added async request logger. Logs method, path, status, and duration to stderr.</span></div>
+          <div class="demo-line"><span class="tool">&#128202; (2.8k, 1.2k, 600)</span></div>
+        </div>
+      </div>
+      <div class="demo-slide">
+        <div class="demo-bar">
+          <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+          <div class="demo-url">research — ai</div>
+        </div>
+        <div class="demo-body">
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai --web "what's the latest serde release and what changed?"</span></div>
+          <div class="demo-line"><span class="think">I'll search for the latest serde release notes.</span></div>
+          <div class="demo-line"><span class="tool">&#x1f310; web_search "serde crate latest release changelog"</span></div>
+          <div class="demo-line"><span class="out">serde 1.0.229 was released last week. Key changes:</span></div>
+          <div class="demo-line"><span class="out">&bull; Improved compile times for large derive macros</span></div>
+          <div class="demo-line"><span class="out">&bull; Added `#[serde(flatten)]` support for untagged enums</span></div>
+          <div class="demo-line"><span class="tool">&#128202; (400, 200, 1.2k)</span></div>
+        </div>
+      </div>
+      <div class="demo-slide">
+        <div class="demo-bar">
+          <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+          <div class="demo-url">git — ai</div>
+        </div>
+        <div class="demo-body">
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai -x git "summarize what I did today"</span></div>
+          <div class="demo-line"><span class="think">Checking today's git log for commits by the current user...</span></div>
+          <div class="demo-line"><span class="tool">&#9881; execute git log --since=midnight --author=me --oneline</span></div>
+          <div class="demo-line"><span class="out">3 commits today:</span></div>
+          <div class="demo-line"><span class="out">&bull; b9f2a1c fix: handle null pointer in parser</span></div>
+          <div class="demo-line"><span class="out">&bull; d7e4f88 feat: add rate limiter middleware</span></div>
+          <div class="demo-line"><span class="out">&bull; a3c1b22 chore: update dependencies</span></div>
+          <div class="demo-line"><span class="tool">&#128202; (300, 100, 500)</span></div>
+    </div>
+      </div>
+      <div class="demo-slide">
+        <div class="demo-bar">
+          <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+          <div class="demo-url">haiku — ai</div>
+        </div>
+        <div class="demo-body">
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai "create a haiku on rust"</span></div>
+          <div class="demo-line"><span class="think">The user wants me to create a haiku about Rust. A haiku is a traditional Japanese poem with three lines and a 5-7-5 syllable pattern.</span></div>
+          <div class="demo-line"><span class="out">A type system strong,</span></div>
+          <div class="demo-line"><span class="out">Ownership ensures safety &mdash;</span></div>
+          <div class="demo-line"><span class="out">No fear of null here.</span></div>
+          <div class="demo-line"><span class="tool">&#128202; (490, 44, 19)</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="demo-nav">
+    <button onclick="demoPrev()">&#x25C0;</button>
+    <div class="demo-dots" id="demo-dots"></div>
+    <button onclick="demoNext()">&#x25B6;</button>
+  </div>
+</div>
+
+<section class="features" id="features">
+  <h2>AI as a command</h2>
+  <p class="sub">Pipe data in. Tell it what to do. Pipe results wherever you like.</p>
+
+  <div class="core-card">
+    <h3>The model, your data, nothing else</h3>
+    <p>Work with any LLM like a normal shell command. Pass your prompt on the command line, pipe data in via stdin, and pipe the response out wherever you need it. The AI sees <strong>only what you give it</strong> — no filesystem, no network, no side effects. Every capability beyond that is an explicit choice, enabled by you and independently gated.</p>
+    <div class="core-badges">
+      <span>File access: off</span>
+      <span>Shell: off</span>
+      <span>Web: off</span>
+      <span>Declarative policy engine</span>
+    </div>
+  </div>
+
+  <div class="opt-connector">Optional capabilities</div>
+
+  <div class="opt-grid">
+    <div class="opt-card">
+      <div class="icon icon-green">&#x1f310;</div>
+      <h3>Web Access</h3>
+      <p><strong>Search the web</strong> via DuckDuckGo. <strong>Fetch any URL</strong> and convert HTML to readable text. Independently gated with <strong>URL allowlists</strong>.</p>
+    </div>
+    <div class="opt-card">
+      <div class="icon icon-blue">&#x1f4c1;</div>
+      <h3>Filesystem Access</h3>
+      <p><strong>Read-only or read-write</strong> with fine-grained permissions. <strong>Policy files</strong>, and <strong>interactive ask mode</strong>.</p>
+    </div>
+    <div class="opt-card">
+      <div class="icon icon-rose">$&gt;</div>
+      <h3>Shell Commands</h3>
+      <p>Execute commands vetted by a <strong>command allowlist</strong>. Detects individual commands in command pipelines.</p>
+    </div>
+    <div class="opt-card">
+      <div class="icon icon-purple">&#x1f9e0;</div>
+      <h3>Memory</h3>
+      <p><strong>Persistent long-term store</strong> for facts and project context. The model <strong>adds and deletes entries</strong> itself.</p>
+    </div>
+    <div class="opt-card">
+      <div class="icon icon-rose">&#x1f4be;</div>
+      <h3>Persistent Sessions</h3>
+      <p>Conversations <strong>auto-saved to disk</strong>. Resume sessions to continue where you left off.</p>
+    </div>
+    <div class="opt-card">
+      <div class="icon icon-blue">&#x2699;&#xfe0f;</div>
+      <h3>MCP Tool Servers</h3>
+      <p>Connect to external <strong>MCP</strong> servers. IDE integrations, database agents, API gateways — use any tool you want.</p>
+    </div>
+  </div>
+</section>
+
+<section class="pricing" id="pricing">
+  <h2>Pricing &amp; Tiers</h2>
+  <p class="sub"></p>
+
+  <div class="billing-toggle">
+    <span id="billing-monthly" class="active">Monthly</span>
+    <div class="toggle-switch" onclick="toggleBilling()" role="switch" tabindex="0">
+      <span class="toggle-knob"></span>
+    </div>
+    <span id="billing-yearly">Yearly <span class="discount">(&minus;20%)</span></span>
+  </div>
+
+  <div class="price-grid">
+    <div class="price-card">
+      <div class="price-name">Core</div>
+      <div class="price-amount"><span class="currency">$</span>0<span class="period">/mo</span></div>
+      <p class="price-desc">The AI, your data, nothing else. Perfect for questions, code review, and research.</p>
+      <ul class="price-features">
+        <li>AI chat with any LLM</li>
+        <li>Pipe data in and out</li>
+        <li>Declarative policy engine</li>
+        <li>Interactive config wizard</li>
+        <li>Quiet &amp; verbose modes</li>
+      </ul>
+      <a href="#install" class="price-btn">Get started</a>
+    </div>
+
+    <div class="price-card featured">
+      <div class="price-badge">Popular</div>
+      <div class="price-name">Plus</div>
+      <div class="price-amount"><span class="currency">$</span>0<span class="period">/mo</span></div>
+      <p class="price-desc">Everything in Core, plus filesystem and shell access. The daily driver for developers.</p>
+      <ul class="price-features">
+        <li>Everything in Core</li>
+        <li>Filesystem access (r/w)</li>
+        <li>Shell commands &amp; allowlists</li>
+        <li>Persistent sessions</li>
+        <li>Session resume &amp; compact</li>
+      </ul>
+      <a href="#install" class="price-btn primary">Get started</a>
+    </div>
+
+    <div class="price-card">
+      <div class="price-name">Pro</div>
+      <div class="price-amount"><span class="currency">$</span>0<span class="period">/mo</span></div>
+      <p class="price-desc">The full arsenal. Web access, memory, and external tool servers. Unlock everything.</p>
+      <ul class="price-features">
+        <li>Everything in Plus</li>
+        <li>Web search &amp; fetch</li>
+        <li>Persistent memory store</li>
+        <li>MCP tool server support</li>
+        <li>Long-term conversation memory</li>
+      </ul>
+      <a href="#install" class="price-btn">Get started</a>
+    </div>
+  </div>
+
+  <p class="price-punchline">Open source &amp; free forever &#x1f609;</p>
+</section>
+
+<section class="providers" id="providers">
+  <h2>Speaks any LLM</h2>
+  <p class="sub">One binary, any backend. Configure once, switch anytime.</p>
+
+  <div class="prov-grid">
+    <a href="https://platform.openai.com" class="prov-card" target="_blank" rel="noopener">
+      <img src="logos/openai.svg" alt=""> OpenAI
+    </a>
+    <a href="https://anthropic.com" class="prov-card" target="_blank" rel="noopener">
+      <img src="logos/anthropic.svg" alt=""> Anthropic
+    </a>
+    <a href="https://deepseek.com" class="prov-card" target="_blank" rel="noopener">
+      <img src="logos/deepseek.svg" alt=""> DeepSeek
+    </a>
+    <a href="https://ollama.com" class="prov-card" target="_blank" rel="noopener">
+      <img src="logos/ollama.svg" alt=""> Ollama
+    </a>
+    <a href="https://groq.com" class="prov-card" target="_blank" rel="noopener">
+      <img src="logos/groq.svg" alt=""> Groq
+    </a>
+    <a href="https://ai.google.dev" class="prov-card" target="_blank" rel="noopener">
+      <img src="logos/google.svg" alt=""> Google Gemini
+    </a>
+    <a href="https://mistral.ai" class="prov-card" target="_blank" rel="noopener">
+      <img src="logos/mistral.svg" alt=""> Mistral
+    </a>
+    <a href="https://openrouter.ai" class="prov-card" target="_blank" rel="noopener">
+      <img src="logos/openrouter.svg" alt=""> OpenRouter
+    </a>
+    <a href="https://x.ai" class="prov-card" target="_blank" rel="noopener">
+      <img src="logos/x.svg" alt=""> xAI
+    </a>
+    <a href="https://github.com/Mozilla-Ocho/llamafile" class="prov-card" target="_blank" rel="noopener">
+      <img src="logos/llamafile.png" alt=""> llamafile
+    </a>
+  </div>
+</section>
+
+<section class="install" id="install">
+  <h2>Get started</h2>
+  <p class="sub">One command, no signup required.</p>
+
+  <div class="install-tabs">
+    <button class="install-tab active" onclick="switchTab('curl')">curl</button>
+    <button class="install-tab" onclick="switchTab('dl')">Downloads</button>
+  </div>
+
+  <div class="install-pane active" id="pane-curl">
+    <p class="install-label">Install <strong>as user</strong> (installs to <code>~/.bin</code>, adds it to your <code>$PATH</code>)</p>
+    <div class="install-cmd">
+      <code><span class="prompt">$&gt;</span> curl -fsSL https://dswd.github.io/ai/install.sh | sh</code>
+      <button class="copy-btn" onclick="copyCmd(this, 'curl -fsSL https://dswd.github.io/ai/install.sh | sh')">&#x29C9;</button>
+    </div>
+    <p class="install-label">Install <strong>system-wide</strong> (requires root, installs to <code>/usr/local/bin</code>)</p>
+    <div class="install-cmd">
+      <code><span class="prompt">$&gt;</span> curl -fsSL https://dswd.github.io/ai/install.sh | sudo sh -s -- --global</code>
+      <button class="copy-btn" onclick="copyCmd(this, 'curl -fsSL https://dswd.github.io/ai/install.sh | sudo sh -s -- --global')">&#x29C9;</button>
+    </div>
+  </div>
+
+  <div class="install-pane" id="pane-dl">
+    <div class="dl-grid">
+      <a href="https://github.com/dswd/ai/releases/latest/download/ai-linux-amd64" class="dl-link"><img src="logos/tux.svg" alt="" class="dl-icon"> Linux x86_64</a>
+      <a href="https://github.com/dswd/ai/releases/latest/download/ai-linux-arm64" class="dl-link"><img src="logos/tux.svg" alt="" class="dl-icon"> Linux ARM64</a>
+      <a href="https://github.com/dswd/ai/releases/latest/download/ai-windows-amd64.exe" class="dl-link"><img src="logos/windows.svg" alt="" class="dl-icon"> Windows x86_64</a>
+    </div>
+    <p style="color:var(--dim);font-size:0.83rem;text-align:center;margin-top:0.5rem;">Prebuilt binaries. Extract and place in your <code>$PATH</code>.</p>
+  </div>
+</section>
+
+<footer>
+  Built with Rust &middot; MIT License &middot; Windows, macOS, Linux
+</footer>
+<script src="js/main.js"></script>
+</body>
+</html>

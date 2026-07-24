@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Docs — ai</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="gradient-bg"></div>
+
+<nav>
+  <div class="logo"><a href="index.html" style="color:inherit;">ai<span>.</span></a></div>
+  <div class="nav-links">
+    <a href="index.html#features">Features</a>
+    <a href="index.html#pricing">Pricing</a>
+    <a href="index.html#providers">Providers</a>
+    <a href="docs.html" class="active">Docs</a>
+  </div>
+  <a href="https://github.com/dswd/ai" class="nav-cta" target="_blank" rel="noopener">GitHub</a>
+</nav>
+
+<div class="docs-layout">
+
+<aside class="sidebar" id="sidebar">
+  <h4>On this page</h4>
+  <ul class="toc">
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#quickstart">Quickstart</a></li>
+    <li><a href="#cli-reference">CLI Reference</a></li>
+    <li><a href="#configuration">Configuration</a></li>
+    <li><a href="#providers">Providers</a></li>
+    <li><a href="#policy">Access Policy</a></li>
+    <li><a href="#sessions">Sessions</a></li>
+    <li><a href="#memory">Memory</a></li>
+    <li><a href="#mcp">MCP Tool Servers</a></li>
+    <li><a href="#builtin-tools">Built-in Tools</a></li>
+    <li><a href="#vanilla-mode">Vanilla Mode</a></li>
+    <li><a href="#quiet-verbose">Quiet &amp; Verbose</a></li>
+    <li><a href="#thinking">Extended Thinking</a></li>
+    <li><a href="#init-wizard">Init Wizard</a></li>
+  </ul>
+</aside>
+
+<main class="content">
+
+<h1>Documentation</h1>
+<p>Everything you need to use <strong>ai</strong> effectively. From your first prompt to advanced policy configuration.</p>
+
+<section id="overview">
+<h2>Overview</h2>
+<p><strong>ai</strong> is a CLI copilot that turns any LLM into a shell command. Pass a prompt on the command line (or pipe data in via <code>stdin</code>), and the response streams to <code>stdout</code>. Tool calls and thinking output go to <code>stderr</code>, so you can pipe results cleanly into other commands.</p>
+<p>By default, the model sees <strong>only what you give it</strong> — no filesystem, no network, no shell. Every capability beyond that is opt-in via CLI flags or a declarative policy file.</p>
+
+<div class="info-callout">
+  <strong>Providers:</strong> Supports OpenAI and Anthropic natively, and any OpenAI-compatible API (Ollama, Groq, DeepSeek, Google Gemini, Mistral, OpenRouter, xAI, llamafile) via <code>api_base</code>.
+</div>
+</section>
+
+<section id="quickstart">
+<h2>Quickstart</h2>
+
+<div class="cmd-block"><span class="prompt">$</span> ai "explain this regex: ^(?=.*[A-Z])(?=.*\d).{8,}$"</div>
+
+<div class="cmd-block"><span class="prompt">$</span> cat data.csv <span class="flag">|</span> ai "summarize the trends in this CSV"</div>
+
+<div class="cmd-block"><span class="prompt">$</span> ai <span class="flag">-x=<span class="arg">cargo,git</span> <span class="flag">-r=<span class="arg">./src/**</span> <span class="flag">-w=<span class="arg">./src/**</span> "fix all compiler warnings"</div>
+
+<div class="cmd-block"><span class="prompt">$</span> ai <span class="flag">--init</span></div>
+</section>
+
+<section id="cli-reference">
+<h2>CLI Reference</h2>
+<p>Every flag, option, and argument.</p>
+
+<table class="flag-table">
+<tr><th>Flag</th><th>Description</th></tr>
+<tr><td><code class="flag">prompt</code></td><td>Positional — the prompt text. Multiple words are joined with spaces. If omitted, reads from <code>stdin</code>.</td></tr>
+<tr><td><code class="flag">-s<code class="arg">[=NAME]</code></code>, <code class="flag">--session<code class="arg">[=NAME]</code></code></td><td>Start or resume an interactive session. If no name is given, generates a random mnemonic like <code>swift-hawk</code>. Sessions auto-save to disk.</td></tr>
+<tr><td><code class="flag">-m<code class="arg">[=FILE]</code></code>, <code class="flag">--memory<code class="arg">[=FILE]</code></code></td><td>Enable persistent memory. The model can add and delete entries. Defaults to <code>~/.local/share/ai/memory.json</code> if no FILE is given.</td></tr>
+<tr><td><code class="flag">-c=<code class="arg">FILE</code></code>, <code class="flag">--config=<code class="arg">FILE</code></code></td><td>Load configuration from FILE instead of the default <code>~/.config/ai/config.yaml</code>.</td></tr>
+<tr><td><code class="flag">--system=<code class="arg">TEXT</code></code></td><td>Override the system prompt for this invocation.</td></tr>
+<tr><td><code class="flag">-r=<code class="arg">PATH</code></code>, <code class="flag">--read=<code class="arg">PATH</code></code></td><td>Grant read-only access to PATH. Repeatable. Supports globs.</td></tr>
+<tr><td><code class="flag">-w=<code class="arg">PATH</code></code>, <code class="flag">--write=<code class="arg">PATH</code></code></td><td>Grant read/write access to PATH. Repeatable. Also grants read access.</td></tr>
+<tr><td><code class="flag">-x=<code class="arg">PATTERN</code></code>, <code class="flag">--execute=<code class="arg">PATTERN</code></code></td><td>Grant execution permission for PATTERN. Repeatable. Supports comma-separated command lists.</td></tr>
+<tr><td><code class="flag">--web</code></td><td>Allow all web access (fetch and search). Equivalent to <code>**</code> wildcard for both.</td></tr>
+<tr><td><code class="flag">--web-fetch=<code class="arg">PATTERN</code></code></td><td>Allow web fetch for URLs matching PATTERN. Repeatable.</td></tr>
+<tr><td><code class="flag">--web-search=<code class="arg">PATTERN</code></code></td><td>Allow web search for queries matching PATTERN. Repeatable.</td></tr>
+<tr><td><code class="flag">-p=<code class="arg">FILE</code></code>, <code class="flag">--policy=<code class="arg">FILE</code></code></td><td>Load access policy from FILE. CLI rules (<code>-r</code>, <code>-w</code>, <code>-x</code>) take precedence.</td></tr>
+<tr><td><code class="flag">-i</code>, <code class="flag">--interactive</code></td><td>When a tool wants to access a resource not covered by any allow rule, prompt the user to approve or deny.</td></tr>
+<tr><td><code class="flag">-t=<code class="arg">URL</code></code>, <code class="flag">--tool=<code class="arg">URL</code></code></td><td>Connect to an MCP tool server. Repeatable for multiple servers.</td></tr>
+<tr><td><code class="flag">-y</code>, <code class="flag">--yolo</code></td><td>Grant <strong>all</strong> permissions: read <code>**</code>, write <code>**</code>, execute <code>*</code>, web-fetch <code>**</code>, web-search <code>**</code>. Dangerous.</td></tr>
+<tr><td><code class="flag">--max-tokens=<code class="arg">N</code></code></td><td>Cap the number of output tokens.</td></tr>
+<tr><td><code class="flag">--max-turns=<code class="arg">N</code></code></td><td>Cap the number of agent turns (tool call rounds). Default: <code>100</code>.</td></tr>
+<tr><td><code class="flag">--thinking<code class="arg">[=TOKENS]</code></code></td><td>Enable extended reasoning. Defaults to 16,000 tokens if no value is given.</td></tr>
+<tr><td><code class="flag">-l</code>, <code class="flag">--list</code></td><td>List all saved sessions (name, message count, model, creation date).</td></tr>
+<tr><td><code class="flag">--init<code class="arg">[=FILE]</code></code></td><td>Run the interactive config wizard. Saves to default path if no FILE is given.</td></tr>
+<tr><td><code class="flag">--delete=<code class="arg">NAME</code></code></td><td>Delete a saved session by name.</td></tr>
+<tr><td><code class="flag">-v</code>, <code class="flag">--verbose</code></td><td>Enable debug-level logging.</td></tr>
+<tr><td><code class="flag">-q</code>, <code class="flag">--quiet</code></td><td>Suppress thinking output and token stats.</td></tr>
+</table>
+
+<h3>Examples</h3>
+
+<div class="cmd-block">
+<span class="prompt"># ask a question (vanilla mode — no tools)</span>
+<span class="prompt">$</span> ai "what does the borrow checker enforce?"
+
+<span class="prompt"># give it filesystem access</span>
+<span class="prompt">$</span> ai <span class="flag">-r=<span class="arg">./src/**</span> "refactor the auth module"
+<span class="prompt">$</span> ai <span class="flag">-w=<span class="arg">./src/**</span> "add input validation to handlers.rs"
+
+<span class="prompt"># allow specific commands</span>
+<span class="prompt">$</span> ai <span class="flag">-x=<span class="arg">cargo,git</span> "build and check for warnings"
+
+<span class="prompt"># web access</span>
+<span class="prompt">$</span> ai <span class="flag">--web</span> "what changed in the latest Rust release?"
+<span class="prompt">$</span> ai <span class="flag">--web-fetch=</span><span class="arg">https://docs.rs/**</span> "summarize the serde docs"
+
+<span class="prompt"># interactive session</span>
+<span class="prompt">$</span> ai <span class="flag">-s=<span class="arg">my-project</span> <span class="flag">-r=<span class="arg">./**</span> <span class="flag">-w=<span class="arg">./**</span> <span class="flag">-x=<span class="arg">cargo,git,npm</span>
+
+<span class="prompt"># pipe data in</span>
+<span class="prompt">$</span> cat error.log <span class="flag">|</span> ai "find the root cause of these errors"
+<span class="prompt">$</span> git diff HEAD~5 <span class="flag">|</span> ai "summarize the changes and suggest a release note"
+</div>
+</section>
+
+<section id="configuration">
+<h2>Configuration</h2>
+<p>Config is stored as YAML at <code>~/.config/ai/config.yaml</code>. Every field is optional; CLI flags and env vars override config values.</p>
+
+<div class="policy-block">
+provider: openai
+api_key: env:OPENAI_API_KEY
+model: gpt-4o
+api_base: https://api.openai.com/v1
+system_prompt: You are a helpful CLI assistant.
+context_window: 128000
+max_tokens: 4096
+thinking: 16000
+session_dir: ~/.local/share/ai/sessions
+policy: ~/.config/ai/policy.conf
+memory: ~/.local/share/ai/memory.json
+</div>
+
+<h3>Environment Variables</h3>
+<p>API keys can be stored in environment variables and referenced via <code>env:VAR_NAME</code> syntax. Supported env vars:</p>
+
+<table class="flag-table">
+<tr><th>Variable</th><th>Provider</th></tr>
+<tr><td><code>OPENAI_API_KEY</code></td><td>OpenAI</td></tr>
+<tr><td><code>ANTHROPIC_API_KEY</code></td><td>Anthropic</td></tr>
+<tr><td><code>OLLAMA_API_KEY</code></td><td>Ollama</td></tr>
+<tr><td><code>GROQ_API_KEY</code></td><td>Groq</td></tr>
+<tr><td><code>GEMINI_API_KEY</code></td><td>Google Gemini</td></tr>
+<tr><td><code>DEEPSEEK_API_KEY</code></td><td>DeepSeek</td></tr>
+<tr><td><code>MISTRAL_API_KEY</code></td><td>Mistral</td></tr>
+<tr><td><code>OPENROUTER_API_KEY</code></td><td>OpenRouter</td></tr>
+<tr><td><code>XAI_API_KEY</code></td><td>xAI</td></tr>
+</table>
+
+<h3>Field Reference</h3>
+<table class="flag-table">
+<tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>provider</code></td><td>string</td><td><code>openai</code></td><td>Provider: <code>openai</code> or <code>anthropic</code></td></tr>
+<tr><td><code>api_key</code></td><td>string</td><td>—</td><td>API key or <code>env:VAR</code> reference</td></tr>
+<tr><td><code>api_base</code></td><td>string</td><td>—</td><td>Custom API base URL (proxies, Ollama, OpenCode)</td></tr>
+<tr><td><code>model</code></td><td>string</td><td><code>gpt-4o</code></td><td>Model name</td></tr>
+<tr><td><code>system_prompt</code></td><td>string</td><td>—</td><td>Default system prompt</td></tr>
+<tr><td><code>max_tokens</code></td><td>number</td><td>—</td><td>Max output tokens</td></tr>
+<tr><td><code>thinking</code></td><td>number</td><td>—</td><td>Extended thinking budget</td></tr>
+<tr><td><code>session_dir</code></td><td>path</td><td><code>~/.local/share/ai/sessions/</code></td><td>Session storage directory</td></tr>
+<tr><td><code>policy</code></td><td>path</td><td>—</td><td>Default policy file</td></tr>
+<tr><td><code>memory</code></td><td>path</td><td><code>~/.local/share/ai/memory.json</code></td><td>Persistent memory file</td></tr>
+<tr><td><code>context_window</code></td><td>number</td><td>—</td><td>Context window size (for display)</td></tr>
+</table>
+</section>
+
+<section id="providers">
+<h2>Providers</h2>
+<p><strong>ai</strong> speaks the OpenAI and Anthropic APIs natively. For any other provider, set <code>api_base</code> to their OpenAI-compatible endpoint.</p>
+
+<div class="cmd-block">
+<span class="prompt"># Ollama (local)</span>
+<span class="prompt">$</span> ai <span class="flag">-c=<span class="arg">ollama.yaml</span> "explain monads"
+
+<span class="prompt"># OpenCode (OpenAI-compatible)</span>
+<span class="prompt">$</span> ai <span class="flag">-c=<span class="arg">opencode.yaml</span> "write a fibonacci function"
+</div>
+
+<h3>Example configs</h3>
+
+<div class="policy-block">
+# ~/.config/ai/openai.yaml
+provider: openai
+api_key: env:OPENAI_API_KEY
+model: gpt-4o
+</div>
+
+<div class="policy-block">
+# ~/.config/ai/ollama.yaml
+provider: openai
+api_base: http://localhost:11434/v1
+api_key: ollama
+model: llama3.2
+</div>
+
+<div class="policy-block">
+# ~/.config/ai/anthropic.yaml
+provider: anthropic
+api_key: env:ANTHROPIC_API_KEY
+model: claude-sonnet-4-20250514
+</div>
+</section>
+
+<section id="policy">
+<h2>Access Policy</h2>
+<p>The policy engine controls what files, commands, and web resources the model can access. Rules are evaluated <strong>first-match</strong>: the first matching Allow or Deny rule wins. CLI flags (<code>-r</code>, <code>-w</code>, <code>-x</code>, <code>--web</code>) are prepended to policy-file rules and always take precedence.</p>
+
+<h3>Actions</h3>
+<table class="flag-table">
+<tr><th>Action</th><th>Covers</th></tr>
+<tr><td><code>read</code></td><td><code>read_file</code>, <code>list_dir</code>, <code>search_content</code>, <code>find_files</code></td></tr>
+<tr><td><code>write</code></td><td><code>write_file</code>, <code>replace_in_file</code>, <code>delete_file</code>, <code>create_directory</code></td></tr>
+<tr><td><code>execute</code></td><td><code>execute</code></td></tr>
+<tr><td><code>web-fetch</code></td><td><code>web_fetch</code></td></tr>
+<tr><td><code>web-search</code></td><td><code>web_search</code></td></tr>
+</table>
+
+<h3>Policy File Syntax</h3>
+<p>One rule per line. <code>#</code> starts a comment.</p>
+
+<div class="policy-block">
+# grant read access to the home projects directory
+allow read ~/projects/**
+
+# deny access to secrets subdirectories
+deny read ~/projects/**/secrets/**
+
+# allow specific commands (comma-separated)
+allow execute cargo,git,npm,npx,rustc
+
+# allow web fetch from docs.rs
+allow web-fetch https://docs.rs/**
+
+# deny search queries containing "confidential"
+deny web-search *confidential*
+</div>
+
+<h3>Path Matching</h3>
+<p>Path patterns support glob wildcards and are <strong>segment-aware</strong>: <code>/tmp</code> matches <code>/tmp/foo.txt</code> but <em>not</em> <code>/tmpfile</code>. Relative patterns resolve against the home directory. <code>~</code> is expanded.</p>
+
+<h3>Execute Patterns</h3>
+<p>For shell commands, <strong>ai</strong> parses the command string by splitting on <code>&amp;&amp;</code>, <code>||</code>, <code>|</code>, <code>;</code>, and <code>&amp;</code>, extracting individual command names. Each is checked against the Execute allowlist. Chained destructive commands like <code>cargo build &amp;&amp; rm -rf /</code> are individually vetted.</p>
+
+<div class="warn-callout">
+  <strong>Example:</strong> With <code>allow execute cargo,git</code> and a prompt that calls <code>cargo build &amp;&amp; rm -rf /</code>, the <code>cargo</code> command passes but <code>rm</code> is denied — and the interactive fallback ask will confirm that individual denial.
+</div>
+
+<h3>Interactive Ask Mode</h3>
+<p>With <code>-i</code>, when a tool wants to access a resource not covered by any Allow rule, you'll see:</p>
+
+<div class="cmd-block"><span class="prompt">$</span> ai <span class="flag">-i</span> "fix the bug"<br><br>❓ Allow Read for /home/user/project/src/auth.rs? [y/N]</div>
+
+<p>Type <code>y</code> or <code>yes</code> to allow once. Anything else denies the access.</p>
+</section>
+
+<section id="sessions">
+<h2>Sessions</h2>
+<p>Sessions persist conversations to disk as JSON files. Each session records every message, the system prompt, model, and timestamps.</p>
+
+<div class="cmd-block">
+<span class="prompt"># start a named session</span>
+<span class="prompt">$</span> ai <span class="flag">-s=<span class="arg">backend-refactor</span> <span class="flag">-r=<span class="arg">./**</span> <span class="flag">-w=<span class="arg">./**</span> <span class="flag">-x=<span class="arg">cargo,git</span>
+
+<span class="prompt"># resume it later</span>
+<span class="prompt">$</span> ai <span class="flag">-s=<span class="arg">backend-refactor</span>
+
+<span class="prompt"># random name generation</span>
+<span class="prompt">$</span> ai <span class="flag">-s</span>  <span class="dim"># &rarr; created session "calm-lynx"</span>
+
+<span class="prompt"># list all sessions</span>
+<span class="prompt">$</span> ai <span class="flag">-l</span>
+
+<span class="prompt"># delete a session</span>
+<span class="prompt">$</span> ai <span class="flag">--delete=</span><span class="arg">calm-lynx</span>
+</div>
+
+<h3>In-Session Commands</h3>
+<table class="flag-table">
+<tr><th>Command</th><th>Action</th></tr>
+<tr><td><code>/exit</code>, <code>/quit</code></td><td>Exit the session</td></tr>
+<tr><td><code>/clear</code></td><td>Clear all messages in the session</td></tr>
+<tr><td><code>/compact</code></td><td>Summarize the conversation and replace history with the summary to save tokens</td></tr>
+<tr><td><code>/session</code></td><td>Print the current session name</td></tr>
+<tr><td><code>/tools</code></td><td>List available tools</td></tr>
+<tr><td><code>/help</code></td><td>Show all slash commands</td></tr>
+</table>
+
+<div class="info-callout">
+  <strong>Context tracking:</strong> When <code>context_window</code> is set in config, the interactive prompt shows token usage: <code>[4.2k/128k] &gt;</code>. A warning emoji (⚠️) appears when usage exceeds 75%.
+</div>
+</section>
+
+<section id="memory">
+<h2>Memory</h2>
+<p>Persistent key-value store that the model reads at the start of each conversation. Entries are injected into the system prompt. The model can add and delete entries itself via tools.</p>
+
+<div class="cmd-block">
+<span class="prompt">$</span> ai <span class="flag">-m</span> "remember that our API uses snake_case"
+
+<span class="prompt"># custom memory file</span>
+<span class="prompt">$</span> ai <span class="flag">-m=<span class="arg">~/.ai/project-memory.json</span> "refactor the auth module"
+</div>
+
+<p>Keys are 4-character hex strings (e.g. <code>0a1f</code>). The model manages entries via two tools: <code>memory_add</code> and <code>memory_delete</code>. Max 100 entries.</p>
+
+<p>Placeholders <code>{memory}</code> and <code>{timestamp}</code> in the system prompt are replaced with the current memory contents and date/time.</p>
+</section>
+
+<section id="mcp">
+<h2>MCP Tool Servers</h2>
+<p>Connect to Model Context Protocol servers to extend <strong>ai</strong> with external tools — IDE integrations, database agents, API gateways.</p>
+
+<div class="cmd-block">
+<span class="prompt">$</span> ai <span class="flag">-t=<span class="arg">http://localhost:8080/mcp</span> "what tables are in the database?"
+
+<span class="prompt"># multiple servers</span>
+<span class="prompt">$</span> ai <span class="flag">-t=<span class="arg">http://localhost:8081</span> <span class="flag">-t=<span class="arg">http://localhost:8082</span> "query the inventory"
+</div>
+
+<p>Discovered tools are automatically registered on the agent and available for the session.</p>
+</section>
+
+<section id="builtin-tools">
+<h2>Built-in Tools</h2>
+<p>14 built-in tools are conditionally registered based on active policy rules. The <code>think</code> tool is always available.</p>
+
+<h3>Filesystem</h3>
+<div class="tool-card">
+  <h4><span class="name">read_file</span></h4>
+  <p>Read file contents. Supports offset and limit for pagination.</p>
+  <div class="params">
+    <span class="required">path</span>
+    <span>offset?</span>
+    <span>limit?</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">write_file</span></h4>
+  <p>Create or overwrite a file. Creates parent directories automatically.</p>
+  <div class="params">
+    <span class="required">path</span>
+    <span class="required">content</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">list_dir</span></h4>
+  <p>List directory contents with type prefixes (<code>d</code> directory, <code>l</code> symlink, <code>f</code> file).</p>
+  <div class="params">
+    <span class="required">path</span>
+    <span>offset?</span>
+    <span>limit?</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">replace_in_file</span></h4>
+  <p>Surgical string replacement. Old string must match exactly once — fails on zero or multiple matches.</p>
+  <div class="params">
+    <span class="required">path</span>
+    <span class="required">old_str</span>
+    <span class="required">new_str</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">delete_file</span></h4>
+  <p>Delete a file or directory. Directories require <code>recursive: true</code>.</p>
+  <div class="params">
+    <span class="required">path</span>
+    <span>recursive?</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">create_directory</span></h4>
+  <p>Create a directory and all parent directories (like <code>mkdir -p</code>).</p>
+  <div class="params">
+    <span class="required">path</span>
+  </div>
+</div>
+
+<h3>Execution</h3>
+<div class="tool-card">
+  <h4><span class="name">execute</span></h4>
+   <p>Run a shell command. Chained commands are parsed individually for policy checks. Uses <code>sh -c</code> (Unix) or <code>cmd /C</code> (Windows).</p>
+  <div class="params">
+    <span class="required">command</span>
+    <span>cwd?</span>
+    <span>offset?</span>
+    <span>limit?</span>
+    <span>timeout?</span>
+  </div>
+</div>
+
+<h3>Search</h3>
+<div class="tool-card">
+  <h4><span class="name">search_content</span></h4>
+  <p>Regex search across files. Skips hidden directories (<code>.git</code>, <code>node_modules</code>, <code>target</code>) and binary files. Max 500 matches, 1 MB per file.</p>
+  <div class="params">
+    <span class="required">path</span>
+    <span class="required">pattern</span>
+    <span>file_types?</span>
+    <span>offset?</span>
+    <span>limit?</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">find_files</span></h4>
+  <p>Glob-based file search. Results sorted alphabetically, truncated at 500.</p>
+  <div class="params">
+    <span class="required">path</span>
+    <span class="required">pattern</span>
+    <span>offset?</span>
+    <span>limit?</span>
+  </div>
+</div>
+
+<h3>Web</h3>
+<div class="tool-card">
+  <h4><span class="name">web_fetch</span></h4>
+  <p>Fetch a URL and return content as text, markdown, or HTML. HTML is converted to readable text via <code>html2text</code>. Max 5 MB response.</p>
+  <div class="params">
+    <span class="required">url</span>
+    <span>format?</span>
+    <span>timeout?</span>
+    <span>offset?</span>
+    <span>limit?</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">web_search</span></h4>
+  <p>Search DuckDuckGo and return results with titles, URLs, and snippets. Max 20 results.</p>
+  <div class="params">
+    <span class="required">query</span>
+    <span>num_results?</span>
+    <span>offset?</span>
+    <span>limit?</span>
+  </div>
+</div>
+
+<h3>Other</h3>
+<div class="tool-card">
+  <h4><span class="name">think</span></h4>
+  <p>Reasoning scratchpad. No side effects, no policy check — always available.</p>
+  <div class="params">
+    <span class="required">thought</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">memory_add</span></h4>
+  <p>Store a fact in persistent memory. Returns a 4-char hex key. Only available when <code>-m</code> is active.</p>
+  <div class="params">
+    <span class="required">data</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">memory_delete</span></h4>
+  <p>Delete a memory entry by its key. Only available when <code>-m</code> is active.</p>
+  <div class="params">
+    <span class="required">key</span>
+  </div>
+</div>
+</section>
+
+<section id="vanilla-mode">
+<h2>Vanilla Mode</h2>
+<p>Running <code>ai</code> with no flags and no config file drops you into <strong>vanilla mode</strong>: the model sees only your prompt and responds with plain text. No tools are registered. No filesystem, no shell, no web.</p>
+
+<div class="cmd-block"><span class="prompt">$</span> ai "what is the time complexity of quicksort?"</div>
+
+<p>This is the safest way to use <strong>ai</strong>. Every capability beyond this is an explicit opt-in.</p>
+</section>
+
+<section id="quiet-verbose">
+<h2>Quiet &amp; Verbose</h2>
+
+<div class="cmd-block">
+<span class="prompt"># quiet: no thinking output, no token stats</span>
+<span class="prompt">$</span> ai <span class="flag">-q</span> "what is 2+2"
+
+<span class="prompt"># verbose: debug-level logging</span>
+<span class="prompt">$</span> ai <span class="flag">-v</span> "explain this code"
+</div>
+
+<p>Quiet mode suppresses the thinking/reasoning stream and token usage summary. Verbose mode enables full debug logging from the <code>ai::</code> module.</p>
+</section>
+
+<section id="thinking">
+<h2>Extended Thinking</h2>
+<p>Enable extended reasoning with a token budget. Supported by Anthropic models and some OpenAI models.</p>
+
+<div class="cmd-block">
+<span class="prompt"># default 16k thinking tokens</span>
+<span class="prompt">$</span> ai <span class="flag">--thinking</span> "design a distributed rate limiter"
+
+<span class="prompt"># custom budget</span>
+<span class="prompt">$</span> ai <span class="flag">--thinking=</span><span class="arg">32000</span> "audit this codebase for security vulnerabilities"
+</div>
+
+<div class="info-callout">
+  <strong>Note:</strong> Thinking tokens are counted in the token stats but excluded from the visible output count. Stats are shown as <code>(in, thinking, out)</code> where <code>out</code> = <code>output_tokens - reasoning_tokens</code>.
+</div>
+</section>
+
+<section id="init-wizard">
+<h2>Init Wizard</h2>
+<p>The <code>--init</code> command runs an interactive setup wizard that walks you through provider selection, API key entry, model choice, and context window configuration.</p>
+
+<div class="cmd-block">
+<span class="prompt">$</span> ai <span class="flag">--init</span>
+
+Provider:
+  [openai]
+  anthropic
+  ollama
+  groq
+  deepseek
+  google
+  mistral
+  openrouter
+  xai
+
+API key (OPENAI_API_KEY): ********
+API base URL (optional):
+Model:
+  [gpt-4o]
+  gpt-4.1
+  gpt-4.1-mini
+  gpt-4o-mini
+  Other (type manually)
+
+Context window (tokens, 0 to skip) [128000]:
+
+Save this config? [Y/n]
+</div>
+
+<p>If you leave the API key blank and a corresponding env var exists, it will be stored as <code>env:VAR_NAME</code> rather than the actual key.</p>
+</section>
+
+</main>
+</div>
+
+<footer>
+  Built with Rust &middot; MIT License &middot; Windows, macOS, Linux
+</footer>
+
+<script src="js/main.js"></script>
+</body>
+</html>
