@@ -83,7 +83,7 @@ jobs:
           exe=${{ contains(matrix.binary, '.exe') && '.exe' || '' }}
           cp "target/${{ matrix.target }}/release/ai${exe}" "${{ matrix.binary }}"
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ !matrix.skip }}
         with:
           name: ${{ matrix.binary }}
@@ -97,17 +97,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: dist
+          pattern: 'ai-*'
+          merge-multiple: true
 
-      - name: Prepare assets
-        run: |
-          mkdir -p dist
-          for dir in artifacts/*/; do
-            find "$dir" -maxdepth 1 -type f -exec cp {} dist/ \;
-          done
-          ls -lh dist/
+      - name: List assets
+        run: ls -lh dist/
 
       - uses: softprops/action-gh-release@v2
         with:
