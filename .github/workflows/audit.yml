@@ -1,0 +1,21 @@
+name: Security Audit
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'
+  push:
+    paths:
+      - 'Cargo.lock'
+
+jobs:
+  audit:
+    name: Scan Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo install cargo-audit --locked
+
+      - run: cargo audit
