@@ -221,10 +221,10 @@ model: claude-sonnet-4-20250514
 <h3>Actions</h3>
 <table class="flag-table">
 <tr><th>Action</th><th>Covers</th></tr>
-<tr><td><code>read</code></td><td><code>read_file</code>, <code>list_dir</code>, <code>search_content</code>, <code>find_files</code></td></tr>
-<tr><td><code>write</code></td><td><code>write_file</code>, <code>replace_in_file</code>, <code>delete_file</code>, <code>create_directory</code></td></tr>
+<tr><td><code>read</code></td><td><code>read_file</code>, <code>list_dir</code>, <code>search_content</code>, <code>find_files</code>, <code>file_info</code>, <code>file_view</code>, <code>git_diff</code>, <code>git_log</code></td></tr>
+<tr><td><code>write</code></td><td><code>write_file</code>, <code>replace_in_file</code>, <code>delete_file</code>, <code>create_directory</code>, <code>move_file</code>, <code>copy_file</code></td></tr>
 <tr><td><code>execute</code></td><td><code>execute</code></td></tr>
-<tr><td><code>web-fetch</code></td><td><code>web_fetch</code></td></tr>
+<tr><td><code>web-fetch</code></td><td><code>web_fetch</code>, <code>download_file</code></td></tr>
 <tr><td><code>web-search</code></td><td><code>web_search</code></td></tr>
 </table>
 
@@ -335,7 +335,7 @@ deny web-search *confidential*
 
 <section id="builtin-tools">
 <h2>Built-in Tools</h2>
-<p>14 built-in tools are conditionally registered based on active policy rules. The <code>think</code> tool is always available.</p>
+<p>20 built-in tools are conditionally registered based on active policy rules.</p>
 
 <h3>Filesystem</h3>
 <div class="tool-card">
@@ -388,17 +388,67 @@ deny web-search *confidential*
     <span class="required">path</span>
   </div>
 </div>
+<div class="tool-card">
+  <h4><span class="name">file_info</span></h4>
+  <p>Get file or directory metadata: size (human-readable), permissions (<code>r--</code> or <code>rw-</code>), modification time, and type.</p>
+  <div class="params">
+    <span class="required">path</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">move_file</span></h4>
+  <p>Move or rename a file or directory. Checks write permission on both source and destination.</p>
+  <div class="params">
+    <span class="required">source</span>
+    <span class="required">destination</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">copy_file</span></h4>
+  <p>Copy a file to a new location. Creates parent directories as needed. Checks read on source, write on destination.</p>
+  <div class="params">
+    <span class="required">source</span>
+    <span class="required">destination</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">file_view</span></h4>
+  <p>Extract readable text from rich documents by converting them to Markdown. Supports PDF, DOCX, XLSX, PPTX, HTML, CSV, XML, images, and ZIP archives.</p>
+  <div class="params">
+    <span class="required">path</span>
+  </div>
+</div>
 
 <h3>Execution</h3>
 <div class="tool-card">
   <h4><span class="name">execute</span></h4>
-   <p>Run a shell command. Chained commands are parsed individually for policy checks. Uses <code>sh -c</code> (Unix) or <code>cmd /C</code> (Windows).</p>
+  <p>Run a shell command. Chained commands are parsed individually for policy checks. Uses <code>sh -c</code> (Unix) or <code>cmd /C</code> (Windows).</p>
   <div class="params">
     <span class="required">command</span>
     <span>cwd?</span>
     <span>offset?</span>
     <span>limit?</span>
     <span>timeout?</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">git_diff</span></h4>
+  <p>Show uncommitted changes with <code>git diff --no-color</code>. Supports <code>--staged</code> and file-path filtering. Requires read access to the <code>.git</code> directory, not shell execution permission.</p>
+  <div class="params">
+    <span>staged?</span>
+    <span>path?</span>
+    <span>offset?</span>
+    <span>limit?</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">git_log</span></h4>
+  <p>Show commit history with <code>git log --oneline</code>. Requires read access to the <code>.git</code> directory, not shell execution permission.</p>
+  <div class="params">
+    <span>n?</span>
+    <span>path?</span>
+    <span>offset?</span>
+    <span>limit?</span>
   </div>
 </div>
 
@@ -447,15 +497,16 @@ deny web-search *confidential*
     <span>limit?</span>
   </div>
 </div>
-
-<h3>Other</h3>
 <div class="tool-card">
-  <h4><span class="name">think</span></h4>
-  <p>Reasoning scratchpad. No side effects, no policy check — always available.</p>
+  <h4><span class="name">download_file</span></h4>
+  <p>Download a file from a URL and save it to disk. Max 5 MB. Requires write permission on the destination path.</p>
   <div class="params">
-    <span class="required">thought</span>
+    <span class="required">url</span>
+    <span class="required">path</span>
   </div>
 </div>
+
+  <h3>Other</h3>
 <div class="tool-card">
   <h4><span class="name">memory_add</span></h4>
   <p>Store a fact in persistent memory. Returns a 4-char hex key. Only available when <code>-m</code> is active.</p>

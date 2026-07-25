@@ -41,7 +41,7 @@ function copyCmd(btn, text) {
 
   function next() { go((idx + 1) % count); }
   function prev() { go((idx - 1 + count) % count); }
-  function resetTimer() { clearInterval(timer); timer = setInterval(next, 5000); }
+  function resetTimer() { clearInterval(timer); timer = setInterval(next, 20000); }
 
   window.demoNext = next;
   window.demoPrev = prev;

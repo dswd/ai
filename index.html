@@ -22,7 +22,7 @@
 
 <section class="hero">
   <h1>Your terminal, <span class="gradient-text">supercharged</span></h1>
-  <p>An AI copilot that lives in your CLI. Reads and writes files, runs commands, searches the web&mdash;all from a single prompt.</p>
+  <p>File management, content analysis, web research, and shell help — all from a single command.</p>
 </section>
 
 <div class="demo">
@@ -31,75 +31,77 @@
       <div class="demo-slide">
         <div class="demo-bar">
           <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
-          <div class="demo-url">debug — ai</div>
+          <div class="demo-url">rename photos — ai</div>
         </div>
         <div class="demo-body">
-          <div class="demo-line"><span class="pr">$</span> <span class="in">ai -w=./src/** "find the bug in the login handler and fix it"</span></div>
-          <div class="demo-line"><span class="think">Scanning auth.rs for the login handler... The issue is in the token validation on line 142 — the expiry check is inverted.</span></div>
-          <div class="demo-line"><span class="tool">&#9881; read_file src/auth.rs:130-155</span></div>
-          <div class="demo-line"><span class="tool">&#9999; replace_in_file src/auth.rs</span></div>
-          <div class="demo-line"><span class="out">Fixed: changed `if now &lt; expiry` to `if now &gt; expiry`. Tokens will now correctly expire.</span></div>
-          <div class="demo-line"><span class="tool">&#128202; (1.9k, 800, 400)</span></div>
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai -w=./** "rename all .jpeg photos to .jpg and make everything lowercase"</span></div>
+          <div class="demo-line"><span class="think">Scanning the project for .jpeg files...</span></div>
+          <div class="demo-line"><span class="tool">🗂 list_dir ./</span></div>
+          <div class="demo-line"><span class="tool">↗ move_file Vacation/IMG_001.JPEG → vacation/img_001.jpg <span class="dim">(x57)</span></span></div>
+          <div class="demo-line"><span class="out">Done. Renamed 57 files across 3 subdirectories. All extensions normalized to .jpg, names lowercased.</span></div>
+          <div class="demo-line"><span class="tool">📈 (800, 200, 120)</span></div>
         </div>
       </div>
       <div class="demo-slide">
         <div class="demo-bar">
           <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
-          <div class="demo-url">refactor — ai</div>
+          <div class="demo-url">analyze document — ai</div>
         </div>
         <div class="demo-body">
-          <div class="demo-line"><span class="pr">$</span> <span class="in">ai -w=./src/** "add request logging middleware"</span></div>
-          <div class="demo-line"><span class="think">Checking the existing middleware chain to find the right insertion point...</span></div>
-          <div class="demo-line"><span class="tool">&#9881; read_file src/middleware/mod.rs</span></div>
-          <div class="demo-line"><span class="tool">&#9999; replace_in_file src/middleware/mod.rs</span></div>
-          <div class="demo-line"><span class="tool">&#x2712; write_file src/middleware/logger.rs</span></div>
-          <div class="demo-line"><span class="out">Added async request logger. Logs method, path, status, and duration to stderr.</span></div>
-          <div class="demo-line"><span class="tool">&#128202; (2.8k, 1.2k, 600)</span></div>
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai -r=./ "summarize this 10-K filing for me"</span></div>
+          <div class="demo-line"><span class="think">Extracting text from the SEC filing PDF...</span></div>
+          <div class="demo-line"><span class="tool">👁 file_view sec-filings/10k-2025.pdf</span></div>
+          <div class="demo-line"><span class="out">Apple Inc. fiscal year 2025 10-K filing:</span></div>
+          <div class="demo-line"><span class="out">• Total revenue: $418B (+6% YoY), Services up to 28% of revenue</span></div>
+          <div class="demo-line"><span class="out">• R&D spending rose 12% to $34B. 164,000 employees.</span></div>
+          <div class="demo-line"><span class="tool">📈 (2.1k, 600, 400)</span></div>
         </div>
       </div>
       <div class="demo-slide">
         <div class="demo-bar">
           <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
-          <div class="demo-url">research — ai</div>
+          <div class="demo-url">shell help — ai</div>
         </div>
         <div class="demo-body">
-          <div class="demo-line"><span class="pr">$</span> <span class="in">ai --web "what's the latest serde release and what changed?"</span></div>
-          <div class="demo-line"><span class="think">I'll search for the latest serde release notes.</span></div>
-          <div class="demo-line"><span class="tool">&#x1f310; web_search "serde crate latest release changelog"</span></div>
-          <div class="demo-line"><span class="out">serde 1.0.229 was released last week. Key changes:</span></div>
-          <div class="demo-line"><span class="out">&bull; Improved compile times for large derive macros</span></div>
-          <div class="demo-line"><span class="out">&bull; Added `#[serde(flatten)]` support for untagged enums</span></div>
-          <div class="demo-line"><span class="tool">&#128202; (400, 200, 1.2k)</span></div>
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai "find all git repos in ~/projects that have unpushed commits over a week old"</span></div>
+          <div class="demo-line"><span class="think">I'll walk through each git repo and check its status against the remote...</span></div>
+          <div class="demo-line"><span class="tool">🚀 execute find ~/projects -name .git -type d | while read d...</span></div>
+          <div class="demo-line"><span class="out">Here's a one-liner that lists stale branches with unpushed commits in every repo under ~/projects, sorted by age:</span></div>
+          <div class="demo-line"><span class="out">find ~/projects -name .git -type d -exec sh -c 'cd "$(dirname "$1")" && git log --oneline @{u}..' _ {} \;</span></div>
+          <div class="demo-line"><span class="tool">📈 (400, 200, 600)</span></div>
         </div>
       </div>
       <div class="demo-slide">
         <div class="demo-bar">
           <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
-          <div class="demo-url">git — ai</div>
+          <div class="demo-url">find a deal — ai</div>
         </div>
         <div class="demo-body">
-          <div class="demo-line"><span class="pr">$</span> <span class="in">ai -x git "summarize what I did today"</span></div>
-          <div class="demo-line"><span class="think">Checking today's git log for commits by the current user...</span></div>
-          <div class="demo-line"><span class="tool">&#9881; execute git log --since=midnight --author=me --oneline</span></div>
-          <div class="demo-line"><span class="out">3 commits today:</span></div>
-          <div class="demo-line"><span class="out">&bull; b9f2a1c fix: handle null pointer in parser</span></div>
-          <div class="demo-line"><span class="out">&bull; d7e4f88 feat: add rate limiter middleware</span></div>
-          <div class="demo-line"><span class="out">&bull; a3c1b22 chore: update dependencies</span></div>
-          <div class="demo-line"><span class="tool">&#128202; (300, 100, 500)</span></div>
-    </div>
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai --web "find the best price on a refurbished ThinkPad X1 Carbon Gen 11"</span></div>
+          <div class="demo-line"><span class="think">Searching across refurbished electronics marketplaces...</span></div>
+          <div class="demo-line"><span class="tool">🌐 web_search "refurbished ThinkPad X1 Carbon Gen 11 price best deal"</span></div>
+          <div class="demo-line"><span class="tool">🌐 web_fetch https://backmarket.com/thinkpad-x1-carbon...</span></div>
+          <div class="demo-line"><span class="out">Best deals right now on a Gen 11 (16GB/512GB):</span></div>
+          <div class="demo-line"><span class="out">• Back Market — $749 (Grade A, 1yr warranty)</span></div>
+          <div class="demo-line"><span class="out">• eBay Certified — $689 (Grade B, 30-day returns)</span></div>
+          <div class="demo-line"><span class="out">• Amazon Renewed — $799 (Grade A, 32GB/1TB)</span></div>
+          <div class="demo-line"><span class="tool">📈 (600, 300, 500)</span></div>
+        </div>
       </div>
       <div class="demo-slide">
         <div class="demo-bar">
           <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
-          <div class="demo-url">haiku — ai</div>
+          <div class="demo-url">work recap — ai</div>
         </div>
         <div class="demo-body">
-          <div class="demo-line"><span class="pr">$</span> <span class="in">ai "create a haiku on rust"</span></div>
-          <div class="demo-line"><span class="think">The user wants me to create a haiku about Rust. A haiku is a traditional Japanese poem with three lines and a 5-7-5 syllable pattern.</span></div>
-          <div class="demo-line"><span class="out">A type system strong,</span></div>
-          <div class="demo-line"><span class="out">Ownership ensures safety &mdash;</span></div>
-          <div class="demo-line"><span class="out">No fear of null here.</span></div>
-          <div class="demo-line"><span class="tool">&#128202; (490, 44, 19)</span></div>
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai -x git "what did the team ship this week?"</span></div>
+          <div class="demo-line"><span class="think">Pulling commit history and diff stats for the last 7 days...</span></div>
+          <div class="demo-line"><span class="tool">📜 git_log -n50</span></div>
+          <div class="demo-line"><span class="out">This week: 3 features landed, 11 bugs fixed across 5 repos.</span></div>
+          <div class="demo-line"><span class="out">• Rate-limiter middleware (alex, 8 commits)</span></div>
+          <div class="demo-line"><span class="out">• Dark mode in settings panel (jess, 12 commits)</span></div>
+          <div class="demo-line"><span class="out">• Fixed WebSocket reconnect race (reza, 5 commits)</span></div>
+          <div class="demo-line"><span class="tool">📈 (500, 200, 400)</span></div>
         </div>
       </div>
     </div>
@@ -178,7 +180,7 @@
     <div class="price-card">
       <div class="price-name">Core</div>
       <div class="price-amount"><span class="currency">$</span>0<span class="period">/mo</span></div>
-      <p class="price-desc">The AI, your data, nothing else. Perfect for questions, code review, and research.</p>
+      <p class="price-desc">The AI, your data, nothing else. Perfect for questions, research, and content analysis.</p>
       <ul class="price-features">
         <li>AI chat with any LLM</li>
         <li>Pipe data in and out</li>
@@ -193,7 +195,7 @@
       <div class="price-badge">Popular</div>
       <div class="price-name">Plus</div>
       <div class="price-amount"><span class="currency">$</span>0<span class="period">/mo</span></div>
-      <p class="price-desc">Everything in Core, plus filesystem and shell access. The daily driver for developers.</p>
+      <p class="price-desc">Everything in Core, plus filesystem and shell access. The daily driver for power users.</p>
       <ul class="price-features">
         <li>Everything in Core</li>
         <li>Filesystem access (r/w)</li>
