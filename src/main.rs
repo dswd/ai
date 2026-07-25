@@ -426,7 +426,8 @@ fn build_agent<M: CompletionModel + 'static>(
             .tool(tools::fs::ListDirTool::new(policy.clone()))
             .tool(tools::search::SearchContentTool::new(policy.clone()))
             .tool(tools::search::FindFilesTool::new(policy.clone()))
-            .tool(tools::fs::FileInfoTool::new(policy.clone()));
+            .tool(tools::fs::FileInfoTool::new(policy.clone()))
+            .tool(tools::fs::FileViewTool::new(policy.clone()));
     }
 
     if can_write {
