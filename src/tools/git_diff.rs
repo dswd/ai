@@ -5,7 +5,7 @@ use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::shared::ToolError;
+use super::shared::{ToolError, find_git_dir};
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::policy::{Action, Policy};
 
@@ -48,18 +48,23 @@ impl Tool for GitDiffTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        if !self.policy.is_allowed(&Action::Execute, "git") {
-            return Err(ToolError::Message(
-                "execution denied for command: git".to_string(),
-            ));
-        }
-
         info!(
             "{DIM}🔀 git diff{}{}{RESET}",
             args.staged
                 .map_or(String::new(), |_| " --staged".to_string()),
             fmt_offset_limit(args.offset, args.limit)
         );
+
+        let git_dir = find_git_dir()?;
+        if !self
+            .policy
+            .is_allowed(&Action::Read, &git_dir.to_string_lossy())
+        {
+            return Err(ToolError::Message(format!(
+                "read access denied for git repository: {}",
+                git_dir.display()
+            )));
+        }
 
         let mut cmd = std::process::Command::new("git");
         cmd.arg("diff");

@@ -427,7 +427,9 @@ fn build_agent<M: CompletionModel + 'static>(
             .tool(tools::SearchContentTool::new(policy.clone()))
             .tool(tools::FindFilesTool::new(policy.clone()))
             .tool(tools::FileInfoTool::new(policy.clone()))
-            .tool(tools::FileViewTool::new(policy.clone()));
+            .tool(tools::FileViewTool::new(policy.clone()))
+            .tool(tools::GitDiffTool::new(policy.clone()))
+            .tool(tools::GitLogTool::new(policy.clone()));
     }
 
     if can_write {
@@ -441,10 +443,7 @@ fn build_agent<M: CompletionModel + 'static>(
     }
 
     if can_exec {
-        server = server
-            .tool(tools::ExecuteTool::new(policy.clone()))
-            .tool(tools::GitDiffTool::new(policy.clone()))
-            .tool(tools::GitLogTool::new(policy.clone()));
+        server = server.tool(tools::ExecuteTool::new(policy.clone()));
     }
 
     if can_web_fetch {
@@ -456,8 +455,6 @@ fn build_agent<M: CompletionModel + 'static>(
     if can_web_search {
         server = server.tool(tools::WebSearchTool::new(policy.clone()));
     }
-
-    server = server.tool(tools::ThinkTool::new());
 
     if let Some(ref mem) = memory {
         server = server
@@ -665,7 +662,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
 
                 if trimmed == "/tools" {
                     io::stderr_line(
-                        "Available tools: read_file, write_file, list_dir, replace_in_file, delete_file, create_directory, file_info, move_file, copy_file, search_content, find_files, execute, git_diff, git_log, web_fetch, web_search, download_file, think, memory_add, memory_delete",
+                        "Available tools: read_file, write_file, list_dir, replace_in_file, delete_file, create_directory, file_info, move_file, copy_file, search_content, find_files, execute, git_diff, git_log, web_fetch, web_search, download_file, memory_add, memory_delete",
                     );
                     continue;
                 }
