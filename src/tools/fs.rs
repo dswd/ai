@@ -467,3 +467,266 @@ impl Tool for CreateDirectoryTool {
         Ok(result)
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct FileInfoArgs {
+    #[schemars(description = "Path to the file or directory")]
+    pub path: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileInfoTool {
+    policy: Policy,
+}
+
+impl FileInfoTool {
+    pub fn new(policy: Policy) -> Self {
+        Self { policy }
+    }
+}
+
+impl Tool for FileInfoTool {
+    const NAME: &'static str = "file_info";
+
+    type Args = FileInfoArgs;
+    type Output = String;
+    type Error = ToolExecError;
+
+    fn description(&self) -> String {
+        "Get metadata about a file or directory: size, permissions, modification time, type."
+            .to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(FileInfoArgs)).unwrap_or_default()
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let path = PathBuf::from(&args.path);
+        let canonical = path
+            .canonicalize()
+            .map_err(|e| ToolExecError::Message(format!("cannot resolve path: {e}")))?;
+        let canonical_str = canonical.to_string_lossy();
+
+        if !self.policy.is_allowed(&Action::Read, &canonical_str) {
+            return Err(ToolExecError::Message(format!(
+                "read access denied for: {canonical_str}"
+            )));
+        }
+
+        let meta = std::fs::symlink_metadata(&canonical)
+            .map_err(|e| ToolExecError::Message(format!("cannot read metadata: {e}")))?;
+
+        let size = meta.len();
+        let size_str = if size < 1024 {
+            format!("{size} B")
+        } else if size < 1024 * 1024 {
+            format!("{:.1} KB", size as f64 / 1024.0)
+        } else {
+            format!("{:.1} MB", size as f64 / (1024.0 * 1024.0))
+        };
+
+        let modified = meta
+            .modified()
+            .ok()
+            .map(|t| {
+                let dur = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                let secs = dur.as_secs();
+                format!("{secs}")
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let permissions = if meta.permissions().readonly() {
+            "r--"
+        } else {
+            "rw-"
+        };
+
+        let entry_type = if canonical.is_dir() {
+            "directory"
+        } else if canonical.is_symlink() {
+            "symlink"
+        } else if canonical.is_file() {
+            "file"
+        } else {
+            "unknown"
+        };
+
+        let result = format!(
+            "Type: {entry_type}\nSize: {size_str}\nPermission: {permissions}\nModified: {modified}"
+        );
+
+        info!("{DIM}ℹℹ️ file_info {}{RESET}", args.path);
+        debug!("{DIM}  \u{2192} {}{RESET}", result);
+        Ok(result)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MoveFileArgs {
+    #[schemars(description = "Source path")]
+    pub source: String,
+    #[schemars(description = "Destination path")]
+    pub destination: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MoveFileTool {
+    policy: Policy,
+}
+
+impl MoveFileTool {
+    pub fn new(policy: Policy) -> Self {
+        Self { policy }
+    }
+}
+
+impl Tool for MoveFileTool {
+    const NAME: &'static str = "move_file";
+
+    type Args = MoveFileArgs;
+    type Output = String;
+    type Error = ToolExecError;
+
+    fn description(&self) -> String {
+        "Move or rename a file or directory.".to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(MoveFileArgs)).unwrap_or_default()
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let src_path = PathBuf::from(&args.source);
+        let src = src_path
+            .canonicalize()
+            .map_err(|e| ToolExecError::Message(format!("cannot resolve path: {e}")))?;
+        let src_str = src.to_string_lossy().to_string();
+        if !self.policy.is_allowed(&Action::Write, &src_str) {
+            return Err(ToolExecError::Message(format!(
+                "write access denied for: {src_str}"
+            )));
+        }
+
+        let dst_parent = std::path::Path::new(&args.destination)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+        let dst_canonical = if dst_parent.exists() {
+            dst_parent.canonicalize().unwrap_or(dst_parent).join(
+                std::path::Path::new(&args.destination)
+                    .file_name()
+                    .unwrap_or_default(),
+            )
+        } else {
+            std::path::PathBuf::from(&args.destination)
+        };
+
+        let dst_str = dst_canonical.to_string_lossy().to_string();
+
+        if !self.policy.is_allowed(&Action::Write, &dst_str) {
+            return Err(ToolExecError::Message(format!(
+                "write access denied for: {dst_str}"
+            )));
+        }
+
+        std::fs::rename(&src, &dst_canonical)
+            .map_err(|e| ToolExecError::Message(format!("cannot move file: {e}")))?;
+
+        let result = format!("Moved {} to {}", args.source, args.destination);
+        info!(
+            "{DIM}➡️ move_file {} -> {}{RESET}",
+            args.source, args.destination
+        );
+        Ok(result)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CopyFileArgs {
+    #[schemars(description = "Source path")]
+    pub source: String,
+    #[schemars(description = "Destination path")]
+    pub destination: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct CopyFileTool {
+    policy: Policy,
+}
+
+impl CopyFileTool {
+    pub fn new(policy: Policy) -> Self {
+        Self { policy }
+    }
+}
+
+impl Tool for CopyFileTool {
+    const NAME: &'static str = "copy_file";
+
+    type Args = CopyFileArgs;
+    type Output = String;
+    type Error = ToolExecError;
+
+    fn description(&self) -> String {
+        "Copy a file to a new location.".to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(CopyFileArgs)).unwrap_or_default()
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let src_path = PathBuf::from(&args.source);
+        let src = src_path
+            .canonicalize()
+            .map_err(|e| ToolExecError::Message(format!("cannot resolve path: {e}")))?;
+        let src_str = src.to_string_lossy().to_string();
+        if !self.policy.is_allowed(&Action::Read, &src_str) {
+            return Err(ToolExecError::Message(format!(
+                "read access denied for: {src_str}"
+            )));
+        }
+
+        if !src.is_file() {
+            return Err(ToolExecError::Message(format!(
+                "cannot copy: {src_str} is not a file"
+            )));
+        }
+
+        let dst_parent = std::path::Path::new(&args.destination)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+        if !dst_parent.exists() {
+            std::fs::create_dir_all(&dst_parent)
+                .map_err(|e| ToolExecError::Message(format!("cannot create parent dirs: {e}")))?;
+        }
+
+        let dst_canonical = dst_parent.canonicalize().unwrap_or(dst_parent).join(
+            std::path::Path::new(&args.destination)
+                .file_name()
+                .unwrap_or_default(),
+        );
+
+        let dst_str = dst_canonical.to_string_lossy().to_string();
+
+        if !self.policy.is_allowed(&Action::Write, &dst_str) {
+            return Err(ToolExecError::Message(format!(
+                "write access denied for: {dst_str}"
+            )));
+        }
+
+        std::fs::copy(&src, &dst_canonical)
+            .map_err(|e| ToolExecError::Message(format!("cannot copy file: {e}")))?;
+
+        let result = format!("Copied {} to {}", args.source, args.destination);
+        info!(
+            "{DIM}🗐 copy_file {} -> {}{RESET}",
+            args.source, args.destination
+        );
+        Ok(result)
+    }
+}

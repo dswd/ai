@@ -175,3 +175,168 @@ impl Tool for ExecuteTool {
         process_output(&result, args.offset, args.limit).map_err(ExecError::Message)
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GitDiffArgs {
+    #[schemars(description = "Show staged changes (--staged)")]
+    pub staged: Option<bool>,
+    #[schemars(description = "Limit diff to a specific file path")]
+    pub path: Option<String>,
+    #[schemars(description = "Line number to start reading from (0-based)")]
+    pub offset: Option<usize>,
+    #[schemars(description = "Maximum number of lines to return")]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitDiffTool {
+    policy: Policy,
+}
+
+impl GitDiffTool {
+    pub fn new(policy: Policy) -> Self {
+        Self { policy }
+    }
+}
+
+impl Tool for GitDiffTool {
+    const NAME: &'static str = "git_diff";
+
+    type Args = GitDiffArgs;
+    type Output = String;
+    type Error = ExecError;
+
+    fn description(&self) -> String {
+        "Show git diff of working tree changes.".to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(GitDiffArgs)).unwrap_or_default()
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        if !self.policy.is_allowed(&Action::Execute, "git") {
+            return Err(ExecError::Message(
+                "execution denied for command: git".to_string(),
+            ));
+        }
+
+        info!(
+            "{DIM}🔀 git diff{}{}{RESET}",
+            args.staged
+                .map_or(String::new(), |_| " --staged".to_string()),
+            fmt_offset_limit(args.offset, args.limit)
+        );
+
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("diff");
+        cmd.arg("--no-color");
+
+        if args.staged.unwrap_or(false) {
+            cmd.arg("--staged");
+        }
+        if let Some(ref path) = args.path {
+            cmd.arg("--").arg(path);
+        }
+
+        let output = cmd
+            .output()
+            .map_err(|e| ExecError::Message(format!("git diff failed: {e}")))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let result = if stdout.trim().is_empty() {
+            "No changes.".to_string()
+        } else {
+            stdout.to_string()
+        };
+
+        let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
+        debug!(
+            "{DIM} {} \n{truncated}\n {} {RESET}",
+            bar_title("git diff"),
+            bar_line()
+        );
+        process_output(&result, args.offset, args.limit).map_err(ExecError::Message)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GitLogArgs {
+    #[schemars(description = "Number of commits to show (default: 20)")]
+    pub n: Option<usize>,
+    #[schemars(description = "Limit log to a specific file path")]
+    pub path: Option<String>,
+    #[schemars(description = "Line number to start reading from (0-based)")]
+    pub offset: Option<usize>,
+    #[schemars(description = "Maximum number of lines to return")]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitLogTool {
+    policy: Policy,
+}
+
+impl GitLogTool {
+    pub fn new(policy: Policy) -> Self {
+        Self { policy }
+    }
+}
+
+impl Tool for GitLogTool {
+    const NAME: &'static str = "git_log";
+
+    type Args = GitLogArgs;
+    type Output = String;
+    type Error = ExecError;
+
+    fn description(&self) -> String {
+        "Show git commit log (--oneline).".to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(GitLogArgs)).unwrap_or_default()
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        if !self.policy.is_allowed(&Action::Execute, "git") {
+            return Err(ExecError::Message(
+                "execution denied for command: git".to_string(),
+            ));
+        }
+
+        info!(
+            "{DIM}📜 git log -n{}{}{RESET}",
+            args.n.unwrap_or(20),
+            fmt_offset_limit(args.offset, args.limit)
+        );
+
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("log");
+        cmd.arg("--oneline");
+        cmd.arg(format!("-n{}", args.n.unwrap_or(20)));
+
+        if let Some(ref path) = args.path {
+            cmd.arg("--").arg(path);
+        }
+
+        let output = cmd
+            .output()
+            .map_err(|e| ExecError::Message(format!("git log failed: {e}")))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let result = if stdout.trim().is_empty() {
+            "No commits.".to_string()
+        } else {
+            stdout.to_string()
+        };
+
+        let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
+        debug!(
+            "{DIM} {} \n{truncated}\n {} {RESET}",
+            bar_title("git log"),
+            bar_line()
+        );
+        process_output(&result, args.offset, args.limit).map_err(ExecError::Message)
+    }
+}

@@ -53,8 +53,7 @@ async fn main() -> anyhow::Result<()> {
         .clone()
         .or_else(|| config.system_prompt.clone())
         .unwrap_or_else(|| {
-            "You are a CLI assistant with access to tools for reading, writing, and searching files, \
-             as well as running shell commands. Use tools when helpful. Keep responses concise. \
+            "You are a CLI assistant. Keep responses concise. \
              For multi-step tasks, work methodically and report progress."
                 .to_string()
         });
@@ -426,7 +425,8 @@ fn build_agent<M: CompletionModel + 'static>(
             .tool(tools::fs::ReadFileTool::new(policy.clone()))
             .tool(tools::fs::ListDirTool::new(policy.clone()))
             .tool(tools::search::SearchContentTool::new(policy.clone()))
-            .tool(tools::search::FindFilesTool::new(policy.clone()));
+            .tool(tools::search::FindFilesTool::new(policy.clone()))
+            .tool(tools::fs::FileInfoTool::new(policy.clone()));
     }
 
     if can_write {
@@ -434,15 +434,22 @@ fn build_agent<M: CompletionModel + 'static>(
             .tool(tools::fs::WriteFileTool::new(policy.clone()))
             .tool(tools::fs::ReplaceInFileTool::new(policy.clone()))
             .tool(tools::fs::DeleteFileTool::new(policy.clone()))
-            .tool(tools::fs::CreateDirectoryTool::new(policy.clone()));
+            .tool(tools::fs::CreateDirectoryTool::new(policy.clone()))
+            .tool(tools::fs::MoveFileTool::new(policy.clone()))
+            .tool(tools::fs::CopyFileTool::new(policy.clone()));
     }
 
     if can_exec {
-        server = server.tool(tools::exec::ExecuteTool::new(policy.clone()));
+        server = server
+            .tool(tools::exec::ExecuteTool::new(policy.clone()))
+            .tool(tools::exec::GitDiffTool::new(policy.clone()))
+            .tool(tools::exec::GitLogTool::new(policy.clone()));
     }
 
     if can_web_fetch {
-        server = server.tool(tools::web::WebFetchTool::new(policy.clone()));
+        server = server
+            .tool(tools::web::WebFetchTool::new(policy.clone()))
+            .tool(tools::web::DownloadFileTool::new(policy.clone()));
     }
 
     if can_web_search {
@@ -656,7 +663,9 @@ async fn run_interactive<M: CompletionModel + 'static>(
                 }
 
                 if trimmed == "/tools" {
-                    io::stderr_line("Available tools: read_file, write_file, list_dir, execute");
+                    io::stderr_line(
+                        "Available tools: read_file, write_file, list_dir, replace_in_file, delete_file, create_directory, file_info, move_file, copy_file, search_content, find_files, execute, git_diff, git_log, web_fetch, web_search, download_file, think, memory_add, memory_delete",
+                    );
                     continue;
                 }
 
