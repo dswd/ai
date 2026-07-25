@@ -43,6 +43,10 @@ impl Tool for CopyFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!(
+            "{DIM}🗐 copy file {} -> {}{RESET}",
+            args.source, args.destination
+        );
         let src_path = PathBuf::from(&args.source);
         let src = src_path
             .canonicalize()
@@ -88,10 +92,6 @@ impl Tool for CopyFileTool {
             .map_err(|e| ToolError::Message(format!("cannot copy file: {e}")))?;
 
         let result = format!("Copied {} to {}", args.source, args.destination);
-        info!(
-            "{DIM}🗐 copy_file {} -> {}{RESET}",
-            args.source, args.destination
-        );
         Ok(result)
     }
 }

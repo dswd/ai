@@ -42,6 +42,7 @@ impl Tool for DownloadFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("{DIM}📥 download file {}{RESET}", args.url);
         if args.url.is_empty() {
             return Err(ToolError::Message("URL is required".to_string()));
         }
@@ -123,7 +124,6 @@ impl Tool for DownloadFileTool {
         };
 
         let result = format!("Downloaded {} ({size_str})", args.url);
-        info!("{DIM}📥 download_file {}{RESET}", args.url);
         Ok(result)
     }
 }

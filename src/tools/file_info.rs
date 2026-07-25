@@ -42,6 +42,7 @@ impl Tool for FileInfoTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("{DIM}ℹ️ file info {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -96,7 +97,6 @@ impl Tool for FileInfoTool {
             "Type: {entry_type}\nSize: {size_str}\nPermission: {permissions}\nModified: {modified}"
         );
 
-        info!("{DIM}ℹ️ file_info {}{RESET}", args.path);
         debug!("{DIM}  \u{2192} {}{RESET}", result);
         Ok(result)
     }

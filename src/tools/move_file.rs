@@ -43,6 +43,10 @@ impl Tool for MoveFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!(
+            "{DIM}➡️ move file {} -> {}{RESET}",
+            args.source, args.destination
+        );
         let src_path = PathBuf::from(&args.source);
         let src = src_path
             .canonicalize()
@@ -81,10 +85,6 @@ impl Tool for MoveFileTool {
             .map_err(|e| ToolError::Message(format!("cannot move file: {e}")))?;
 
         let result = format!("Moved {} to {}", args.source, args.destination);
-        info!(
-            "{DIM}➡️ move_file {} -> {}{RESET}",
-            args.source, args.destination
-        );
         Ok(result)
     }
 }

@@ -45,6 +45,7 @@ impl Tool for FileViewTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        info!("{DIM}👁️ file view {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()
@@ -78,7 +79,6 @@ impl Tool for FileViewTool {
 
         match result {
             Some(r) => {
-                info!("{DIM}👁️ file_view {}{RESET}", args.path);
                 let truncated = truncate(&r.text_content, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
                 debug!(
                     "{DIM} {} \n{truncated}\n {} {RESET}",
