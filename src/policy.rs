@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use std::fmt;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Read,
@@ -11,6 +13,18 @@ pub enum Action {
     Execute,
     WebFetch,
     WebSearch,
+}
+
+impl fmt::Display for Action {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Action::Read => write!(f, "read"),
+            Action::Write => write!(f, "write"),
+            Action::Execute => write!(f, "execute"),
+            Action::WebFetch => write!(f, "web fetch"),
+            Action::WebSearch => write!(f, "web search"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -127,6 +141,30 @@ impl Policy {
             .iter()
             .chain(self.rules.iter())
             .any(|rule| matches!(rule, PolicyRule::Allow(a, _) if a == action))
+    }
+
+    pub fn summary(&self) -> String {
+        let mut lines = vec!["## Policy".to_string()];
+
+        for rule in self.cli_rules.iter().chain(self.rules.iter()) {
+            match rule {
+                PolicyRule::Allow(action, pattern) => {
+                    lines.push(format!("- allow {} {}", action, pattern));
+                }
+                PolicyRule::Deny(action, pattern) => {
+                    lines.push(format!("- deny {} {}", action, pattern));
+                }
+            }
+        }
+
+        lines.push(String::new());
+        if self.ask {
+            lines.push("You may ask for more permissions — the user will be asked to approve each request.".to_string());
+        } else {
+            lines.push("Do not try additional permissions.".to_string());
+        }
+
+        lines.join("\n")
     }
 }
 

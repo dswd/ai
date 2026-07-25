@@ -82,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
     let thinking = cli.thinking.or(config.thinking);
 
     let policy = load_policy(&cli, &config)?;
+    system_prompt = format!("{system_prompt}\n\n{}", policy.summary());
     let session_dir = config.session_dir_resolved();
 
     if cli.list {
