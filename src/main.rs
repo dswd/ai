@@ -422,47 +422,47 @@ fn build_agent<M: CompletionModel + 'static>(
 
     if can_read {
         server = server
-            .tool(tools::fs::ReadFileTool::new(policy.clone()))
-            .tool(tools::fs::ListDirTool::new(policy.clone()))
-            .tool(tools::search::SearchContentTool::new(policy.clone()))
-            .tool(tools::search::FindFilesTool::new(policy.clone()))
-            .tool(tools::fs::FileInfoTool::new(policy.clone()))
-            .tool(tools::fs::FileViewTool::new(policy.clone()));
+            .tool(tools::ReadFileTool::new(policy.clone()))
+            .tool(tools::ListDirTool::new(policy.clone()))
+            .tool(tools::SearchContentTool::new(policy.clone()))
+            .tool(tools::FindFilesTool::new(policy.clone()))
+            .tool(tools::FileInfoTool::new(policy.clone()))
+            .tool(tools::FileViewTool::new(policy.clone()));
     }
 
     if can_write {
         server = server
-            .tool(tools::fs::WriteFileTool::new(policy.clone()))
-            .tool(tools::fs::ReplaceInFileTool::new(policy.clone()))
-            .tool(tools::fs::DeleteFileTool::new(policy.clone()))
-            .tool(tools::fs::CreateDirectoryTool::new(policy.clone()))
-            .tool(tools::fs::MoveFileTool::new(policy.clone()))
-            .tool(tools::fs::CopyFileTool::new(policy.clone()));
+            .tool(tools::WriteFileTool::new(policy.clone()))
+            .tool(tools::ReplaceInFileTool::new(policy.clone()))
+            .tool(tools::DeleteFileTool::new(policy.clone()))
+            .tool(tools::CreateDirectoryTool::new(policy.clone()))
+            .tool(tools::MoveFileTool::new(policy.clone()))
+            .tool(tools::CopyFileTool::new(policy.clone()));
     }
 
     if can_exec {
         server = server
-            .tool(tools::exec::ExecuteTool::new(policy.clone()))
-            .tool(tools::exec::GitDiffTool::new(policy.clone()))
-            .tool(tools::exec::GitLogTool::new(policy.clone()));
+            .tool(tools::ExecuteTool::new(policy.clone()))
+            .tool(tools::GitDiffTool::new(policy.clone()))
+            .tool(tools::GitLogTool::new(policy.clone()));
     }
 
     if can_web_fetch {
         server = server
-            .tool(tools::web::WebFetchTool::new(policy.clone()))
-            .tool(tools::web::DownloadFileTool::new(policy.clone()));
+            .tool(tools::WebFetchTool::new(policy.clone()))
+            .tool(tools::DownloadFileTool::new(policy.clone()));
     }
 
     if can_web_search {
-        server = server.tool(tools::web::WebSearchTool::new(policy.clone()));
+        server = server.tool(tools::WebSearchTool::new(policy.clone()));
     }
 
-    server = server.tool(tools::think::ThinkTool::new());
+    server = server.tool(tools::ThinkTool::new());
 
     if let Some(ref mem) = memory {
         server = server
-            .tool(tools::memory::MemoryAddTool::new(Arc::clone(mem)))
-            .tool(tools::memory::MemoryDeleteTool::new(Arc::clone(mem)));
+            .tool(tools::MemoryAddTool::new(Arc::clone(mem)))
+            .tool(tools::MemoryDeleteTool::new(Arc::clone(mem)));
     }
 
     for set in tool_sets {

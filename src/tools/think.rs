@@ -4,17 +4,12 @@ use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::shared::ToolError;
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ThinkArgs {
     #[schemars(description = "A thought to think about.")]
     pub thought: String,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ThinkError {
-    #[error("{0}")]
-    #[allow(dead_code)]
-    Message(String),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -31,7 +26,7 @@ impl Tool for ThinkTool {
 
     type Args = ThinkArgs;
     type Output = String;
-    type Error = ThinkError;
+    type Error = ToolError;
 
     fn description(&self) -> String {
         "Use the tool to think about something. It will not obtain new information or make changes, \
