@@ -34,7 +34,16 @@
     <li><a href="#sessions">Sessions</a></li>
     <li><a href="#memory">Memory</a></li>
     <li><a href="#mcp">MCP Tool Servers</a></li>
-    <li><a href="#builtin-tools">Built-in Tools</a></li>
+    <li><a href="#builtin-tools">Built-in Tools</a>
+      <ul class="toc-sub">
+        <li><a href="#builtin-tools">Filesystem</a></li>
+        <li><a href="#builtin-tools">Execution</a></li>
+        <li><a href="#builtin-tools">Search</a></li>
+        <li><a href="#builtin-tools">Web</a></li>
+        <li><a href="#browser-tools">Browser</a></li>
+        <li><a href="#builtin-tools">Other</a></li>
+      </ul>
+    </li>
     <li><a href="#vanilla-mode">Vanilla Mode</a></li>
     <li><a href="#quiet-verbose">Quiet &amp; Verbose</a></li>
     <li><a href="#thinking">Extended Thinking</a></li>
@@ -252,10 +261,10 @@ deny web-search *confidential*
 <p>Path patterns support glob wildcards and are <strong>segment-aware</strong>: <code>/tmp</code> matches <code>/tmp/foo.txt</code> but <em>not</em> <code>/tmpfile</code>. Relative patterns resolve against the home directory. <code>~</code> is expanded.</p>
 
 <h3>Execute Patterns</h3>
-<p>For shell commands, <strong>ai</strong> parses the command string by splitting on <code>&amp;&amp;</code>, <code>||</code>, <code>|</code>, <code>;</code>, and <code>&amp;</code>, extracting individual command names. Each is checked against the Execute allowlist. Chained destructive commands like <code>cargo build &amp;&amp; rm -rf /</code> are individually vetted.</p>
+<p>The <code>execute</code> tool is always available. 164 built-in commands (echo, cat, grep, sed, git, curl, &hellip;) run inside a virtual bash interpreter (<strong>bashkit</strong>) and are governed by <strong>filesystem read/write policy</strong>, not execute permissions. Only external commands (e.g. <code>cargo</code>, <code>npm</code>, <code>python</code>) are checked against the execute allowlist.</p>
 
-<div class="warn-callout">
-  <strong>Example:</strong> With <code>allow execute cargo,git</code> and a prompt that calls <code>cargo build &amp;&amp; rm -rf /</code>, the <code>cargo</code> command passes but <code>rm</code> is denied — and the interactive fallback ask will confirm that individual denial.
+<div class="info-callout">
+  <strong>Example:</strong> With <code>allow execute cargo</code>, running <code>cargo build</code> is allowed (external command) but <code>cat Cargo.toml</code> needs <code>allow read Cargo.toml</code> (builtin, FS policy). Running <code>rm -rf /</code> needs <code>allow write /</code>. Builtins like <code>echo</code>, <code>ls</code>, <code>grep</code> follow the same FS policy — they check read/write on the files they access, not execute on their name.
 </div>
 
 <h3>Interactive Ask Mode</h3>
@@ -335,7 +344,7 @@ deny web-search *confidential*
 
 <section id="builtin-tools">
 <h2>Built-in Tools</h2>
-<p>20 built-in tools are conditionally registered based on active policy rules.</p>
+<p>25 built-in tools are conditionally registered based on active policy rules.</p>
 
 <h3>Filesystem</h3>
 <div class="tool-card">
@@ -413,7 +422,7 @@ deny web-search *confidential*
 </div>
 <div class="tool-card">
   <h4><span class="name">file_view</span></h4>
-  <p>Extract readable text from rich documents by converting them to Markdown. Supports PDF, DOCX, XLSX, PPTX, HTML, CSV, XML, images, and ZIP archives.</p>
+  <p>Extract readable text from rich documents by converting them to Markdown via <strong>markitdown</strong>. Supports PDF, DOCX, XLSX, PPTX, HTML, CSV, XML, images, and ZIP archives.</p>
   <div class="params">
     <span class="required">path</span>
   </div>
@@ -422,7 +431,7 @@ deny web-search *confidential*
 <h3>Execution</h3>
 <div class="tool-card">
   <h4><span class="name">execute</span></h4>
-  <p>Run a shell command. Chained commands are parsed individually for policy checks. Uses <code>sh -c</code> (Unix) or <code>cmd /C</code> (Windows).</p>
+  <p>Run a shell command. 164 built-in commands (echo, cat, grep, sed, git, etc.) run in-process via bashkit — no forking. External commands fork-exec as needed. Filesystem access governed by read/write policy.</p>
   <div class="params">
     <span class="required">command</span>
     <span>cwd?</span>
@@ -489,7 +498,7 @@ deny web-search *confidential*
 </div>
 <div class="tool-card">
   <h4><span class="name">web_search</span></h4>
-  <p>Search DuckDuckGo and return results with titles, URLs, and snippets. Max 20 results.</p>
+  <p>Search DuckDuckGo, Google, and Bing via stealth headless browser. Returns results with titles, URLs, and snippets. Max 20 results.</p>
   <div class="params">
     <span class="required">query</span>
     <span>num_results?</span>
@@ -503,6 +512,50 @@ deny web-search *confidential*
   <div class="params">
     <span class="required">url</span>
     <span class="required">path</span>
+  </div>
+</div>
+
+  <h3 id="browser-tools">Browser</h3>
+<div class="tool-card">
+  <h4><span class="name">browser_navigate</span></h4>
+  <p>Navigate the browser to a URL. Returns the page title and content size. Requires web-fetch permission on the URL.</p>
+  <div class="params">
+    <span class="required">url</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">browser_click</span></h4>
+  <p>Click an element by CSS selector on the current page. Navigates to a URL first if provided.</p>
+  <div class="params">
+    <span class="required">selector</span>
+    <span>url?</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">browser_get_content</span></h4>
+  <p>Get the full page content in markdown or raw HTML. Requires a prior navigate call.</p>
+  <div class="params">
+    <span>format?</span>
+    <span>offset?</span>
+    <span>limit?</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">browser_get_element</span></h4>
+  <p>Extract a specific DOM element by CSS selector in markdown or raw HTML.</p>
+  <div class="params">
+    <span class="required">selector</span>
+    <span>format?</span>
+    <span>offset?</span>
+    <span>limit?</span>
+  </div>
+</div>
+<div class="tool-card">
+  <h4><span class="name">browser_evaluate</span></h4>
+  <p>Execute arbitrary JavaScript on the current page and return the result as JSON.</p>
+  <div class="params">
+    <span class="required">expression</span>
+    <span>url?</span>
   </div>
 </div>
 

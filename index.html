@@ -63,9 +63,9 @@
           <div class="demo-url">shell help — ai</div>
         </div>
         <div class="demo-body">
-          <div class="demo-line"><span class="pr">$</span> <span class="in">ai "find all git repos in ~/projects that have unpushed commits over a week old"</span></div>
-          <div class="demo-line"><span class="think">I'll walk through each git repo and check its status against the remote...</span></div>
-          <div class="demo-line"><span class="tool">🚀 execute find ~/projects -name .git -type d | while read d...</span></div>
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai -r=./ "find all git repos in ~/projects that have unpushed commits over a week old"</span></div>
+          <div class="demo-line"><span class="think">I'll find every git working tree and check its status against the remote...</span></div>
+          <div class="demo-line"><span class="tool">🚀 execute find ~/projects -name .git -type d -exec sh -c 'cd ...' _ {} \;</span></div>
           <div class="demo-line"><span class="out">Here's a one-liner that lists stale branches with unpushed commits in every repo under ~/projects, sorted by age:</span></div>
           <div class="demo-line"><span class="out">find ~/projects -name .git -type d -exec sh -c 'cd "$(dirname "$1")" && git log --oneline @{u}..' _ {} \;</span></div>
           <div class="demo-line"><span class="tool">📈 (400, 200, 600)</span></div>
@@ -104,6 +104,21 @@
           <div class="demo-line"><span class="tool">📈 (500, 200, 400)</span></div>
         </div>
       </div>
+      <div class="demo-slide">
+        <div class="demo-bar">
+          <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+          <div class="demo-url">scrape product — ai</div>
+        </div>
+        <div class="demo-body">
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai --web "get the specs and price of the MacBook Pro on apple.com"</span></div>
+          <div class="demo-line"><span class="think">Launching headless browser to extract product details...</span></div>
+          <div class="demo-line"><span class="tool">💻 browser_navigate https://www.apple.com/macbook-pro/</span></div>
+          <div class="demo-line"><span class="tool">💻 browser_get_element #specs</span></div>
+          <div class="demo-line"><span class="out">MacBook Pro 16\": M4 Max, up to 128GB unified memory, 36hr battery</span></div>
+          <div class="demo-line"><span class="out">• Starting at $2,499 · 512GB SSD standard</span></div>
+          <div class="demo-line"><span class="tool">📈 (600, 200, 300)</span></div>
+        </div>
+      </div>
     </div>
   </div>
   <div class="demo-nav">
@@ -134,7 +149,12 @@
     <div class="opt-card">
       <div class="icon icon-green">&#x1f310;</div>
       <h3>Web Access</h3>
-      <p><strong>Search the web</strong> via DuckDuckGo. <strong>Fetch any URL</strong> and convert HTML to readable text. Independently gated with <strong>URL allowlists</strong>.</p>
+      <p><strong>Search the web</strong> via DuckDuckGo, Google, or Bing using a stealth headless browser. <strong>Fetch any URL</strong> and convert HTML to readable text. Independently gated with <strong>URL allowlists</strong>.</p>
+    </div>
+    <div class="opt-card">
+      <div class="icon icon-green">&#x1f4bb;</div>
+      <h3>Browser Automation</h3>
+      <p><strong>Navigate, click, extract</strong> — drive a real headless browser for JavaScript-heavy sites, login flows, and dynamic content. Requires <strong>web-fetch permission</strong>.</p>
     </div>
     <div class="opt-card">
       <div class="icon icon-blue">&#x1f4c1;</div>
@@ -144,7 +164,7 @@
     <div class="opt-card">
       <div class="icon icon-rose">$&gt;</div>
       <h3>Shell Commands</h3>
-      <p>Execute commands vetted by a <strong>command allowlist</strong>. Detects individual commands in command pipelines.</p>
+      <p>164 built-in commands (grep, sed, awk, find, tar, curl, git, …) run <strong>in-process</strong> via bashkit. Only external commands need allowlisting. Filesystem access governed by <strong>read/write policy</strong>.</p>
     </div>
     <div class="opt-card">
       <div class="icon icon-purple">&#x1f9e0;</div>
@@ -213,6 +233,7 @@
       <ul class="price-features">
         <li>Everything in Plus</li>
         <li>Web search &amp; fetch</li>
+        <li>Browser automation</li>
         <li>Persistent memory store</li>
         <li>MCP tool server support</li>
         <li>Long-term conversation memory</li>
