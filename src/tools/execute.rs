@@ -98,7 +98,7 @@ impl Tool for ExecuteTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!(
-            "{DIM}\u{1F680} execute {}{}{RESET}",
+            "{DIM}🚀 execute {}{}{RESET}",
             args.command,
             fmt_offset_limit(args.offset, args.limit)
         );

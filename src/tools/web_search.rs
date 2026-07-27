@@ -198,6 +198,7 @@ impl WebSearchTool {
         fetch(&url).await.map_err(|e| format!("DDG: {e}"))
     }
 
+    #[cfg(feature = "browser")]
     async fn search_google(&self, query: &str) -> Result<String, String> {
         let query = query.to_string();
         let query_escaped = query.replace('\\', "\\\\").replace('\'', "\\'");
@@ -250,6 +251,12 @@ impl WebSearchTool {
         .map_err(|e| e.to_string())?
     }
 
+    #[cfg(not(feature = "browser"))]
+    async fn search_google(&self, _query: &str) -> Result<String, String> {
+        Err("Google search requires the browser feature".to_string())
+    }
+
+    #[cfg(feature = "browser")]
     async fn search_bing(&self, query: &str) -> Result<String, String> {
         let query = query.to_string();
         let query_escaped = query.replace('\\', "\\\\").replace('\'', "\\'");
@@ -301,6 +308,11 @@ impl WebSearchTool {
         .await
         .map_err(|_| "search timed out after 30s".to_string())?
         .map_err(|e| e.to_string())?
+    }
+
+    #[cfg(not(feature = "browser"))]
+    async fn search_bing(&self, _query: &str) -> Result<String, String> {
+        Err("Bing search requires the browser feature".to_string())
     }
 }
 

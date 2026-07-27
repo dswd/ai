@@ -1,3 +1,4 @@
+#[cfg(feature = "browser")]
 pub mod browser;
 pub mod copy_file;
 pub mod create_directory;
@@ -22,6 +23,7 @@ pub mod web_fetch;
 pub mod web_search;
 pub mod write_file;
 
+#[cfg(feature = "browser")]
 pub use browser::{
     BrowserClickTool, BrowserEvaluateTool, BrowserGetContentTool, BrowserGetElementTool,
     BrowserNavigateTool, BrowserState,

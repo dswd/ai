@@ -27,3 +27,35 @@
 
 - Rust edition 2024, async runtime with Tokio.
 - Dependencies: `rig-core` (LLM framework), `clap` (CLI parsing), `serde`/`serde_yaml` (config), `rustyline` (interactive input), `reqwest` (HTTP), `dialoguer` (init wizard), and others.
+
+## v0.2.0 – Bashkit Integration & Policy-Based Filesystem
+
+### Breaking
+
+- **Remove `Think` tool** — deemed unnecessary for agent reasoning.
+- **Execute permissions no longer required for built-in commands** — execute tool is always available; only external (non-bashkit) commands need `-x`/`Action::Execute`. Builtins are governed by filesystem read/write policy.
+- **Feature-gated builtins removed from bashkit list** — `curl`, `wget`, `git`, `python`, `node`, `ssh`, `sqlite`, `jq` are now external commands handled via fork-exec, requiring `Action::Execute` policy.
+
+### Added
+
+- **Bashkit virtual bash interpreter** — replaces `sh -c` with 164 in-process builtins (echo, grep, sed, awk, find, tar, etc.). Sandboxed execution with resource limits and timeout control.
+- **Policy-based filesystem (`PolicyFsBackend`)** — custom `FsBackend` for bashkit that checks `Action::Read`/`Action::Write` on every file operation, enabling fine-grained policy enforcement for built-in commands.
+- **`file_view` tool** — extracts text from PDF, DOCX, XLSX, and other binary formats via `markitdown`.
+- **Obscura headless browser** — stealth-mode browser for web search (Bing, Google, DuckDuckGo) with anti-detection.
+
+### Changed
+
+- **`execute` tool**: Rewired to use bashkit `Bash::exec()` instead of `sh -c`. External commands fork-exec through registered `ExtBuiltin` wrappers with policy checks.
+- **Tool file layout**: Each tool now lives in its own file under `src/tools/` (22 files + `mod.rs` + `shared.rs`). Old group files deleted.
+- **Git tools** (`git_diff`, `git_log`): Check `Action::Read` on `.git` folder instead of `Action::Execute` on `"git"`.
+- **Stdio reading**: Replaced 2-second timeout with async `tokio::io::stdin().read_to_end()`.
+- **Policy summary**: Injected into system prompt as flat bullet list; default system prompt no longer claims tool access.
+- **Memory tool**: Max 100 entries, 4-char hex keys via `rand 0.10`.
+- **Token stats**: Displayed as `(in, thinking, out)`.
+- **Session naming**: Random mnemonic when `-s` given without a name.
+
+### Infrastructure
+
+- Dependency added: `bashkit 0.14` (virtual bash interpreter), `obscura` (headless browser), `markitdown` (document conversion).
+- Build deps added: `cmake`, `clang`, `llvm-dev`, `libssl-dev` (for Obscura/Deno).
+- Binary size: ~22 MB (release).

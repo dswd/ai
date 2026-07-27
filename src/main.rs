@@ -152,7 +152,10 @@ async fn main() -> anyhow::Result<()> {
         Vec::new()
     };
 
-    let browser_state = if policy.ask || policy.has_any_allow(&Action::WebFetch) {
+    #[cfg(feature = "browser")]
+    let browser_state: Option<Arc<tools::BrowserState>> = if policy.ask
+        || policy.has_any_allow(&Action::WebFetch)
+    {
         match tools::BrowserState::new().await {
             Ok(s) => Some(Arc::new(s)),
             Err(e) => {
@@ -163,6 +166,9 @@ async fn main() -> anyhow::Result<()> {
     } else {
         None
     };
+
+    #[cfg(not(feature = "browser"))]
+    let browser_state: Option<Arc<()>> = None;
 
     match provider.as_str() {
         "openai" => {
@@ -428,7 +434,10 @@ fn build_agent<M: CompletionModel + 'static>(
     thinking: Option<usize>,
     memory: Option<Arc<memory::Memory>>,
     search: &config::SearchConfig,
+    #[cfg(feature = "browser")]
     browser_state: Option<Arc<tools::BrowserState>>,
+    #[cfg(not(feature = "browser"))]
+    _browser_state: Option<Arc<()>>,
 ) -> rig_core::agent::Agent<M> {
     let can_read = policy.ask || policy.has_any_allow(&Action::Read);
     let can_write = policy.ask || policy.has_any_allow(&Action::Write);
@@ -463,6 +472,7 @@ fn build_agent<M: CompletionModel + 'static>(
 
     if can_web_fetch {
         server = server.tool(tools::WebFetchTool::new(policy.clone()));
+        #[cfg(feature = "browser")]
         if let Some(ref bs) = browser_state {
             server = server
                 .tool(tools::BrowserNavigateTool::new(

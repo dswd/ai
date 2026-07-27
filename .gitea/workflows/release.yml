@@ -32,6 +32,7 @@ jobs:
             native: false
             cross-packages: mingw-w64
             linker: x86_64-w64-mingw32-gcc
+            features: --no-default-features
 
           - target: x86_64-apple-darwin
             os: ubuntu-latest
@@ -62,7 +63,7 @@ jobs:
 
       - name: Build (native)
         if: ${{ matrix.native }}
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} ${{ matrix.features }}
 
       - name: Build (cross)
         if: ${{ !matrix.native && !matrix.skip }}
@@ -75,7 +76,7 @@ jobs:
               export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${{ matrix.linker }}"
               ;;
           esac
-          cargo build --release --target ${{ matrix.target }}
+          cargo build --release --target ${{ matrix.target }} ${{ matrix.features }}
 
       - name: Rename artifact
         if: ${{ !matrix.skip }}

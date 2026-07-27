@@ -1,3 +1,5 @@
+#![cfg(feature = "browser")]
+
 use crate::util::{bar_line, bar_title};
 use ansi_color_constants::*;
 use log::{debug, info};

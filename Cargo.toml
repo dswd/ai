@@ -1,7 +1,11 @@
 [package]
 name = "ai"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+
+[features]
+default = ["browser"]
+browser = ["dep:obscura"]
 
 [profile.release]
 strip = true
@@ -44,5 +48,6 @@ tokio = { version = "1.53.1", features = [
 markitdown = "0.1"
 html2md = "0.2"
 ansi_color_constants = "4.0.0"
-obscura = { git = "https://github.com/h4ckf0r0day/obscura" }
+obscura = { git = "https://github.com/h4ckf0r0day/obscura", optional = true }
 bashkit = { version = "0.14", features = ["realfs"] }
+openssl = { version = "0.10", features = ["vendored"] }
