@@ -152,6 +152,18 @@ async fn main() -> anyhow::Result<()> {
         Vec::new()
     };
 
+    let browser_state = if policy.ask || policy.has_any_allow(&Action::WebFetch) {
+        match tools::BrowserState::new().await {
+            Ok(s) => Some(Arc::new(s)),
+            Err(e) => {
+                log::warn!("Failed to initialize browser: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     match provider.as_str() {
         "openai" => {
             let client = openai_client(&config)?;
@@ -166,6 +178,7 @@ async fn main() -> anyhow::Result<()> {
                 thinking,
                 memory.as_ref().map(Arc::clone),
                 &config.search,
+                browser_state.clone(),
             );
 
             if is_interactive {
@@ -196,6 +209,7 @@ async fn main() -> anyhow::Result<()> {
                 thinking,
                 memory.as_ref().map(Arc::clone),
                 &config.search,
+                browser_state.clone(),
             );
 
             if is_interactive {
@@ -414,6 +428,7 @@ fn build_agent<M: CompletionModel + 'static>(
     thinking: Option<usize>,
     memory: Option<Arc<memory::Memory>>,
     search: &config::SearchConfig,
+    browser_state: Option<Arc<tools::BrowserState>>,
 ) -> rig_core::agent::Agent<M> {
     let can_read = policy.ask || policy.has_any_allow(&Action::Read);
     let can_write = policy.ask || policy.has_any_allow(&Action::Write);
@@ -450,9 +465,19 @@ fn build_agent<M: CompletionModel + 'static>(
     }
 
     if can_web_fetch {
-        server = server
-            .tool(tools::WebFetchTool::new(policy.clone()))
-            .tool(tools::DownloadFileTool::new(policy.clone()));
+        server = server.tool(tools::WebFetchTool::new(policy.clone()));
+        if let Some(ref bs) = browser_state {
+            server = server
+                .tool(tools::BrowserNavigateTool::new(policy.clone(), Arc::clone(bs)))
+                .tool(tools::BrowserClickTool::new(policy.clone(), Arc::clone(bs)))
+                .tool(tools::BrowserEvaluateTool::new(policy.clone(), Arc::clone(bs)))
+                .tool(tools::BrowserGetContentTool::new(policy.clone(), Arc::clone(bs)))
+                .tool(tools::BrowserGetElementTool::new(policy.clone(), Arc::clone(bs)));
+        }
+    }
+
+    if can_web_fetch && can_write {
+        server = server.tool(tools::DownloadFileTool::new(policy.clone()));
     }
 
     if can_web_search {

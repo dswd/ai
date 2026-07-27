@@ -1,3 +1,4 @@
+pub mod browser;
 pub mod copy_file;
 pub mod create_directory;
 pub mod delete_file;
@@ -20,6 +21,10 @@ pub mod web_fetch;
 pub mod web_search;
 pub mod write_file;
 
+pub use browser::{
+    BrowserClickTool, BrowserEvaluateTool, BrowserGetContentTool, BrowserGetElementTool,
+    BrowserNavigateTool, BrowserState,
+};
 pub use copy_file::CopyFileTool;
 pub use create_directory::CreateDirectoryTool;
 pub use delete_file::DeleteFileTool;

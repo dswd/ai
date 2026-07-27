@@ -1,6 +1,6 @@
 use crate::util::{bar_line, bar_title};
 use ansi_color_constants::*;
-use log::debug;
+use log::{debug, info};
 use rand::RngExt;
 use regex::Regex;
 use rig_core::tool::Tool;
@@ -308,7 +308,7 @@ impl WebSearchTool {
 
 // ----- HTML to markdown conversion -----
 
-fn html_to_markdown(html: &str) -> String {
+pub(crate) fn html_to_markdown(html: &str) -> String {
     let re_block = Regex::new(r"(?s)<style[^>]*>.*?</style>|<script[^>]*>.*?</script>").unwrap();
     let cleaned = re_block.replace_all(html, "").to_string();
     let md = html2md::parse_html(&cleaned);
