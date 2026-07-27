@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::config::Config;
+use crate::config::{Config, SearchConfig};
 use dialoguer::{Input, Password, Select, theme::ColorfulTheme};
 
 const PROVIDERS: &[&str] = &[
@@ -185,6 +185,7 @@ pub fn run(target_path: Option<String>) -> anyhow::Result<()> {
         policy: None,
         memory: None,
         context_window,
+        search: SearchConfig::default(),
     };
 
     let path = if let Some(ref p) = target_path {

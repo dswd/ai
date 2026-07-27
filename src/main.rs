@@ -165,6 +165,7 @@ async fn main() -> anyhow::Result<()> {
                 tool_sets,
                 thinking,
                 memory.as_ref().map(Arc::clone),
+                &config.search,
             );
 
             if is_interactive {
@@ -194,6 +195,7 @@ async fn main() -> anyhow::Result<()> {
                 tool_sets,
                 thinking,
                 memory.as_ref().map(Arc::clone),
+                &config.search,
             );
 
             if is_interactive {
@@ -411,6 +413,7 @@ fn build_agent<M: CompletionModel + 'static>(
     tool_sets: Vec<tool::ToolSet>,
     thinking: Option<usize>,
     memory: Option<Arc<memory::Memory>>,
+    search: &config::SearchConfig,
 ) -> rig_core::agent::Agent<M> {
     let can_read = policy.ask || policy.has_any_allow(&Action::Read);
     let can_write = policy.ask || policy.has_any_allow(&Action::Write);
@@ -453,7 +456,7 @@ fn build_agent<M: CompletionModel + 'static>(
     }
 
     if can_web_search {
-        server = server.tool(tools::WebSearchTool::new(policy.clone()));
+        server = server.tool(tools::WebSearchTool::new(policy.clone(), search.clone()));
     }
 
     if let Some(ref mem) = memory {

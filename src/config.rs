@@ -2,6 +2,12 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SearchConfig {
+    #[serde(default)]
+    pub searxng_url: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -18,6 +24,8 @@ pub struct Config {
     pub policy: Option<PathBuf>,
     pub memory: Option<PathBuf>,
     pub context_window: Option<usize>,
+    #[serde(default)]
+    pub search: SearchConfig,
 }
 
 impl Default for Config {
@@ -34,6 +42,7 @@ impl Default for Config {
             policy: None,
             memory: None,
             context_window: None,
+            search: SearchConfig::default(),
         }
     }
 }

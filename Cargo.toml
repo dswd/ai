@@ -9,11 +9,11 @@ strip = true
 [dependencies]
 log = "0.4.33"
 anyhow = "1.0.104"
+regex = "1.13.1"
 clap = { version = "4.6.4", features = ["derive", "env"] }
 dirs = "6.0.0"
 futures = "0.3"
 glob = "0.3.4"
-regex = "1.13.1"
 rig-core = { version = "0.40.0", features = ["rmcp"] }
 rmcp = { version = "1.8", features = [
     "client",
@@ -25,7 +25,8 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 serde_yaml = "0.9.34"
 html2text = "0.17.1"
-reqwest = "0.13"
+urlencoding = "2"
+reqwest = { version = "0.13", features = ["gzip"] }
 rustyline = { version = "18.0.1", default-features = false, features = [
     "custom-bindings",
 ] }
@@ -40,6 +41,7 @@ tokio = { version = "1.53.1", features = [
     "io-util",
     "io-std",
 ] }
-urlencoding = "2"
 markitdown = "0.1"
+html2md = "0.2"
 ansi_color_constants = "4.0.0"
+obscura = { git = "https://github.com/h4ckf0r0day/obscura" }
