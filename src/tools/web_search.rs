@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::shared::ToolError;
-use super::{fmt_offset_limit, process_output, truncate, MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES};
+use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::config::SearchConfig;
 use crate::policy::{Action, Policy};
 
@@ -147,10 +147,8 @@ impl Tool for WebSearchTool {
                 let md = html_to_markdown(&html);
                 match check_quality(&md) {
                     Ok(()) => {
-                        let result = format!(
-                            "Search results for \"{}\" via Bing:\n\n{}",
-                            args.query, md
-                        );
+                        let result =
+                            format!("Search results for \"{}\" via Bing:\n\n{}", args.query, md);
                         return finalize(result, args.offset, args.limit);
                     }
                     Err(reason) => debug!("{DIM}  Bing rejected: {reason}{RESET}"),

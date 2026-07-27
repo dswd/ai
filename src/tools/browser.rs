@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use super::shared::ToolError;
 use super::web_search::html_to_markdown;
-use super::{process_output, truncate, MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES};
+use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, process_output, truncate};
 use crate::policy::{Action, Policy};
 
 #[derive(Clone)]
@@ -79,10 +79,7 @@ impl Tool for BrowserNavigateTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!(
-            "{DIM}💻 browser navigate: {}{RESET}",
-            args.url,
-        );
+        info!("{DIM}💻 browser navigate: {}{RESET}", args.url,);
         if args.url.is_empty() {
             return Err(ToolError::Message("URL is required".to_string()));
         }
@@ -110,13 +107,8 @@ impl Tool for BrowserNavigateTool {
                     .build()
                     .map_err(|e| format!("browser rt: {e}"))?;
                 rt.block_on(async {
-                    let mut page = browser
-                        .new_page()
-                        .await
-                        .map_err(|e| format!("page: {e}"))?;
-                    page.goto(&url)
-                        .await
-                        .map_err(|e| format!("goto: {e}"))?;
+                    let mut page = browser.new_page().await.map_err(|e| format!("page: {e}"))?;
+                    page.goto(&url).await.map_err(|e| format!("goto: {e}"))?;
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     let title = page
                         .evaluate("document.title")
@@ -134,7 +126,11 @@ impl Tool for BrowserNavigateTool {
             Ok(Ok(Ok(v))) => v,
             Ok(Ok(Err(e))) => return Err(ToolError::Message(e)),
             Ok(Err(e)) => return Err(ToolError::Message(e.to_string())),
-            Err(_) => return Err(ToolError::Message("browser timed out after 30s".to_string())),
+            Err(_) => {
+                return Err(ToolError::Message(
+                    "browser timed out after 30s".to_string(),
+                ));
+            }
         };
 
         *last_url.lock().unwrap() = Some(url_label.clone());
@@ -194,21 +190,14 @@ impl Tool for BrowserClickTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!(
-            "{DIM}💻 browser click: {}{RESET}",
-            args.selector,
-        );
+        info!("{DIM}💻 browser click: {}{RESET}", args.selector,);
         if args.selector.is_empty() {
             return Err(ToolError::Message("selector is required".to_string()));
         }
 
-        let url = args.url.unwrap_or_else(|| {
-            self.last_url
-                .lock()
-                .unwrap()
-                .clone()
-                .unwrap_or_default()
-        });
+        let url = args
+            .url
+            .unwrap_or_else(|| self.last_url.lock().unwrap().clone().unwrap_or_default());
         if url.is_empty() {
             return Err(ToolError::Message(
                 "no URL — call browser_navigate first or provide a url parameter".to_string(),
@@ -263,11 +252,15 @@ impl Tool for BrowserClickTool {
             Ok(Ok(Ok(h))) => h,
             Ok(Ok(Err(e))) => return Err(ToolError::Message(e)),
             Ok(Err(e)) => return Err(ToolError::Message(e.to_string())),
-            Err(_) => return Err(ToolError::Message("browser timed out after 30s".to_string())),
+            Err(_) => {
+                return Err(ToolError::Message(
+                    "browser timed out after 30s".to_string(),
+                ));
+            }
         };
 
         let title = {
-            let re =             Regex::new(r"<title>(.*?)</title>").unwrap();
+            let re = Regex::new(r"<title>(.*?)</title>").unwrap();
             re.captures(&html)
                 .and_then(|c| c.get(1))
                 .map(|m| m.as_str().to_string())
@@ -334,12 +327,7 @@ impl Tool for BrowserGetContentTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!("{DIM}💻 browser get content{RESET}");
-        let url = self
-            .last_url
-            .lock()
-            .unwrap()
-            .clone()
-            .unwrap_or_default();
+        let url = self.last_url.lock().unwrap().clone().unwrap_or_default();
         if url.is_empty() {
             return Err(ToolError::Message(
                 "no page loaded — call browser_navigate first".to_string(),
@@ -357,13 +345,8 @@ impl Tool for BrowserGetContentTool {
                     .build()
                     .map_err(|e| format!("browser rt: {e}"))?;
                 rt.block_on(async {
-                    let mut page = browser
-                        .new_page()
-                        .await
-                        .map_err(|e| format!("page: {e}"))?;
-                    page.goto(&url)
-                        .await
-                        .map_err(|e| format!("goto: {e}"))?;
+                    let mut page = browser.new_page().await.map_err(|e| format!("page: {e}"))?;
+                    page.goto(&url).await.map_err(|e| format!("goto: {e}"))?;
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     Ok(page.content())
                 })
@@ -375,7 +358,11 @@ impl Tool for BrowserGetContentTool {
             Ok(Ok(Ok(h))) => h,
             Ok(Ok(Err(e))) => return Err(ToolError::Message(e)),
             Ok(Err(e)) => return Err(ToolError::Message(e.to_string())),
-            Err(_) => return Err(ToolError::Message("browser timed out after 30s".to_string())),
+            Err(_) => {
+                return Err(ToolError::Message(
+                    "browser timed out after 30s".to_string(),
+                ));
+            }
         };
 
         let output = if want_html {
@@ -447,19 +434,11 @@ impl Tool for BrowserGetElementTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!(
-            "{DIM}💻 browser get element: {}{RESET}",
-            args.selector,
-        );
+        info!("{DIM}💻 browser get element: {}{RESET}", args.selector,);
         if args.selector.is_empty() {
             return Err(ToolError::Message("selector is required".to_string()));
         }
-        let url = self
-            .last_url
-            .lock()
-            .unwrap()
-            .clone()
-            .unwrap_or_default();
+        let url = self.last_url.lock().unwrap().clone().unwrap_or_default();
         if url.is_empty() {
             return Err(ToolError::Message(
                 "no page loaded — call browser_navigate first".to_string(),
@@ -506,7 +485,11 @@ impl Tool for BrowserGetElementTool {
             Ok(Ok(Ok(h))) => h,
             Ok(Ok(Err(e))) => return Err(ToolError::Message(e)),
             Ok(Err(e)) => return Err(ToolError::Message(e.to_string())),
-            Err(_) => return Err(ToolError::Message("browser timed out after 30s".to_string())),
+            Err(_) => {
+                return Err(ToolError::Message(
+                    "browser timed out after 30s".to_string(),
+                ));
+            }
         };
 
         let output = if want_html {
@@ -565,8 +548,7 @@ impl Tool for BrowserEvaluateTool {
     type Error = ToolError;
 
     fn description(&self) -> String {
-        "Execute JavaScript on the current page and return the result as JSON."
-            .to_string()
+        "Execute JavaScript on the current page and return the result as JSON.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -574,20 +556,14 @@ impl Tool for BrowserEvaluateTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!(
-            "{DIM}💻 browser evaluate{RESET}",
-        );
+        info!("{DIM}💻 browser evaluate{RESET}",);
         if args.expression.is_empty() {
             return Err(ToolError::Message("expression is required".to_string()));
         }
 
-        let url = args.url.unwrap_or_else(|| {
-            self.last_url
-                .lock()
-                .unwrap()
-                .clone()
-                .unwrap_or_default()
-        });
+        let url = args
+            .url
+            .unwrap_or_else(|| self.last_url.lock().unwrap().clone().unwrap_or_default());
         if !url.is_empty() && !self.policy.is_allowed(&Action::WebFetch, &url) {
             return Err(ToolError::Message(format!(
                 "browse access denied for: {}",
@@ -605,28 +581,27 @@ impl Tool for BrowserEvaluateTool {
                     .build()
                     .map_err(|e| format!("browser rt: {e}"))?;
                 rt.block_on(async {
-                    let mut page = browser
-                        .new_page()
-                        .await
-                        .map_err(|e| format!("page: {e}"))?;
+                    let mut page = browser.new_page().await.map_err(|e| format!("page: {e}"))?;
 
                     if !url.is_empty() {
-                        page.goto(&url)
-                            .await
-                            .map_err(|e| format!("goto: {e}"))?;
+                        page.goto(&url).await.map_err(|e| format!("goto: {e}"))?;
                         tokio::time::sleep(Duration::from_millis(500)).await;
                     }
 
                     let value = page.evaluate(&expression);
                     Ok(format!("{value}"))
-                })}),
-        ).await;
+                })
+            }),
+        )
+        .await;
 
         match result {
             Ok(Ok(Ok(v))) => Ok(v),
             Ok(Ok(Err(e))) => Err(ToolError::Message(e)),
             Ok(Err(e)) => Err(ToolError::Message(e.to_string())),
-            Err(_) => Err(ToolError::Message("browser timed out after 30s".to_string())),
+            Err(_) => Err(ToolError::Message(
+                "browser timed out after 30s".to_string(),
+            )),
         }
     }
 }

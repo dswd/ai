@@ -468,11 +468,23 @@ fn build_agent<M: CompletionModel + 'static>(
         server = server.tool(tools::WebFetchTool::new(policy.clone()));
         if let Some(ref bs) = browser_state {
             server = server
-                .tool(tools::BrowserNavigateTool::new(policy.clone(), Arc::clone(bs)))
+                .tool(tools::BrowserNavigateTool::new(
+                    policy.clone(),
+                    Arc::clone(bs),
+                ))
                 .tool(tools::BrowserClickTool::new(policy.clone(), Arc::clone(bs)))
-                .tool(tools::BrowserEvaluateTool::new(policy.clone(), Arc::clone(bs)))
-                .tool(tools::BrowserGetContentTool::new(policy.clone(), Arc::clone(bs)))
-                .tool(tools::BrowserGetElementTool::new(policy.clone(), Arc::clone(bs)));
+                .tool(tools::BrowserEvaluateTool::new(
+                    policy.clone(),
+                    Arc::clone(bs),
+                ))
+                .tool(tools::BrowserGetContentTool::new(
+                    policy.clone(),
+                    Arc::clone(bs),
+                ))
+                .tool(tools::BrowserGetElementTool::new(
+                    policy.clone(),
+                    Arc::clone(bs),
+                ));
         }
     }
 
