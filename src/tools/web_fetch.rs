@@ -57,7 +57,7 @@ impl Tool for WebFetchTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!(
-            "{DIM}\u{1F30E} fetch {}{}{RESET}",
+            "{DIM}🌐 fetch {}{}{RESET}",
             args.url,
             fmt_offset_limit(args.offset, args.limit)
         );
