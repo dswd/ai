@@ -69,7 +69,7 @@ impl Tool for FileViewTool {
                     file_extension: canonical
                         .extension()
                         .and_then(|e| e.to_str())
-                        .map(|e| format!(".{e}")),
+                        .map(|e| format!(".{e}").to_lowercase()),
                     url: None,
                     llm_client: None,
                     llm_model: None,
