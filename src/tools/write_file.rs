@@ -43,7 +43,7 @@ impl Tool for WriteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}✏️ write file {}{RESET}", args.path);
+        info!("{DIM}✏️  write file {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = if path.exists() {
             path.canonicalize()

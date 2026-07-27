@@ -158,6 +158,18 @@ impl Policy {
         }
 
         lines.push(String::new());
+        lines.push("### Available Built-in Commands".to_string());
+        lines.push(String::new());
+        lines.push(
+            "These commands are available inside the `execute` tool without needing `-x` permissions. Filesystem access is governed by read/write policy."
+                .to_string(),
+        );
+
+        for chunk in crate::tools::shared::BASHKIT_BUILTINS.chunks(12) {
+            lines.push(format!("  - {}", chunk.join(", ")));
+        }
+
+        lines.push(String::new());
         if self.ask {
             lines.push("You may ask for more permissions — the user will be asked to approve each request.".to_string());
         } else {

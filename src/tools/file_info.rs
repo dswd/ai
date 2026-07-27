@@ -42,7 +42,7 @@ impl Tool for FileInfoTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        info!("{DIM}ℹ️ file info {}{RESET}", args.path);
+        info!("{DIM}ℹ️  file info {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
         let canonical = path
             .canonicalize()

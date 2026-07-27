@@ -82,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
 
     let policy = load_policy(&cli, &config)?;
     system_prompt = format!("{system_prompt}\n\n{}", policy.summary());
+    log::debug!("system prompt:\n{system_prompt}");
     let session_dir = config.session_dir_resolved();
 
     if cli.list {
@@ -153,19 +154,18 @@ async fn main() -> anyhow::Result<()> {
     };
 
     #[cfg(feature = "browser")]
-    let browser_state: Option<Arc<tools::BrowserState>> = if policy.ask
-        || policy.has_any_allow(&Action::WebFetch)
-    {
-        match tools::BrowserState::new().await {
-            Ok(s) => Some(Arc::new(s)),
-            Err(e) => {
-                log::warn!("Failed to initialize browser: {e}");
-                None
+    let browser_state: Option<Arc<tools::BrowserState>> =
+        if policy.ask || policy.has_any_allow(&Action::WebFetch) {
+            match tools::BrowserState::new().await {
+                Ok(s) => Some(Arc::new(s)),
+                Err(e) => {
+                    log::warn!("Failed to initialize browser: {e}");
+                    None
+                }
             }
-        }
-    } else {
-        None
-    };
+        } else {
+            None
+        };
 
     #[cfg(not(feature = "browser"))]
     let browser_state: Option<Arc<()>> = None;
@@ -291,7 +291,7 @@ struct ConsoleLogger;
 
 impl log::Log for ConsoleLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        if metadata.target().starts_with("ai::") {
+        if metadata.target().starts_with("ai::") || metadata.target() == "ai" {
             metadata.level() <= log::max_level()
         } else {
             metadata.level() <= Level::Warn
@@ -434,10 +434,8 @@ fn build_agent<M: CompletionModel + 'static>(
     thinking: Option<usize>,
     memory: Option<Arc<memory::Memory>>,
     search: &config::SearchConfig,
-    #[cfg(feature = "browser")]
-    browser_state: Option<Arc<tools::BrowserState>>,
-    #[cfg(not(feature = "browser"))]
-    _browser_state: Option<Arc<()>>,
+    #[cfg(feature = "browser")] browser_state: Option<Arc<tools::BrowserState>>,
+    #[cfg(not(feature = "browser"))] _browser_state: Option<Arc<()>>,
 ) -> rig_core::agent::Agent<M> {
     let can_read = policy.ask || policy.has_any_allow(&Action::Read);
     let can_write = policy.ask || policy.has_any_allow(&Action::Write);
