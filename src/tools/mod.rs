@@ -13,6 +13,7 @@ pub mod list_dir;
 pub mod memory_add;
 pub mod memory_delete;
 pub mod move_file;
+pub mod policy_fs;
 pub mod read_file;
 pub mod replace_in_file;
 pub mod search_content;

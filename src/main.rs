@@ -432,7 +432,6 @@ fn build_agent<M: CompletionModel + 'static>(
 ) -> rig_core::agent::Agent<M> {
     let can_read = policy.ask || policy.has_any_allow(&Action::Read);
     let can_write = policy.ask || policy.has_any_allow(&Action::Write);
-    let can_exec = policy.ask || policy.has_any_allow(&Action::Execute);
     let can_web_fetch = policy.ask || policy.has_any_allow(&Action::WebFetch);
     let can_web_search = policy.ask || policy.has_any_allow(&Action::WebSearch);
 
@@ -460,9 +459,7 @@ fn build_agent<M: CompletionModel + 'static>(
             .tool(tools::CopyFileTool::new(policy.clone()));
     }
 
-    if can_exec {
-        server = server.tool(tools::ExecuteTool::new(policy.clone()));
-    }
+    server = server.tool(tools::ExecuteTool::new(policy.clone()));
 
     if can_web_fetch {
         server = server.tool(tools::WebFetchTool::new(policy.clone()));

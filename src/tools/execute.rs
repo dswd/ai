@@ -1,17 +1,21 @@
 use crate::util::{bar_line, bar_title};
 use ansi_color_constants::*;
+use bashkit::{
+    Bash, Builtin, BuiltinContext, ExecResult, ExecutionLimits, FileSystem, PosixFs, RealFs,
+    RealFsMode, async_trait,
+};
 use log::{debug, info};
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
-use super::shared::{ToolError, commands_in_string};
+use super::policy_fs::PolicyFsBackend;
+use super::shared::{ToolError, commands_in_string, is_bashkit_builtin};
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::policy::{Action, Policy};
-use tokio::time::timeout;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ExecuteArgs {
@@ -38,6 +42,45 @@ impl ExecuteTool {
     }
 }
 
+struct ExtBuiltin {
+    name: String,
+    policy: Policy,
+}
+
+#[async_trait]
+impl Builtin for ExtBuiltin {
+    async fn execute(&self, ctx: BuiltinContext<'_>) -> bashkit::Result<ExecResult> {
+        if !self.policy.is_allowed(&Action::Execute, &self.name) {
+            return Ok(ExecResult::err(
+                format!("command denied by policy: {}", self.name),
+                1,
+            ));
+        }
+        match std::process::Command::new(&self.name)
+            .args(ctx.args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => {
+                let output = match child.wait_with_output() {
+                    Ok(o) => o,
+                    Err(e) => {
+                        return Ok(ExecResult::err(format!("failed to collect output: {e}"), 1));
+                    }
+                };
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let mut result = ExecResult::ok(stdout);
+                result.stderr = stderr;
+                result.exit_code = output.status.code().unwrap_or(-1);
+                Ok(result)
+            }
+            Err(e) => Ok(ExecResult::err(format!("{}: command not found", e), 127)),
+        }
+    }
+}
+
 impl Tool for ExecuteTool {
     const NAME: &'static str = "execute";
 
@@ -55,95 +98,85 @@ impl Tool for ExecuteTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!(
-            "{DIM}🚀 execute {}{}{RESET}",
+            "{DIM}\u{1F680} execute {}{}{RESET}",
             args.command,
             fmt_offset_limit(args.offset, args.limit)
         );
-        let commands = commands_in_string(&args.command);
+
+        let timeout_secs = args.timeout.unwrap_or(30).min(300);
+
+        let full_command = if let Some(ref cwd) = args.cwd {
+            format!("cd {} && {}", cwd, args.command)
+        } else {
+            args.command.clone()
+        };
+
+        let commands = commands_in_string(&full_command);
         if commands.is_empty() {
             return Err(ToolError::Message(
                 "no command found in execution string".to_string(),
             ));
         }
-        for cmd in &commands {
-            if !self.policy.is_allowed(&Action::Execute, cmd) {
-                return Err(ToolError::Message(format!(
-                    "execution denied for command: {cmd}"
-                )));
-            }
-        }
 
-        let mut cmd = if cfg!(target_os = "windows") {
-            let mut c = std::process::Command::new("cmd");
-            c.arg("/C").arg(&args.command);
-            c
-        } else {
-            let mut c = std::process::Command::new("sh");
-            c.arg("-c").arg(&args.command);
-            c
+        let policy = self.policy.clone();
+
+        let external_names: Vec<String> = commands
+            .iter()
+            .filter(|c| !is_bashkit_builtin(c))
+            .map(|c| c.to_string())
+            .collect();
+
+        let fs_backend = RealFs::new("/", RealFsMode::ReadWrite)
+            .map_err(|e| ToolError::Message(format!("filesystem backend init failed: {e}")))?;
+        let policy_backend = PolicyFsBackend::new(fs_backend, policy.clone());
+        let fs: Arc<dyn FileSystem> = Arc::new(PosixFs::new(policy_backend));
+
+        let limits = ExecutionLimits {
+            timeout: Duration::from_secs(timeout_secs),
+            ..Default::default()
         };
 
-        if let Some(cwd) = &args.cwd {
-            cmd.current_dir(cwd);
+        let mut builder = Bash::builder().fs(fs).limits(limits);
+
+        for name in &external_names {
+            builder = builder.builtin(
+                name.clone(),
+                Box::new(ExtBuiltin {
+                    name: name.clone(),
+                    policy: policy.clone(),
+                }),
+            );
         }
 
-        let timeout_secs = args.timeout.unwrap_or(30).min(300);
-
-        let child = cmd
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| ToolError::Message(format!("execution failed: {e}")))?;
-
-        let child = Arc::new(Mutex::new(Some(child)));
-        let child_for_task = child.clone();
-
-        let result = timeout(
-            Duration::from_secs(timeout_secs),
-            tokio::task::spawn_blocking(move || {
-                child_for_task
-                    .lock()
-                    .unwrap()
-                    .take()
-                    .unwrap()
-                    .wait_with_output()
-            }),
-        )
-        .await;
+        let mut bash = builder.build();
+        let result = bash.exec(&full_command).await;
 
         let output = match result {
-            Ok(Ok(Ok(out))) => out,
-            Ok(Ok(Err(e))) => {
-                return Err(ToolError::Message(format!("execution failed: {e}")));
-            }
-            Ok(Err(e)) => {
-                return Err(ToolError::Message(format!("join error: {e}")));
-            }
-            Err(_elapsed) => {
-                let mut guard = child.lock().unwrap();
-                if let Some(mut c) = guard.take() {
-                    let _ = c.kill();
-                    let _ = c.wait();
+            Ok(r) => r,
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("timed out") || msg.contains("timeout") {
+                    return Err(ToolError::Message(format!(
+                        "execution timed out after {timeout_secs}s"
+                    )));
                 }
-                return Err(ToolError::Message(format!(
-                    "execution timed out after {timeout_secs}s"
-                )));
+                return Err(ToolError::Message(format!("bashkit error: {msg}")));
             }
         };
 
         let mut result = String::new();
         if !output.stdout.is_empty() {
-            result.push_str(&String::from_utf8_lossy(&output.stdout));
+            result.push_str(&output.stdout);
         }
         if !output.stderr.is_empty() {
             if !result.is_empty() {
                 result.push('\n');
             }
             result.push_str("--- stderr ---\n");
-            result.push_str(&String::from_utf8_lossy(&output.stderr));
+            result.push_str(&output.stderr);
         }
         if result.is_empty() {
-            result = format!("(exit code: {})", output.status.code().unwrap_or(-1));
+            result = format!("(exit code: {})", output.exit_code);
         }
 
         let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
@@ -153,5 +186,57 @@ impl Tool for ExecuteTool {
             bar_line()
         );
         process_output(&result, args.offset, args.limit).map_err(ToolError::Message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bashkit::{Bash, ExecutionLimits, FileSystem, PosixFs, RealFs, RealFsMode};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    fn test_bash() -> Bash {
+        let fs_backend = RealFs::new("/", RealFsMode::ReadWrite).unwrap();
+        let fs: Arc<dyn FileSystem> = Arc::new(PosixFs::new(fs_backend));
+        let limits = ExecutionLimits {
+            timeout: Duration::from_secs(10),
+            ..Default::default()
+        };
+        Bash::builder().fs(fs).limits(limits).build()
+    }
+
+    #[tokio::test]
+    async fn test_bashkit_echo() {
+        let mut bash = test_bash();
+        let result = bash.exec("echo 'hello bashkit'").await.unwrap();
+        assert_eq!(result.stdout.trim(), "hello bashkit");
+        assert_eq!(result.exit_code, 0);
+    }
+
+    #[tokio::test]
+    async fn test_bashkit_pipeline() {
+        let mut bash = test_bash();
+        let result = bash
+            .exec("echo -e 'apple\nbanana\ncherry' | grep a")
+            .await
+            .unwrap();
+        assert!(result.stdout.contains("apple"));
+        assert!(result.stdout.contains("banana"));
+        assert_eq!(result.exit_code, 0);
+    }
+
+    #[tokio::test]
+    async fn test_bashkit_cat() {
+        let mut bash = test_bash();
+        let result = bash.exec("cat /etc/hostname").await.unwrap();
+        assert!(!result.stdout.trim().is_empty());
+        assert_eq!(result.exit_code, 0);
+    }
+
+    #[tokio::test]
+    async fn test_bashkit_exit_code() {
+        let mut bash = test_bash();
+        let result = bash.exec("false").await.unwrap();
+        assert_eq!(result.exit_code, 1);
     }
 }
