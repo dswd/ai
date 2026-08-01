@@ -21,6 +21,7 @@ pub struct Config {
     pub max_tokens: Option<usize>,
     pub thinking: Option<usize>,
     pub session_dir: Option<PathBuf>,
+    pub skills_dir: Option<PathBuf>,
     pub policy: Option<PathBuf>,
     pub memory: Option<PathBuf>,
     pub context_window: Option<usize>,
@@ -39,6 +40,7 @@ impl Default for Config {
             max_tokens: None,
             thinking: None,
             session_dir: None,
+            skills_dir: None,
             policy: None,
             memory: None,
             context_window: None,
@@ -85,6 +87,15 @@ impl Config {
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("ai")
                 .join("memory.json")
+        })
+    }
+
+    pub fn skills_dir_resolved(&self) -> PathBuf {
+        self.skills_dir.clone().unwrap_or_else(|| {
+            dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("ai")
+                .join("skills")
         })
     }
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.3.0 – Skills
+
+### Added
+
+- **Skills system** — load reusable skill definitions from `SKILL.md` files:
+  - **`--skill=PATH`** CLI flag (repeatable) — accepts a single `SKILL.md` file or a folder containing skills.
+  - **Automatic discovery** — `SKILL.md` files in subfolders of the skills directory (configurable via `skills_dir` in config; default `~/.local/share/ai/skills`) are loaded automatically.
+  - **Front matter parsing** — each skill's `name` and `description` are read from its YAML front matter and cached at startup. Missing names fall back to the folder/file stem.
+  - **System prompt listing** — available skill names and descriptions are injected into the system prompt under a `## Skills` section.
+  - **`load_skill` tool** — loads the full definition (instructions) of a skill by name on demand.
+  - Duplicate skill names are deduplicated (first occurrence wins, warning logged).
+
 ## v0.2.0 – Bashkit Integration & Policy-Based Filesystem
 
 ### Breaking

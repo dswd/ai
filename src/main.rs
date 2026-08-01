@@ -6,6 +6,7 @@ mod memory;
 mod output;
 mod policy;
 mod session;
+mod skills;
 mod tool;
 mod tools;
 mod util;
@@ -82,7 +83,6 @@ async fn main() -> anyhow::Result<()> {
 
     let policy = load_policy(&cli, &config)?;
     system_prompt = format!("{system_prompt}\n\n{}", policy.summary());
-    log::debug!("system prompt:\n{system_prompt}");
     let session_dir = config.session_dir_resolved();
 
     if cli.list {
@@ -92,6 +92,12 @@ async fn main() -> anyhow::Result<()> {
     if let Some(ref name) = cli.delete {
         return cmd_delete_session(name, &session_dir);
     }
+
+    let skills = skills::discover(&cli.skill, &config.skills_dir_resolved());
+    if !skills.is_empty() {
+        system_prompt = format!("{system_prompt}\n\n{}", skills::summary(&skills));
+    }
+    log::debug!("system prompt:\n{system_prompt}");
 
     let is_interactive = cli.is_interactive();
 
@@ -184,6 +190,7 @@ async fn main() -> anyhow::Result<()> {
                 thinking,
                 memory.as_ref().map(Arc::clone),
                 &config.search,
+                Arc::new(skills.clone()),
                 browser_state.clone(),
             );
 
@@ -215,6 +222,7 @@ async fn main() -> anyhow::Result<()> {
                 thinking,
                 memory.as_ref().map(Arc::clone),
                 &config.search,
+                Arc::new(skills.clone()),
                 browser_state.clone(),
             );
 
@@ -434,6 +442,7 @@ fn build_agent<M: CompletionModel + 'static>(
     thinking: Option<usize>,
     memory: Option<Arc<memory::Memory>>,
     search: &config::SearchConfig,
+    skills: Arc<Vec<skills::Skill>>,
     #[cfg(feature = "browser")] browser_state: Option<Arc<tools::BrowserState>>,
     #[cfg(not(feature = "browser"))] _browser_state: Option<Arc<()>>,
 ) -> rig_core::agent::Agent<M> {
@@ -505,6 +514,10 @@ fn build_agent<M: CompletionModel + 'static>(
         server = server
             .tool(tools::MemoryAddTool::new(Arc::clone(mem)))
             .tool(tools::MemoryDeleteTool::new(Arc::clone(mem)));
+    }
+
+    if !skills.is_empty() {
+        server = server.tool(tools::LoadSkillTool::new(Arc::clone(&skills)));
     }
 
     for set in tool_sets {
@@ -707,7 +720,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
 
                 if trimmed == "/tools" {
                     io::stderr_line(
-                        "Available tools: read_file, write_file, list_dir, replace_in_file, delete_file, create_directory, file_info, move_file, copy_file, search_content, find_files, execute, git_diff, git_log, web_fetch, web_search, download_file, memory_add, memory_delete",
+                        "Available tools: read_file, write_file, list_dir, replace_in_file, delete_file, create_directory, file_info, move_file, copy_file, search_content, find_files, execute, git_diff, git_log, web_fetch, web_search, download_file, memory_add, memory_delete, load_skill",
                     );
                     continue;
                 }

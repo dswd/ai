@@ -182,6 +182,7 @@ pub fn run(target_path: Option<String>) -> anyhow::Result<()> {
         max_tokens: None,
         thinking: None,
         session_dir: None,
+        skills_dir: None,
         policy: None,
         memory: None,
         context_window,

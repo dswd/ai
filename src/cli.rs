@@ -112,6 +112,14 @@ pub struct Cli {
     pub policy: Option<PathBuf>,
 
     #[arg(
+        long = "skill",
+        help = "Load a skill from PATH (SKILL.md file or folder containing SKILL.md); can be given multiple times",
+        value_name = "PATH",
+        require_equals = true
+    )]
+    pub skill: Vec<String>,
+
+    #[arg(
         short = 'i',
         long = "interactive",
         help = "Enable interactive mode (ask for confirmation instead of denying)"
@@ -225,6 +233,7 @@ impl Cli {
             && self.web_fetch.is_empty()
             && self.web_search.is_empty()
             && self.policy.is_none()
+            && self.skill.is_empty()
             && !self.interactive
             && self.tool.is_empty()
             && !self.yolo
