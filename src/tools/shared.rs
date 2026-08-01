@@ -226,6 +226,15 @@ pub fn search_file(
     Ok(())
 }
 
+/// Returns true for directory entries that recursive file walks should skip:
+/// hidden dirs (except `.cargo`) and common dependency/build directories.
+pub fn should_skip_walk_entry(name: &str) -> bool {
+    if name.starts_with('.') && name != "." && name != ".." && name != ".cargo" {
+        return true;
+    }
+    matches!(name, "node_modules" | "target" | ".git")
+}
+
 #[allow(clippy::too_many_arguments, clippy::only_used_in_recursion)]
 pub fn walk_dir(
     root: &Path,
@@ -246,11 +255,7 @@ pub fn walk_dir(
         let path = entry.path();
         let name = path.file_name().unwrap_or_default().to_string_lossy();
 
-        if name.starts_with('.') && name != "." && name != ".." && name != ".cargo" {
-            continue;
-        }
-
-        if name == "node_modules" || name == "target" || name == ".git" {
+        if should_skip_walk_entry(&name) {
             continue;
         }
 

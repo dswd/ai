@@ -2,6 +2,8 @@ use log::warn;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+use crate::tools::shared::should_skip_walk_entry;
+
 #[derive(Debug, Clone, Deserialize)]
 struct SkillFrontMatter {
     name: Option<String>,
@@ -61,9 +63,8 @@ pub fn summary(skills: &[Skill]) -> String {
     lines.join("\n")
 }
 
-pub fn load(skill: &Skill) -> Result<String, String> {
+pub fn load(skill: &Skill) -> std::io::Result<String> {
     std::fs::read_to_string(&skill.path)
-        .map_err(|e| format!("failed to read skill '{}': {e}", skill.name))
 }
 
 fn find_skills_in_dir(dir: &Path, out: &mut Vec<Skill>) {
@@ -82,20 +83,18 @@ fn find_skills_in_dir(dir: &Path, out: &mut Vec<Skill>) {
         let path = entry.path();
         let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
 
-        if name.starts_with('.') {
-            continue;
-        }
-        if name == "node_modules" || name == "target" || name == ".git" {
+        if should_skip_walk_entry(&name) {
             continue;
         }
 
-        if path.is_dir() {
+        if name == "SKILL.md" {
+            if path.is_file()
+                && let Some(skill) = parse_skill_file(&path)
+            {
+                out.push(skill);
+            }
+        } else if path.is_dir() {
             find_skills_in_dir(&path, out);
-        } else if path.is_file()
-            && name == "SKILL.md"
-            && let Some(skill) = parse_skill_file(&path)
-        {
-            out.push(skill);
         }
     }
 }
@@ -113,28 +112,26 @@ fn parse_skill_file(path: &Path) -> Option<Skill> {
         Some(fm) => (fm.name, fm.description),
         None => (None, None),
     };
-    let fallback_name = path
-        .parent()
-        .and_then(|p| p.file_name())
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
+
+    let name = front_name
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| {
+            let fallback = path
+                .parent()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().to_string())
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| path.file_stem().unwrap_or_default().to_string_lossy().to_string());
+            warn!(
+                "skill {} has no name in front matter; using '{}'",
+                path.display(),
+                fallback
+            );
+            fallback
+        });
 
     Some(Skill {
-        name: front_name
-            .filter(|n| !n.trim().is_empty())
-            .unwrap_or_else(|| {
-                if fallback_name.is_empty() {
-                    let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
-                    warn!(
-                        "skill {} has no name in front matter; using file stem '{}'",
-                        path.display(),
-                        stem
-                    );
-                    stem
-                } else {
-                    fallback_name
-                }
-            }),
+        name,
         description: front_desc.unwrap_or_default(),
         path: path.to_path_buf(),
     })
@@ -142,7 +139,11 @@ fn parse_skill_file(path: &Path) -> Option<Skill> {
 
 fn parse_front_matter(content: &str) -> Option<SkillFrontMatter> {
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
-    let content = content.replace("\r\n", "\n");
+    let content = if content.contains("\r\n") {
+        content.replace("\r\n", "\n")
+    } else {
+        content.to_string()
+    };
     if !content.starts_with("---\n") {
         return None;
     }

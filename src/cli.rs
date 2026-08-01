@@ -140,7 +140,7 @@ pub struct Cli {
         long = "ask",
         help = "Ask the user for confirmation instead of denying policy checks"
     )]
-    pub interactive: bool,
+    pub ask: bool,
 
     #[arg(
         short = 't',
@@ -155,7 +155,7 @@ pub struct Cli {
         short = 'y',
         long = "yolo",
         help = "Allow everything without asking (overrides all policy rules, DANGEROUS)",
-        conflicts_with = "interactive"
+        conflicts_with = "ask"
     )]
     pub yolo: bool,
 
@@ -260,7 +260,7 @@ impl Cli {
             && self.web_search.is_empty()
             && self.policy.is_none()
             && self.skill.is_empty()
-            && !self.interactive
+            && !self.ask
             && self.tool.is_empty()
             && !self.yolo
             && self.max_tokens.is_none()

@@ -54,7 +54,9 @@ impl Tool for LoadSkillTool {
                 };
                 ToolError::Message(format!("skill '{}' not found ({hint})", args.name))
             })?;
-        crate::skills::load(skill).map_err(ToolError::Message)
+        crate::skills::load(skill).map_err(|e| {
+            ToolError::Message(format!("failed to read skill '{}': {e}", skill.name))
+        })
     }
 }
 

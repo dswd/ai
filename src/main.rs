@@ -93,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
         return cmd_delete_session(name, &session_dir);
     }
 
-    let skills = skills::discover(&cli.skill, &config.skills_dir_resolved());
+    let skills = Arc::new(skills::discover(&cli.skill, &config.skills_dir_resolved()));
     if !skills.is_empty() {
         system_prompt = format!("{system_prompt}\n\n{}", skills::summary(&skills));
     }
@@ -196,24 +196,18 @@ async fn main() -> anyhow::Result<()> {
                 thinking,
                 memory.as_ref().map(Arc::clone),
                 &config.search,
-                Arc::new(skills.clone()),
+                Arc::clone(&skills),
                 browser_state.clone(),
             );
-
-            if is_interactive {
-                run_interactive(
-                    agent,
-                    &mut session,
-                    &session_dir,
-                    prompt_text,
-                    config.context_window,
-                )
-                .await?;
-            } else if let Some(text) = prompt_text {
-                run_oneshot(agent, &text).await?;
-            } else {
-                anyhow::bail!("No prompt provided. Pass a prompt argument or pipe text to stdin.");
-            }
+            dispatch_agent(
+                agent,
+                is_interactive,
+                &mut session,
+                &session_dir,
+                prompt_text,
+                config.context_window,
+            )
+            .await?;
         }
         "anthropic" => {
             let client = anthropic_client(&config)?;
@@ -228,30 +222,49 @@ async fn main() -> anyhow::Result<()> {
                 thinking,
                 memory.as_ref().map(Arc::clone),
                 &config.search,
-                Arc::new(skills.clone()),
+                Arc::clone(&skills),
                 browser_state.clone(),
             );
-
-            if is_interactive {
-                run_interactive(
-                    agent,
-                    &mut session,
-                    &session_dir,
-                    prompt_text,
-                    config.context_window,
-                )
-                .await?;
-            } else if let Some(text) = prompt_text {
-                run_oneshot(agent, &text).await?;
-            } else {
-                anyhow::bail!("No prompt provided. Pass a prompt argument or pipe text to stdin.");
-            }
+            dispatch_agent(
+                agent,
+                is_interactive,
+                &mut session,
+                &session_dir,
+                prompt_text,
+                config.context_window,
+            )
+            .await?;
         }
         _ => {
             anyhow::bail!("Unsupported provider: {provider}. Supported: openai, anthropic");
         }
     }
 
+    Ok(())
+}
+
+async fn dispatch_agent<M: CompletionModel + 'static>(
+    agent: rig_core::agent::Agent<M>,
+    is_interactive: bool,
+    session: &mut Session,
+    session_dir: &std::path::Path,
+    prompt_text: Option<String>,
+    context_window: Option<usize>,
+) -> anyhow::Result<()> {
+    if is_interactive {
+        run_interactive(
+            agent,
+            session,
+            session_dir,
+            prompt_text,
+            context_window,
+        )
+        .await?;
+    } else if let Some(text) = prompt_text {
+        run_oneshot(agent, &text).await?;
+    } else {
+        anyhow::bail!("No prompt provided. Pass a prompt argument or pipe text to stdin.");
+    }
     Ok(())
 }
 
@@ -408,7 +421,7 @@ fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> {
         policy.add_cli_rule(PolicyRule::Allow(Action::WebSearch, "**".to_string()));
     }
 
-    policy.ask = cli.interactive || cli.is_interactive();
+    policy.ask = cli.ask || cli.is_interactive();
 
     Ok(policy)
 }
@@ -632,7 +645,8 @@ async fn run_interactive<M: CompletionModel + 'static>(
                     output::stdout_push(&msg.content);
                     output::stdout_finish();
                 }
-                _ => output::stderr_line(&format!("> {}", msg.content)),
+                "user" => output::stderr_line(&format!("> {}", msg.content)),
+                _ => {}
             }
         }
     }
