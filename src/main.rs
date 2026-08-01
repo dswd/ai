@@ -153,6 +153,12 @@ async fn main() -> anyhow::Result<()> {
 
     let provider = config.provider.to_lowercase();
 
+    if thinking.is_some() && provider != "anthropic" {
+        log::warn!(
+            "--thinking is only supported by the anthropic provider; it has no effect with provider '{provider}'"
+        );
+    }
+
     let tool_sets = if !cli.tool.is_empty() {
         tool::connect_tool_servers(&cli.tool).await?
     } else {
@@ -345,6 +351,12 @@ fn apply_cli_overrides(cli: &Cli, config: &mut Config) {
     if let Some(ref system) = cli.system {
         config.system_prompt = Some(system.clone());
     }
+    if let Some(ref model) = cli.model {
+        config.model = model.clone();
+    }
+    if let Some(ref provider) = cli.provider {
+        config.provider = provider.clone();
+    }
 }
 
 fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> {
@@ -396,7 +408,7 @@ fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> {
         policy.add_cli_rule(PolicyRule::Allow(Action::WebSearch, "**".to_string()));
     }
 
-    policy.ask = cli.interactive;
+    policy.ask = cli.interactive || cli.is_interactive();
 
     Ok(policy)
 }
@@ -609,18 +621,19 @@ async fn run_interactive<M: CompletionModel + 'static>(
         .collect();
 
     if chat_history.len() >= 2 {
-        let last_user = session.messages.iter().rev().find(|m| m.role == "user");
-        let last_assistant = session
+        let last_user_idx = session
             .messages
             .iter()
-            .rev()
-            .find(|m| m.role == "assistant");
-        if let Some(msg) = last_user {
-            output::stderr_line(&format!("> {}", msg.content));
-        }
-        if let Some(msg) = last_assistant {
-            output::stdout_push(&msg.content);
-            output::stdout_finish();
+            .rposition(|m| m.role == "user")
+            .unwrap_or(0);
+        for msg in &session.messages[last_user_idx..] {
+            match msg.role.as_str() {
+                "assistant" => {
+                    output::stdout_push(&msg.content);
+                    output::stdout_finish();
+                }
+                _ => output::stderr_line(&format!("> {}", msg.content)),
+            }
         }
     }
 
@@ -718,16 +731,9 @@ async fn run_interactive<M: CompletionModel + 'static>(
                     continue;
                 }
 
-                if trimmed == "/tools" {
-                    io::stderr_line(
-                        "Available tools: read_file, write_file, list_dir, replace_in_file, delete_file, create_directory, file_info, move_file, copy_file, search_content, find_files, execute, git_diff, git_log, web_fetch, web_search, download_file, memory_add, memory_delete, load_skill",
-                    );
-                    continue;
-                }
-
                 if trimmed == "/help" {
                     io::stderr_line(
-                        "Commands: /exit, /quit, /clear, /compact, /session, /tools, /help",
+                        "Commands: /exit, /quit, /clear, /compact, /session, /help",
                     );
                     continue;
                 }

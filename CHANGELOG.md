@@ -12,6 +12,16 @@
   - **`load_skill` tool** — loads the full definition (instructions) of a skill by name on demand.
   - Duplicate skill names are deduplicated (first occurrence wins, warning logged).
 
+### Changed
+
+- **`--interactive` renamed to `--ask`** (`-i` short flag retained) — the flag only controls ask-before-deny policy behavior, not the interactive session, so the old name was misleading.
+- **`-s/--session` now implies `--ask`** — previously the help text claimed it did but the code never set `policy.ask`, so tools silently failed in interactive sessions instead of prompting the user. Bug fix.
+- **`--model` and `--provider` CLI overrides** — override the config model/provider for a single invocation without editing the config file.
+- **`--yolo` conflicts with `--ask`** — the two are contradictory (allow everything vs. ask before denying), so the combination is now rejected at parse time. Help text clarified that yolo overrides all policy rules without asking.
+- **Removed `/tools` interactive command** — its hardcoded list was out of sync with actually-registered tools and users can't call tools directly anyway.
+- **`--init` now conflicts with `--config`** — `--init` writes to FILE, so `--init -c=...` was silently ignoring the `-c` value; the combination is now rejected at parse time.
+- **`--list`, `--delete`, `--init`, and `--session` are now mutually exclusive** — these are standalone actions that bail out of `main()` early, so combining them was silently ignoring the extra flags. All combinations are now rejected at parse time.
+
 ## v0.2.0 – Bashkit Integration & Policy-Based Filesystem
 
 ### Breaking
@@ -62,7 +72,7 @@
   - **Think tool** – Extended reasoning capability.
 - **Policy engine:** Granular permission system controlling file access (read/write), command execution (glob patterns), and web access (fetch/search URLs). Supports policy files and CLI overrides.
 - **Config management:** YAML-based configuration, interactive `--init` wizard for setting up providers, API keys, models, and context windows.
-- **CLI flags:** `--memory`, `--session`, `--interactive`, `--thinking`, `--max-tokens`, `--max-turns`, `--verbose`/`--quiet`, `--list`, `--delete`, `--tool` (for external MCP tool servers), `--policy`, `--yolo` (allow-all mode).
+- **CLI flags:** `--memory`, `--session`, `--ask`, `--thinking`, `--max-tokens`, `--max-turns`, `--verbose`/`--quiet`, `--list`, `--delete`, `--tool` (for external MCP tool servers), `--policy`, `--yolo` (allow-all mode).
 - **Output control:** Offset/limit pagination, hard caps (200 lines / 100 KB), and truncation notices for all tool outputs.
 - **Logging:** `log` crate-based logging with emoji icons, color-coded levels, and configurable verbosity.
 - **CI/CD:** Gitea workflows for audit, CI (build & test), and release automation.

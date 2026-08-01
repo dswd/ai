@@ -138,9 +138,11 @@ Arguments:
   [PROMPT]...  Prompt text (if absent, read from stdin)
 
 Options:
-  -s, --session=[<NAME>]     Start an interactive session (or continue NAME)
+  -s, --session=[<NAME>]     Start an interactive session (or continue NAME, implies --ask)
   -m, --memory=[<FILE>]      Enable persistent memory
   -c, --config=<FILE>        Load configuration from FILE
+      --model=<MODEL>        Override the model
+      --provider=<PROVIDER>  Override the provider (openai, anthropic)
   -r, --read=<PATH>          Allow read-only access to PATH
   -w, --write=<PATH>         Allow read/write access to PATH
   -x, --execute=<PATTERN>    Allow execution of PATTERN
@@ -148,9 +150,9 @@ Options:
       --web-fetch=<PATTERN>  Allow web fetch for matching URL pattern
       --web-search=<PATTERN> Allow web search with matching query pattern
   -p, --policy=<FILE>        Load policy from FILE
-  -i, --interactive          Ask for approval instead of denying
+  -i, --ask                  Ask for approval instead of denying
   -t, --tool=<URL>           Connect to an MCP tool server (repeatable)
-  -y, --yolo                 Allow everything (dangerous)
+  -y, --yolo                 Allow everything without asking (overrides all policy, dangerous)
       --max-tokens=<N>       Maximum number of tokens
       --max-turns=<N>        Maximum agent turns (tool call rounds) [default: 100]
       --thinking=[<TOKENS>]  Enable extended thinking [default: 16000]

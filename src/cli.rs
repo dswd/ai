@@ -28,7 +28,7 @@ pub struct Cli {
     #[arg(
         short = 's',
         long = "session",
-        help = "Start an interactive session (or continue one given NAME), implies -i",
+        help = "Start an interactive session (or continue one given NAME), implies --ask",
         num_args = 0..=1,
         value_name = "NAME",
         default_missing_value = "",
@@ -55,6 +55,22 @@ pub struct Cli {
         require_equals = true
     )]
     pub config: Option<PathBuf>,
+
+    #[arg(
+        long = "model",
+        help = "Override the model",
+        value_name = "MODEL",
+        require_equals = true
+    )]
+    pub model: Option<String>,
+
+    #[arg(
+        long = "provider",
+        help = "Override the provider (openai, anthropic)",
+        value_name = "PROVIDER",
+        require_equals = true
+    )]
+    pub provider: Option<String>,
 
     #[arg(
         short = 'r',
@@ -121,8 +137,8 @@ pub struct Cli {
 
     #[arg(
         short = 'i',
-        long = "interactive",
-        help = "Enable interactive mode (ask for confirmation instead of denying)"
+        long = "ask",
+        help = "Ask the user for confirmation instead of denying policy checks"
     )]
     pub interactive: bool,
 
@@ -138,7 +154,8 @@ pub struct Cli {
     #[arg(
         short = 'y',
         long = "yolo",
-        help = "Enable yolo mode (set default policy to allow, DANGEROUS)"
+        help = "Allow everything without asking (overrides all policy rules, DANGEROUS)",
+        conflicts_with = "interactive"
     )]
     pub yolo: bool,
 
@@ -169,7 +186,12 @@ pub struct Cli {
     )]
     pub thinking: Option<usize>,
 
-    #[arg(short = 'l', long = "list", help = "List all saved sessions")]
+    #[arg(
+        short = 'l',
+        long = "list",
+        help = "List all saved sessions",
+        conflicts_with_all = ["delete", "init", "session"]
+    )]
     pub list: bool,
 
     #[arg(
@@ -179,6 +201,7 @@ pub struct Cli {
         num_args = 0..=1,
         default_missing_value = "",
         require_equals = true,
+        conflicts_with_all = ["config", "list", "delete", "session"],
     )]
     pub init: Option<String>,
 
@@ -186,7 +209,8 @@ pub struct Cli {
         long = "delete",
         help = "Delete a session by NAME",
         value_name = "NAME",
-        require_equals = true
+        require_equals = true,
+        conflicts_with_all = ["list", "init", "session"]
     )]
     pub delete: Option<String>,
 
@@ -226,6 +250,8 @@ impl Cli {
             && self.session.is_none()
             && self.memory.is_none()
             && self.config.is_none()
+            && self.model.is_none()
+            && self.provider.is_none()
             && self.read.is_empty()
             && self.write.is_empty()
             && self.execute.is_empty()
