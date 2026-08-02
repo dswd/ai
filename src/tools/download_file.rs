@@ -5,7 +5,7 @@ use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::shared::ToolError;
+use super::shared::{ToolError, http_client};
 use crate::policy::{Action, Policy};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -63,14 +63,9 @@ impl Tool for DownloadFileTool {
             )));
         }
 
-        let client = reqwest::Client::builder()
-            .user_agent("ai-cli/1.0")
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| ToolError::Message(format!("failed to create HTTP client: {e}")))?;
-
-        let resp = client
+        let resp = http_client()
             .get(&args.url)
+            .timeout(std::time::Duration::from_secs(30))
             .send()
             .await
             .map_err(|e| ToolError::Message(format!("failed to fetch URL: {e}")))?;

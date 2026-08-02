@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::shared::ToolError;
+use super::shared::{ToolError, js_literal};
 use super::web_search::html_to_markdown;
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, process_output, truncate};
 use crate::policy::{Action, Policy};
@@ -223,7 +223,7 @@ impl Tool for BrowserClickTool {
                     .enable_all()
                     .build()
                     .map_err(|e| format!("browser rt: {e}"))?;
-                let sel = selector.replace('\\', "\\\\").replace('\'', "\\'");
+                let sel = js_literal(&selector);
                 rt.block_on(async {
                     let mut page = browser
                         .new_page()
@@ -236,7 +236,7 @@ impl Tool for BrowserClickTool {
                     tokio::time::sleep(Duration::from_millis(800)).await;
 
                     let click_js = format!(
-                        r#"(function(){{var e=document.querySelector('{sel}');if(!e)return'not found';e.dispatchEvent(new MouseEvent('click',{{bubbles:true}}));return'clicked'}})()"#
+                        r#"(function(){{var e=document.querySelector({sel});if(!e)return'not found';e.dispatchEvent(new MouseEvent('click',{{bubbles:true}}));return'clicked'}})()"#
                     );
                     let clicked = page.evaluate(&click_js);
                     if clicked.as_str() == Some("not found") {
@@ -458,7 +458,7 @@ impl Tool for BrowserGetElementTool {
                     .enable_all()
                     .build()
                     .map_err(|e| format!("browser rt: {e}"))?;
-                let sel = selector.replace('\\', "\\\\").replace('\'', "\\'");
+                let sel = js_literal(&selector);
                 rt.block_on(async {
                     let mut page = browser
                         .new_page()
@@ -470,7 +470,7 @@ impl Tool for BrowserGetElementTool {
                     tokio::time::sleep(Duration::from_millis(500)).await;
 
                     let js = format!(
-                        r#"(function(){{var e=document.querySelector('{sel}');return e?e.innerHTML:'__not_found__'}})()"#
+                        r#"(function(){{var e=document.querySelector({sel});return e?e.innerHTML:'__not_found__'}})()"#
                     );
                     let raw = page.evaluate(&js);
                     let inner = raw.as_str().unwrap_or("");

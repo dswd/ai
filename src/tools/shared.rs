@@ -1,6 +1,32 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use std::time::Duration;
 
 use regex::Regex;
+
+/// Realistic browser user-agent used for all web requests.
+pub(crate) const DEFAULT_UA: &str =
+    "Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0";
+
+/// Shared HTTP client with connection pooling, built once and reused across tools.
+pub(crate) fn http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent(DEFAULT_UA)
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("failed to build HTTP client")
+    })
+}
+
+/// Emit a JS string literal (JSON strings are valid JS string literals; `serde_json`
+/// escapes `\`, `"`, newlines, and unicode line separators). Safe to splice into
+/// `page.evaluate(...)` templates.
+#[cfg(feature = "browser")]
+pub(crate) fn js_literal(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string())
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ToolError {
@@ -312,4 +338,28 @@ pub fn find_git_dir() -> Result<PathBuf, ToolError> {
     Err(ToolError::Message(
         "not in a git repository (no .git directory found)".to_string(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "browser")]
+    #[test]
+    fn test_js_literal_escapes_metacharacters() {
+        assert_eq!(js_literal("plain"), "\"plain\"");
+        assert_eq!(js_literal("a\\b"), r#""a\\b""#);
+        assert_eq!(js_literal("a\"b"), r#""a\"b""#);
+        assert_eq!(js_literal("a'b"), "\"a'b\""); // single quotes need no escaping in JSON
+        assert_eq!(js_literal("a\nb"), r#""a\nb""#);
+    }
+
+    #[cfg(feature = "browser")]
+    #[test]
+    fn test_js_literal_roundtrips() {
+        let s = "sel\\ector's\"with\nnewline";
+        let lit = js_literal(s);
+        let parsed: String = serde_json::from_str(&lit).unwrap();
+        assert_eq!(parsed, s);
+    }
 }

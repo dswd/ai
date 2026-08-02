@@ -6,11 +6,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use super::shared::ToolError;
+use super::shared::{ToolError, http_client};
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::policy::{Action, Policy};
-
-const USER_AGENT: &str = "Mozilla/5.0 (compatible; ai-cli/1.0; +https://github.com/dswd/ai)";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WebFetchArgs {
@@ -119,14 +117,9 @@ impl Tool for WebFetchTool {
 }
 
 async fn fetch_url(url: &str, timeout_secs: u64) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(timeout_secs))
-        .user_agent(USER_AGENT)
-        .build()
-        .map_err(|e| format!("failed to create HTTP client: {e}"))?;
-
-    let resp = client
+    let resp = http_client()
         .get(url)
+        .timeout(Duration::from_secs(timeout_secs))
         .header(
             "Accept",
             "text/html, application/xhtml+xml, text/plain;q=0.9",

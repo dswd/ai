@@ -9,12 +9,12 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::shared::ToolError;
+#[cfg(feature = "browser")]
+use super::shared::js_literal;
+use super::shared::{ToolError, http_client};
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::config::SearchConfig;
 use crate::policy::{Action, Policy};
-
-const UA: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WebSearchArgs {
@@ -198,7 +198,7 @@ impl WebSearchTool {
     #[cfg(feature = "browser")]
     async fn search_google(&self, query: &str) -> Result<String, String> {
         let query = query.to_string();
-        let query_escaped = query.replace('\\', "\\\\").replace('\'', "\\'");
+        let query_escaped = js_literal(&query);
         tokio::time::timeout(
             Duration::from_secs(30),
             tokio::task::spawn_blocking(move || {
@@ -227,7 +227,7 @@ impl WebSearchTool {
                     tokio::time::sleep(Duration::from_millis(500)).await;
 
                     page.evaluate(&format!(
-                        r#"(function(){{var i=document.querySelector('input[name="q"],textarea[name="q"],input[type="search"]');if(i){{i.focus();i.value='{query_escaped}';i.dispatchEvent(new Event('input',{{bubbles:true}}));i.dispatchEvent(new KeyboardEvent('keydown',{{key:'Enter',code:'Enter',keyCode:13,bubbles:true}}));i.dispatchEvent(new KeyboardEvent('keyup',{{key:'Enter',code:'Enter',keyCode:13,bubbles:true}}));}}}})()"#
+                        r#"(function(){{var i=document.querySelector('input[name="q"],textarea[name="q"],input[type="search"]');if(i){{i.focus();i.value={query_escaped};i.dispatchEvent(new Event('input',{{bubbles:true}}));i.dispatchEvent(new KeyboardEvent('keydown',{{key:'Enter',code:'Enter',keyCode:13,bubbles:true}}));i.dispatchEvent(new KeyboardEvent('keyup',{{key:'Enter',code:'Enter',keyCode:13,bubbles:true}}));}}}})()"#
                     ));
 
                     tokio::time::sleep(Duration::from_millis(2500)).await;
@@ -256,7 +256,7 @@ impl WebSearchTool {
     #[cfg(feature = "browser")]
     async fn search_bing(&self, query: &str) -> Result<String, String> {
         let query = query.to_string();
-        let query_escaped = query.replace('\\', "\\\\").replace('\'', "\\'");
+        let query_escaped = js_literal(&query);
         debug!("{DIM}  Obscura Bing: spawning browser...{RESET}");
         tokio::time::timeout(
             Duration::from_secs(30),
@@ -286,7 +286,7 @@ impl WebSearchTool {
                     tokio::time::sleep(Duration::from_millis(500)).await;
 
                     page.evaluate(&format!(
-                        r#"(function(){{var i=document.querySelector('input[name="q"],textarea[name="q"],input[type="search"]');if(i){{i.focus();i.value='{query_escaped}';i.dispatchEvent(new Event('input',{{bubbles:true}}));i.dispatchEvent(new KeyboardEvent('keydown',{{key:'Enter',code:'Enter',keyCode:13,bubbles:true}}));i.dispatchEvent(new KeyboardEvent('keyup',{{key:'Enter',code:'Enter',keyCode:13,bubbles:true}}));}}}})()"#
+                        r#"(function(){{var i=document.querySelector('input[name="q"],textarea[name="q"],input[type="search"]');if(i){{i.focus();i.value={query_escaped};i.dispatchEvent(new Event('input',{{bubbles:true}}));i.dispatchEvent(new KeyboardEvent('keydown',{{key:'Enter',code:'Enter',keyCode:13,bubbles:true}}));i.dispatchEvent(new KeyboardEvent('keyup',{{key:'Enter',code:'Enter',keyCode:13,bubbles:true}}));}}}})()"#
                     ));
 
                     tokio::time::sleep(Duration::from_millis(2500)).await;
@@ -360,14 +360,9 @@ fn finalize(
 // ----- HTTP fetch -----
 
 async fn fetch(url: &str) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(12))
-        .user_agent(UA)
-        .build()
-        .map_err(|e| format!("client: {e}"))?;
-
-    let resp = client
+    let resp = http_client()
         .get(url)
+        .timeout(Duration::from_secs(12))
         .header(
             "Accept",
             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",

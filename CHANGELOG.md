@@ -28,6 +28,8 @@
 - **Deduplicated byte-size formatting** — `fmt_bytes()` helper in `util.rs` shared by `file_info` and `download_file`.
 - **Docs/version drift fixed** — `Cargo.toml` bumped to `0.3.0` to match the changelog; README CLI reference regenerated (`--system`, `--skill` added, `/tools` removed, `-i` → `--ask`).
 - **`Role` enum replaces stringly-typed roles** — `session::Message.role` is now a typed `Role { User, Assistant, System }` instead of a raw string. Session files remain backward compatible (`#[serde(rename_all = "lowercase")]` keeps the on-disk format). The `/compact` summary is now consistently persisted and resumed as a `system` message (previously it was stored as `system` but rebuilt as `user`, mislabeling the summary as a user turn).
+- **Shared HTTP client** — `web_fetch`, `web_search`, and `download_file` now reuse a single lazily-built `reqwest::Client` (connection pooling) instead of constructing a new client per request. A unified realistic browser user-agent is used across all three.
+- **JS-injection hardening** — selectors and search queries spliced into `page.evaluate(...)` are now emitted as proper JSON string literals via `js_literal()` (which escapes `\`, `"`, newlines, and unicode line separators) instead of ad-hoc backslash/single-quote escaping. Applies to `browser_click`, `browser_get_element`, and Google/Bing search.
 
 ## v0.2.0 – Bashkit Integration & Policy-Based Filesystem
 
