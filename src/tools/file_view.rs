@@ -61,35 +61,33 @@ impl Tool for FileViewTool {
         let bytes = std::fs::read(&canonical)
             .map_err(|e| ToolError::Message(format!("cannot read file: {e}")))?;
 
-        let md = markitdown::MarkItDown::new();
-        let result = md
-            .convert_bytes(
-                &bytes,
-                Some(markitdown::model::ConversionOptions {
-                    file_extension: canonical
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .map(|e| format!(".{e}").to_lowercase()),
-                    url: None,
-                    llm_client: None,
-                    llm_model: None,
-                }),
-            )
-            .map_err(|e| ToolError::Message(format!("conversion failed: {e}")))?;
+        let ext = canonical
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase());
 
-        match result {
-            Some(r) => {
-                let truncated = truncate(&r.text_content, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
-                debug!(
-                    "{DIM} {} \n{truncated}\n {} {RESET}",
-                    bar_title(&args.path),
-                    bar_line()
-                );
-                process_output(&r.text_content, None, None).map_err(ToolError::Message)
+        let is_pdf = ext.as_deref() == Some("pdf") || bytes.starts_with(b"%PDF-");
+
+        let text = if is_pdf {
+            pdf_extract::extract_text_from_mem(&bytes)
+                .map_err(|e| ToolError::Message(format!("PDF extraction failed: {e}")))?
+        } else {
+            let mut input = markdownify::MarkdownifyInput::from_bytes(bytes, args.path.clone())
+                .map_err(|e| ToolError::Message(format!("conversion failed: {e}")))?;
+            if let Some(ref ext) = ext {
+                input.set_ext(ext.clone());
             }
-            None => Err(ToolError::Message(
-                "unsupported file type — cannot extract text".to_string(),
-            )),
-        }
+            input
+                .convert()
+                .map_err(|e| ToolError::Message(format!("conversion failed: {e}")))?
+        };
+
+        let truncated = truncate(&text, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
+        debug!(
+            "{DIM} {} \n{truncated}\n {} {RESET}",
+            bar_title(&args.path),
+            bar_line()
+        );
+        process_output(&text, None, None).map_err(ToolError::Message)
     }
 }

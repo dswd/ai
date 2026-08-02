@@ -126,7 +126,8 @@ impl Tool for ExecuteTool {
             .map(|c| c.to_string())
             .collect();
 
-        let fs_backend = RealFs::new("/", RealFsMode::ReadWrite)
+        let fs_backend = RealFs::open("/", RealFsMode::ReadWrite)
+            .await
             .map_err(|e| ToolError::Message(format!("filesystem backend init failed: {e}")))?;
         let policy_backend = PolicyFsBackend::new(fs_backend, policy.clone());
         let fs: Arc<dyn FileSystem> = Arc::new(PosixFs::new(policy_backend));
@@ -195,8 +196,8 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    fn test_bash() -> Bash {
-        let fs_backend = RealFs::new("/", RealFsMode::ReadWrite).unwrap();
+    async fn test_bash() -> Bash {
+        let fs_backend = RealFs::open("/", RealFsMode::ReadWrite).await.unwrap();
         let fs: Arc<dyn FileSystem> = Arc::new(PosixFs::new(fs_backend));
         let limits = ExecutionLimits {
             timeout: Duration::from_secs(10),
@@ -207,7 +208,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_bashkit_echo() {
-        let mut bash = test_bash();
+        let mut bash = test_bash().await;
         let result = bash.exec("echo 'hello bashkit'").await.unwrap();
         assert_eq!(result.stdout.trim(), "hello bashkit");
         assert_eq!(result.exit_code, 0);
@@ -215,7 +216,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_bashkit_pipeline() {
-        let mut bash = test_bash();
+        let mut bash = test_bash().await;
         let result = bash
             .exec("echo -e 'apple\nbanana\ncherry' | grep a")
             .await
@@ -227,7 +228,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_bashkit_cat() {
-        let mut bash = test_bash();
+        let mut bash = test_bash().await;
         let result = bash.exec("cat /etc/hostname").await.unwrap();
         assert!(!result.stdout.trim().is_empty());
         assert_eq!(result.exit_code, 0);
@@ -235,7 +236,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_bashkit_exit_code() {
-        let mut bash = test_bash();
+        let mut bash = test_bash().await;
         let result = bash.exec("false").await.unwrap();
         assert_eq!(result.exit_code, 1);
     }

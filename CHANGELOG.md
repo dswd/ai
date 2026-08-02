@@ -22,6 +22,7 @@
 - **`--init` now conflicts with `--config`** — `--init` writes to FILE, so `--init -c=...` was silently ignoring the `-c` value; the combination is now rejected at parse time.
 - **`--list`, `--delete`, `--init`, and `--session` are now mutually exclusive** — these are standalone actions that bail out of `main()` early, so combining them was silently ignoring the extra flags. All combinations are now rejected at parse time.
 - **Provider flavors** — all providers now map to one of two client flavors: OpenAI-compatible or Anthropic-compatible, each with a default base URL. Previously only `openai` and `anthropic` worked at runtime while the init wizard advertised 9. Added generic `openai-compatible` and `anthropic-compatible` providers that require a user-supplied `api_base` (e.g. for proxies or self-hosted endpoints). `api_base` in config still overrides the provider default.
+- **Dependency security fixes** — replaced `markitdown` (which pinned vulnerable `lopdf 0.34`, `quick-xml 0.31/0.37`, and old `rig-core 0.8`) with `markdownify 0.3` + `pdf-extract 0.12` (`lopdf 0.42`, `quick-xml 0.41`). This resolves RUSTSEC-2026-0187 (lopdf stack overflow) and RUSTSEC-2026-0195/0194 (quick-xml DoS), which were previously ignored in CI. `file_view` routes PDFs to `pdf-extract` and all other formats through `markdownify`. The stale `ignore:` list was removed from the GitHub audit workflow. The four remaining advisories are all "unmaintained" warnings (not vulnerabilities) from the optional `obscura` browser crate and `lopdf`'s font parser.
 
 ## v0.2.0 – Bashkit Integration & Policy-Based Filesystem
 
@@ -35,7 +36,7 @@
 
 - **Bashkit virtual bash interpreter** — replaces `sh -c` with 164 in-process builtins (echo, grep, sed, awk, find, tar, etc.). Sandboxed execution with resource limits and timeout control.
 - **Policy-based filesystem (`PolicyFsBackend`)** — custom `FsBackend` for bashkit that checks `Action::Read`/`Action::Write` on every file operation, enabling fine-grained policy enforcement for built-in commands.
-- **`file_view` tool** — extracts text from PDF, DOCX, XLSX, and other binary formats via `markitdown`.
+- **`file_view` tool** — extracts text from PDF, DOCX, XLSX, and other binary formats via `markdownify` + `pdf-extract`.
 - **Obscura headless browser** — stealth-mode browser for web search (Bing, Google, DuckDuckGo) with anti-detection.
 
 ### Changed
@@ -51,7 +52,7 @@
 
 ### Infrastructure
 
-- Dependency added: `bashkit 0.14` (virtual bash interpreter), `obscura` (headless browser), `markitdown` (document conversion).
+- Dependency added: `bashkit 0.14` (virtual bash interpreter), `obscura` (headless browser), `markdownify` + `pdf-extract` (document conversion).
 - Build deps added: `cmake`, `clang`, `llvm-dev`, `libssl-dev` (for Obscura/Deno).
 - Binary size: ~22 MB (release).
 
