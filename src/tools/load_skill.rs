@@ -54,9 +54,8 @@ impl Tool for LoadSkillTool {
                 };
                 ToolError::Message(format!("skill '{}' not found ({hint})", args.name))
             })?;
-        crate::skills::load(skill).map_err(|e| {
-            ToolError::Message(format!("failed to read skill '{}': {e}", skill.name))
-        })
+        crate::skills::load(skill)
+            .map_err(|e| ToolError::Message(format!("failed to read skill '{}': {e}", skill.name)))
     }
 }
 
@@ -66,10 +65,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_skill_found() {
-        let dir = std::env::temp_dir().join(format!(
-            "ai-skill-tool-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("ai-skill-tool-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(

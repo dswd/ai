@@ -5,6 +5,7 @@ mod io;
 mod memory;
 mod output;
 mod policy;
+mod providers;
 mod session;
 mod skills;
 mod tool;
@@ -23,7 +24,7 @@ use rig_core::{
     agent::{MultiTurnStreamItem, PromptResponse, StreamingResult},
     client::CompletionClient,
     completion::{Chat, CompletionModel, Message, Usage},
-    providers,
+    providers as rig_providers,
     streaming::{StreamedAssistantContent, StreamingChat, StreamingPrompt},
     tool::server::ToolServer,
 };
@@ -152,10 +153,20 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let provider = config.provider.to_lowercase();
+    let provider_spec = providers::resolve(&provider).ok_or_else(|| {
+        let supported = providers::all_names().collect::<Vec<_>>().join(", ");
+        anyhow::anyhow!("Unsupported provider: {provider}. Supported: {supported}")
+    })?;
 
-    if thinking.is_some() && provider != "anthropic" {
+    let base_url = config
+        .api_base
+        .clone()
+        .or_else(|| provider_spec.default_base_url.map(str::to_string))
+        .ok_or_else(|| anyhow::anyhow!("provider '{provider}' requires an api_base in config"))?;
+
+    if thinking.is_some() && provider_spec.flavor != providers::Flavor::Anthropic {
         log::warn!(
-            "--thinking is only supported by the anthropic provider; it has no effect with provider '{provider}'"
+            "--thinking is only supported by the anthropic flavor; it has no effect with provider '{provider}'"
         );
     }
 
@@ -182,11 +193,10 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(not(feature = "browser"))]
     let browser_state: Option<Arc<()>> = None;
 
-    match provider.as_str() {
-        "openai" => {
-            let client = openai_client(&config)?;
-            let model = client.completion_model(&model_name);
-            let agent = build_agent(
+    match provider_spec.flavor {
+        providers::Flavor::OpenAi => {
+            let model = openai_client(&config, &base_url)?.completion_model(&model_name);
+            run_agent(
                 model,
                 &system_prompt,
                 &policy,
@@ -198,9 +208,6 @@ async fn main() -> anyhow::Result<()> {
                 &config.search,
                 Arc::clone(&skills),
                 browser_state.clone(),
-            );
-            dispatch_agent(
-                agent,
                 is_interactive,
                 &mut session,
                 &session_dir,
@@ -209,10 +216,9 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?;
         }
-        "anthropic" => {
-            let client = anthropic_client(&config)?;
-            let model = client.completion_model(&model_name);
-            let agent = build_agent(
+        providers::Flavor::Anthropic => {
+            let model = anthropic_client(&config, &base_url)?.completion_model(&model_name);
+            run_agent(
                 model,
                 &system_prompt,
                 &policy,
@@ -224,9 +230,6 @@ async fn main() -> anyhow::Result<()> {
                 &config.search,
                 Arc::clone(&skills),
                 browser_state.clone(),
-            );
-            dispatch_agent(
-                agent,
                 is_interactive,
                 &mut session,
                 &session_dir,
@@ -234,13 +237,57 @@ async fn main() -> anyhow::Result<()> {
                 config.context_window,
             )
             .await?;
-        }
-        _ => {
-            anyhow::bail!("Unsupported provider: {provider}. Supported: openai, anthropic");
         }
     }
 
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_agent<M: CompletionModel + 'static>(
+    model: M,
+    system_prompt: &str,
+    policy: &Policy,
+    max_tokens: Option<usize>,
+    max_turns: usize,
+    tool_sets: Vec<tool::ToolSet>,
+    thinking: Option<usize>,
+    memory: Option<Arc<memory::Memory>>,
+    search: &config::SearchConfig,
+    skills: Arc<Vec<skills::Skill>>,
+    #[cfg(feature = "browser")] browser_state: Option<Arc<tools::BrowserState>>,
+    #[cfg(not(feature = "browser"))] _browser_state: Option<Arc<()>>,
+    is_interactive: bool,
+    session: &mut Session,
+    session_dir: &std::path::Path,
+    prompt_text: Option<String>,
+    context_window: Option<usize>,
+) -> anyhow::Result<()> {
+    let agent = build_agent(
+        model,
+        system_prompt,
+        policy,
+        max_tokens,
+        max_turns,
+        tool_sets,
+        thinking,
+        memory,
+        search,
+        skills,
+        #[cfg(feature = "browser")]
+        browser_state,
+        #[cfg(not(feature = "browser"))]
+        _browser_state,
+    );
+    dispatch_agent(
+        agent,
+        is_interactive,
+        session,
+        session_dir,
+        prompt_text,
+        context_window,
+    )
+    .await
 }
 
 async fn dispatch_agent<M: CompletionModel + 'static>(
@@ -252,14 +299,7 @@ async fn dispatch_agent<M: CompletionModel + 'static>(
     context_window: Option<usize>,
 ) -> anyhow::Result<()> {
     if is_interactive {
-        run_interactive(
-            agent,
-            session,
-            session_dir,
-            prompt_text,
-            context_window,
-        )
-        .await?;
+        run_interactive(agent, session, session_dir, prompt_text, context_window).await?;
     } else if let Some(text) = prompt_text {
         run_oneshot(agent, &text).await?;
     } else {
@@ -426,7 +466,10 @@ fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> {
     Ok(policy)
 }
 
-fn openai_client(config: &Config) -> anyhow::Result<providers::openai::CompletionsClient> {
+fn openai_client(
+    config: &Config,
+    base_url: &str,
+) -> anyhow::Result<rig_providers::openai::CompletionsClient> {
     let api_key = config
         .resolve_api_key()
         .or_else(|| std::env::var("OPENAI_API_KEY").ok())
@@ -434,14 +477,16 @@ fn openai_client(config: &Config) -> anyhow::Result<providers::openai::Completio
             "OpenAI API key not found. Set OPENAI_API_KEY environment variable or api_key in config."
         ))?;
 
-    let mut builder = providers::openai::CompletionsClient::builder().api_key(api_key.as_str());
-    if let Some(ref base) = config.api_base {
-        builder = builder.base_url(base);
-    }
+    let builder = rig_providers::openai::CompletionsClient::builder()
+        .api_key(api_key.as_str())
+        .base_url(base_url);
     Ok(builder.build()?)
 }
 
-fn anthropic_client(config: &Config) -> anyhow::Result<providers::anthropic::Client> {
+fn anthropic_client(
+    config: &Config,
+    base_url: &str,
+) -> anyhow::Result<rig_providers::anthropic::Client> {
     let api_key = config
         .resolve_api_key()
         .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
@@ -449,10 +494,9 @@ fn anthropic_client(config: &Config) -> anyhow::Result<providers::anthropic::Cli
             "Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable or api_key in config."
         ))?;
 
-    let mut builder = providers::anthropic::Client::builder().api_key(api_key.as_str());
-    if let Some(ref base) = config.api_base {
-        builder = builder.base_url(base);
-    }
+    let builder = rig_providers::anthropic::Client::builder()
+        .api_key(api_key.as_str())
+        .base_url(base_url);
     Ok(builder.build()?)
 }
 
@@ -746,9 +790,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
                 }
 
                 if trimmed == "/help" {
-                    io::stderr_line(
-                        "Commands: /exit, /quit, /clear, /compact, /session, /help",
-                    );
+                    io::stderr_line("Commands: /exit, /quit, /clear, /compact, /session, /help");
                     continue;
                 }
 

@@ -6,7 +6,7 @@ A CLI agent for interacting with AI models, with tool use, filesystem and comman
 
 ## Features
 
-- **Multi-provider support** — OpenAI, Anthropic, Ollama, Groq, DeepSeek, Google (Gemini), Mistral, OpenRouter, and xAI (Grok), configurable via `ai --init`.
+- **Multi-provider support** — OpenAI, Anthropic, Ollama, Groq, DeepSeek, Google (Gemini), Mistral, OpenRouter, and xAI (Grok), configurable via `ai --init`. All map to an OpenAI- or Anthropic-compatible endpoint; `openai-compatible` and `anthropic-compatible` are also available for custom endpoints (requires `api_base`).
 - **Interactive & one-shot modes** — Run with a direct prompt, pipe text via stdin, or start an interactive session with persistent history.
 - **Sessions** — Save, list (`-l`), continue (`-s NAME`), and delete (`--delete NAME`) sessions with message history and system prompt preservation.
 - **Tool system** — Filesystem tools, code search, git diff/log, web fetch/search, command execution, downloads, document extraction, and more.
@@ -57,6 +57,17 @@ context_window: 128000
 ```
 
 API keys can also be supplied via environment variables (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`).
+
+All providers map to an OpenAI- or Anthropic-compatible endpoint. To use a custom
+endpoint, set `provider` to `openai-compatible` or `anthropic-compatible` and
+provide `api_base`:
+
+```yaml
+provider: openai-compatible
+api_key: "env:MY_PROXY_KEY"
+api_base: "https://my-proxy.example.com/v1"
+model: "some-model"
+```
 
 ### One-shot prompt
 
@@ -142,7 +153,7 @@ Options:
   -m, --memory=[<FILE>]      Enable persistent memory
   -c, --config=<FILE>        Load configuration from FILE
       --model=<MODEL>        Override the model
-      --provider=<PROVIDER>  Override the provider (openai, anthropic)
+      --provider=<PROVIDER>  Override the provider
   -r, --read=<PATH>          Allow read-only access to PATH
   -w, --write=<PATH>         Allow read/write access to PATH
   -x, --execute=<PATTERN>    Allow execution of PATTERN

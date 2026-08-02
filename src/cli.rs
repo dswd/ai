@@ -66,7 +66,7 @@ pub struct Cli {
 
     #[arg(
         long = "provider",
-        help = "Override the provider (openai, anthropic)",
+        help = "Override the provider",
         value_name = "PROVIDER",
         require_equals = true
     )]

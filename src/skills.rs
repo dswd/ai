@@ -41,7 +41,11 @@ pub fn discover(skill_args: &[String], skills_dir: &Path) -> Vec<Skill> {
         if seen.insert(skill.name.clone()) {
             deduped.push(skill);
         } else {
-            warn!("duplicate skill name '{}' ignored ({})", skill.name, skill.path.display());
+            warn!(
+                "duplicate skill name '{}' ignored ({})",
+                skill.name,
+                skill.path.display()
+            );
         }
     }
     deduped
@@ -81,7 +85,11 @@ fn find_skills_in_dir(dir: &Path, out: &mut Vec<Skill>) {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
 
         if should_skip_walk_entry(&name) {
             continue;
@@ -121,7 +129,12 @@ fn parse_skill_file(path: &Path) -> Option<Skill> {
                 .and_then(|p| p.file_name())
                 .map(|n| n.to_string_lossy().to_string())
                 .filter(|n| !n.is_empty())
-                .unwrap_or_else(|| path.file_stem().unwrap_or_default().to_string_lossy().to_string());
+                .unwrap_or_else(|| {
+                    path.file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string()
+                });
             warn!(
                 "skill {} has no name in front matter; using '{}'",
                 path.display(),
@@ -167,7 +180,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ai-skills-test-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("ai-skills-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -197,7 +211,8 @@ mod tests {
 
     #[test]
     fn test_parse_front_matter_crlf() {
-        let content = "---\r\nname: win-skill\r\ndescription: Windows file\r\n---\r\n\r\nBody here\r\n";
+        let content =
+            "---\r\nname: win-skill\r\ndescription: Windows file\r\n---\r\n\r\nBody here\r\n";
         let fm = parse_front_matter(content).unwrap();
         assert_eq!(fm.name.as_deref(), Some("win-skill"));
         assert_eq!(fm.description.as_deref(), Some("Windows file"));
@@ -216,7 +231,11 @@ mod tests {
         let dir = temp_dir("summary-empty");
         std::fs::create_dir_all(dir.join("no-desc")).unwrap();
         std::fs::create_dir_all(dir.join("with-desc")).unwrap();
-        std::fs::write(dir.join("no-desc").join("SKILL.md"), "---\nname: no-desc\n---\nBody").unwrap();
+        std::fs::write(
+            dir.join("no-desc").join("SKILL.md"),
+            "---\nname: no-desc\n---\nBody",
+        )
+        .unwrap();
         std::fs::write(
             dir.join("with-desc").join("SKILL.md"),
             "---\nname: with-desc\ndescription: Has one\n---\nBody",
@@ -240,7 +259,11 @@ mod tests {
             "---\nname: foo-skill\ndescription: Foo skill\n---\nBody",
         )
         .unwrap();
-        std::fs::write(dir.join("bar").join("SKILL.md"), "---\nname: bar-skill\n---\nBody").unwrap();
+        std::fs::write(
+            dir.join("bar").join("SKILL.md"),
+            "---\nname: bar-skill\n---\nBody",
+        )
+        .unwrap();
 
         let skills = discover(&[], &dir);
         assert_eq!(skills.len(), 2);
@@ -260,7 +283,10 @@ mod tests {
         )
         .unwrap();
 
-        let skills = discover(&[file.to_string_lossy().to_string()], &dir.join("nonexistent"));
+        let skills = discover(
+            &[file.to_string_lossy().to_string()],
+            &dir.join("nonexistent"),
+        );
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "direct");
         let _ = std::fs::remove_dir_all(&dir);

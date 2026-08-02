@@ -1,77 +1,8 @@
 use std::path::PathBuf;
 
 use crate::config::{Config, SearchConfig};
+use crate::providers::{PROVIDERS, resolve};
 use dialoguer::{Input, Password, Select, theme::ColorfulTheme};
-
-const PROVIDERS: &[&str] = &[
-    "openai",
-    "anthropic",
-    "ollama",
-    "groq",
-    "deepseek",
-    "google",
-    "mistral",
-    "openrouter",
-    "xai",
-];
-
-fn default_models(provider: &str) -> Vec<String> {
-    match provider {
-        "openai" => vec![
-            "gpt-4o".into(),
-            "gpt-4.1".into(),
-            "gpt-4.1-mini".into(),
-            "gpt-4o-mini".into(),
-            "gpt-4.1-nano".into(),
-        ],
-        "anthropic" => vec![
-            "claude-sonnet-4-20250514".into(),
-            "claude-3-5-sonnet-20241022".into(),
-            "claude-3-5-haiku-20241022".into(),
-        ],
-        "ollama" => vec!["llama3.2".into(), "qwen3".into(), "deepseek-r1".into()],
-        "groq" => vec![
-            "llama-3.3-70b-versatile".into(),
-            "mixtral-8x7b-32768".into(),
-        ],
-        "deepseek" => vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
-        "google" => vec!["gemini-2.5-flash".into(), "gemini-2.5-pro".into()],
-        "mistral" => vec!["mistral-large-latest".into(), "mistral-small-latest".into()],
-        "openrouter" => vec![
-            "openai/gpt-4o".into(),
-            "openai/gpt-4.1".into(),
-            "anthropic/claude-sonnet-4".into(),
-        ],
-        "xai" => vec!["grok-3".into()],
-        _ => vec![],
-    }
-}
-
-fn default_context_window(provider: &str) -> usize {
-    match provider {
-        "openai" => 128_000,
-        "anthropic" => 200_000,
-        "deepseek" => 128_000,
-        "google" => 1_000_000,
-        "xai" => 128_000,
-        _ => 128_000,
-    }
-}
-
-fn env_var_for(provider: &str) -> &str {
-    match provider {
-        "openai" => "OPENAI_API_KEY",
-        "anthropic" => "ANTHROPIC_API_KEY",
-        "ollama" => "OLLAMA_API_KEY",
-        "groq" => "GROQ_API_KEY",
-        "deepseek" => "DEEPSEEK_API_KEY",
-        "google" => "GEMINI_API_KEY",
-        "mistral" => "MISTRAL_API_KEY",
-        "openrouter" => "OPENROUTER_API_KEY",
-        "xai" => "XAI_API_KEY",
-        _ => "",
-    }
-}
 
 pub fn run(target_path: Option<String>) -> anyhow::Result<()> {
     let theme = ColorfulTheme::default();
@@ -81,15 +12,17 @@ pub fn run(target_path: Option<String>) -> anyhow::Result<()> {
     println!();
 
     // Step 1: Provider
+    let names: Vec<&str> = PROVIDERS.iter().map(|p| p.name).collect();
     let provider_idx = Select::with_theme(&theme)
         .with_prompt("Provider")
-        .items(PROVIDERS)
+        .items(&names)
         .default(0)
         .interact()?;
-    let provider = PROVIDERS[provider_idx].to_string();
+    let provider_spec = resolve(names[provider_idx]).expect("provider list derived from table");
+    let provider = provider_spec.name.to_string();
 
     // Step 2: API key
-    let env_var = env_var_for(&provider);
+    let env_var = provider_spec.env_var;
     let detected = std::env::var(env_var).ok();
     let api_key = Password::with_theme(&theme)
         .with_prompt(format!("API key ({env_var})"))
@@ -102,36 +35,60 @@ pub fn run(target_path: Option<String>) -> anyhow::Result<()> {
         Some(api_key)
     };
 
-    // Step 3: API base URL
-    let api_base: String = Input::with_theme(&theme)
-        .with_prompt("API base URL (optional)")
-        .allow_empty(true)
-        .default(String::new())
-        .interact_text()?;
-    let api_base = if api_base.is_empty() {
-        None
-    } else {
-        Some(api_base)
+    // Step 3: API base URL (optional for named providers, required for generic)
+    let api_base = match provider_spec.default_base_url {
+        Some(default) => {
+            let default_str = default.to_string();
+            let base: String = Input::with_theme(&theme)
+                .with_prompt(format!("API base URL (default: {default_str})"))
+                .allow_empty(true)
+                .default(default_str.clone())
+                .interact_text()?;
+            Some(base)
+        }
+        None => {
+            let base: String = loop {
+                let input: String = Input::with_theme(&theme)
+                    .with_prompt(format!(
+                        "API base URL (required for {provider}, e.g. https://example.com/v1)"
+                    ))
+                    .allow_empty(true)
+                    .interact_text()?;
+                let trimmed = input.trim();
+                if trimmed.is_empty() {
+                    println!("  API base URL is required for provider '{provider}'.");
+                    continue;
+                }
+                break trimmed.to_string();
+            };
+            Some(base)
+        }
     };
 
     // Step 4: Model
-    let mut models = default_models(&provider);
-    models.push("Other (type manually)".into());
-    let model_idx = Select::with_theme(&theme)
-        .with_prompt("Model")
-        .items(&models)
-        .default(0)
-        .interact()?;
-    let model = if model_idx == models.len() - 1 {
+    let model = if provider_spec.models.is_empty() {
         Input::with_theme(&theme)
             .with_prompt("Model name")
             .interact_text()?
     } else {
-        models[model_idx].clone()
+        let mut models: Vec<String> = provider_spec.models.iter().map(|m| m.to_string()).collect();
+        models.push("Other (type manually)".into());
+        let model_idx = Select::with_theme(&theme)
+            .with_prompt("Model")
+            .items(&models)
+            .default(0)
+            .interact()?;
+        if model_idx == models.len() - 1 {
+            Input::with_theme(&theme)
+                .with_prompt("Model name")
+                .interact_text()?
+        } else {
+            models[model_idx].clone()
+        }
     };
 
     // Step 5: Context window
-    let default_cw = default_context_window(&provider);
+    let default_cw = provider_spec.context_window;
     let cw_input: String = Input::with_theme(&theme)
         .with_prompt("Context window (tokens, 0 to skip)")
         .default(default_cw.to_string())
