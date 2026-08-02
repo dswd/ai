@@ -46,129 +46,35 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    run(cli).await
+}
+
+async fn run(cli: Cli) -> anyhow::Result<()> {
     let vanilla = cli.is_vanilla();
     let mut config = load_config(&cli, vanilla)?;
     apply_cli_overrides(&cli, &mut config);
 
-    let system_prompt = cli
-        .system
-        .clone()
-        .or_else(|| config.system_prompt.clone())
-        .unwrap_or_else(|| {
-            "You are a CLI assistant. Keep responses concise. \
-             For multi-step tasks, work methodically and report progress."
-                .to_string()
-        });
+    let session_dir = config.session_dir_resolved();
+    if cli.list {
+        return cmd_list_sessions(&session_dir);
+    }
+    if let Some(ref name) = cli.delete {
+        return cmd_delete_session(name, &session_dir);
+    }
 
-    let now = current_time();
-    let mut system_prompt = format!("{system_prompt}\n\nCurrent time: {now}");
-
-    let memory = if let Some(memory_path) = &cli.memory {
-        let path = if memory_path.is_empty() {
-            config.memory_path_resolved()
-        } else {
-            std::path::PathBuf::from(memory_path)
-        };
-        let mem = Arc::new(memory::Memory::load(&path)?);
-        let md = mem.to_markdown();
-        system_prompt = format!("{system_prompt}\n\n{md}");
-        Some(mem)
-    } else {
-        None
-    };
+    let policy = load_policy(&cli, &config)?;
+    let skills = Arc::new(skills::discover(&cli.skill, &config.skills_dir_resolved()));
+    let (system_prompt, memory) = assemble_system_prompt(&cli, &config, &policy, &skills)?;
+    log::debug!("system prompt:\n{system_prompt}");
 
     let model_name = config.model.clone();
     let max_tokens = cli.max_tokens.or(config.max_tokens);
     let max_turns = cli.max_turns;
     let thinking = cli.thinking.or(config.thinking);
 
-    let policy = load_policy(&cli, &config)?;
-    system_prompt = format!("{system_prompt}\n\n{}", policy.summary());
-    let session_dir = config.session_dir_resolved();
-
-    if cli.list {
-        return cmd_list_sessions(&session_dir);
-    }
-
-    if let Some(ref name) = cli.delete {
-        return cmd_delete_session(name, &session_dir);
-    }
-
-    let skills = Arc::new(skills::discover(&cli.skill, &config.skills_dir_resolved()));
-    if !skills.is_empty() {
-        system_prompt = format!("{system_prompt}\n\n{}", skills::summary(&skills));
-    }
-    log::debug!("system prompt:\n{system_prompt}");
-
-    let is_interactive = cli.is_interactive();
-
-    let session_name = match &cli.session {
-        Some(name) => {
-            if name.is_empty() {
-                Some(session::generate_session_name())
-            } else {
-                Some(name.clone())
-            }
-        }
-        None => None,
-    };
-
-    let mut session = if let Some(ref name) = session_name {
-        match Session::load(name, &session_dir) {
-            Ok(s) => {
-                info!("Continuing session: {name}");
-                s
-            }
-            Err(_) => {
-                let s = Session::new(name.clone(), system_prompt.clone(), model_name.clone());
-                info!("Started new session: {name}");
-                s
-            }
-        }
-    } else {
-        Session::new(
-            session::generate_session_name(),
-            system_prompt.clone(),
-            model_name.clone(),
-        )
-    };
-
-    if is_interactive {
-        let user_lines: Vec<String> = session
-            .messages
-            .iter()
-            .filter(|m| m.role == Role::User)
-            .map(|m| m.content.clone())
-            .collect();
-        io::load_session_history(&user_lines);
-    }
-
-    let cli_prompt = cli.prompt_text();
-    let stdin_prompt = io::read_stdin_async().await;
-    let prompt_text = match (cli_prompt, stdin_prompt) {
-        (Some(a), Some(b)) => Some(format!("{a}\n\n{b}")),
-        (Some(a), None) => Some(a),
-        (None, Some(b)) => Some(b),
-        (None, None) => None,
-    };
-
-    let provider = config.provider.to_lowercase();
-    let provider_spec = providers::resolve(&provider).ok_or_else(|| {
-        let supported = providers::all_names().collect::<Vec<_>>().join(", ");
-        anyhow::anyhow!("Unsupported provider: {provider}. Supported: {supported}")
-    })?;
-
-    let base_url = config
-        .api_base
-        .clone()
-        .or_else(|| provider_spec.default_base_url.map(str::to_string))
-        .ok_or_else(|| anyhow::anyhow!("provider '{provider}' requires an api_base in config"))?;
-
-    if thinking.is_some() && provider_spec.flavor != providers::Flavor::Anthropic {
-        log::warn!(
-            "--thinking is only supported by the anthropic flavor; it has no effect with provider '{provider}'"
-        );
-    }
+    let mut session = resolve_session(&cli, &session_dir, &system_prompt, &model_name)?;
+    let prompt_text = resolve_prompt_text(&cli).await;
+    let (provider_spec, base_url) = resolve_provider(&config, thinking)?;
 
     let tool_sets = if !cli.tool.is_empty() {
         tool::connect_tool_servers(&cli.tool).await?
@@ -193,114 +99,221 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(not(feature = "browser"))]
     let browser_state: Option<Arc<()>> = None;
 
+    let ctx = AgentContext {
+        system_prompt: &system_prompt,
+        policy: &policy,
+        max_tokens,
+        max_turns,
+        tool_sets,
+        thinking,
+        memory: memory.as_ref().map(Arc::clone),
+        search: &config.search,
+        skills: Arc::clone(&skills),
+        #[cfg(feature = "browser")]
+        browser_state,
+        #[cfg(not(feature = "browser"))]
+        _browser_state: browser_state,
+        is_interactive: cli.is_interactive(),
+        session: &mut session,
+        session_dir: &session_dir,
+        prompt_text,
+        context_window: config.context_window,
+    };
+
     match provider_spec.flavor {
         providers::Flavor::OpenAi => {
-            let model = openai_client(&config, &base_url)?.completion_model(&model_name);
             run_agent(
-                model,
-                &system_prompt,
-                &policy,
-                max_tokens,
-                max_turns,
-                tool_sets,
-                thinking,
-                memory.as_ref().map(Arc::clone),
-                &config.search,
-                Arc::clone(&skills),
-                browser_state.clone(),
-                is_interactive,
-                &mut session,
-                &session_dir,
-                prompt_text,
-                config.context_window,
+                openai_client(&config, &base_url)?.completion_model(&model_name),
+                ctx,
             )
-            .await?;
+            .await?
         }
         providers::Flavor::Anthropic => {
-            let model = anthropic_client(&config, &base_url)?.completion_model(&model_name);
             run_agent(
-                model,
-                &system_prompt,
-                &policy,
-                max_tokens,
-                max_turns,
-                tool_sets,
-                thinking,
-                memory.as_ref().map(Arc::clone),
-                &config.search,
-                Arc::clone(&skills),
-                browser_state.clone(),
-                is_interactive,
-                &mut session,
-                &session_dir,
-                prompt_text,
-                config.context_window,
+                anthropic_client(&config, &base_url)?.completion_model(&model_name),
+                ctx,
             )
-            .await?;
+            .await?
         }
     }
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn run_agent<M: CompletionModel + 'static>(
-    model: M,
-    system_prompt: &str,
-    policy: &Policy,
+struct AgentContext<'a> {
+    system_prompt: &'a str,
+    policy: &'a Policy,
     max_tokens: Option<usize>,
     max_turns: usize,
     tool_sets: Vec<tool::ToolSet>,
     thinking: Option<usize>,
     memory: Option<Arc<memory::Memory>>,
-    search: &config::SearchConfig,
+    search: &'a config::SearchConfig,
     skills: Arc<Vec<skills::Skill>>,
-    #[cfg(feature = "browser")] browser_state: Option<Arc<tools::BrowserState>>,
-    #[cfg(not(feature = "browser"))] _browser_state: Option<Arc<()>>,
+    #[cfg(feature = "browser")]
+    browser_state: Option<Arc<tools::BrowserState>>,
+    #[cfg(not(feature = "browser"))]
+    _browser_state: Option<Arc<()>>,
     is_interactive: bool,
-    session: &mut Session,
-    session_dir: &std::path::Path,
+    session: &'a mut Session,
+    session_dir: &'a std::path::Path,
     prompt_text: Option<String>,
     context_window: Option<usize>,
+}
+
+const DEFAULT_SYSTEM_PROMPT: &str = "You are a CLI assistant. Keep responses concise. \
+     For multi-step tasks, work methodically and report progress.";
+
+fn assemble_system_prompt(
+    cli: &Cli,
+    config: &Config,
+    policy: &Policy,
+    skills: &[skills::Skill],
+) -> anyhow::Result<(String, Option<Arc<memory::Memory>>)> {
+    let mut system_prompt = cli
+        .system
+        .clone()
+        .or_else(|| config.system_prompt.clone())
+        .unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string());
+
+    let now = current_time();
+    system_prompt = format!("{system_prompt}\n\nCurrent time: {now}");
+
+    let memory = if let Some(memory_path) = &cli.memory {
+        let path = if memory_path.is_empty() {
+            config.memory_path_resolved()
+        } else {
+            std::path::PathBuf::from(memory_path)
+        };
+        let mem = Arc::new(memory::Memory::load(&path)?);
+        let md = mem.to_markdown();
+        system_prompt = format!("{system_prompt}\n\n{md}");
+        Some(mem)
+    } else {
+        None
+    };
+
+    system_prompt = format!("{system_prompt}\n\n{}", policy.summary());
+
+    if !skills.is_empty() {
+        system_prompt = format!("{system_prompt}\n\n{}", skills::summary(skills));
+    }
+
+    Ok((system_prompt, memory))
+}
+
+fn resolve_session(
+    cli: &Cli,
+    session_dir: &std::path::Path,
+    system_prompt: &str,
+    model_name: &str,
+) -> anyhow::Result<Session> {
+    let session_name = match &cli.session {
+        Some(name) => {
+            if name.is_empty() {
+                Some(session::generate_session_name())
+            } else {
+                Some(name.clone())
+            }
+        }
+        None => None,
+    };
+
+    let session = if let Some(ref name) = session_name {
+        match Session::load(name, session_dir) {
+            Ok(s) => {
+                info!("Continuing session: {name}");
+                s
+            }
+            Err(_) => {
+                let s = Session::new(
+                    name.clone(),
+                    system_prompt.to_string(),
+                    model_name.to_string(),
+                );
+                info!("Started new session: {name}");
+                s
+            }
+        }
+    } else {
+        Session::new(
+            session::generate_session_name(),
+            system_prompt.to_string(),
+            model_name.to_string(),
+        )
+    };
+
+    if cli.is_interactive() {
+        let user_lines: Vec<String> = session
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::User)
+            .map(|m| m.content.clone())
+            .collect();
+        io::load_session_history(&user_lines);
+    }
+
+    Ok(session)
+}
+
+async fn resolve_prompt_text(cli: &Cli) -> Option<String> {
+    let cli_prompt = cli.prompt_text();
+    let stdin_prompt = io::read_stdin_async().await;
+    match (cli_prompt, stdin_prompt) {
+        (Some(a), Some(b)) => Some(format!("{a}\n\n{b}")),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
+fn resolve_provider(
+    config: &Config,
+    thinking: Option<usize>,
+) -> anyhow::Result<(&'static providers::Provider, String)> {
+    let provider = config.provider.to_lowercase();
+    let provider_spec = providers::resolve(&provider).ok_or_else(|| {
+        let supported = providers::all_names().collect::<Vec<_>>().join(", ");
+        anyhow::anyhow!("Unsupported provider: {provider}. Supported: {supported}")
+    })?;
+
+    let base_url = config
+        .api_base
+        .clone()
+        .or_else(|| provider_spec.default_base_url.map(str::to_string))
+        .ok_or_else(|| anyhow::anyhow!("provider '{provider}' requires an api_base in config"))?;
+
+    if thinking.is_some() && provider_spec.flavor != providers::Flavor::Anthropic {
+        log::warn!(
+            "--thinking is only supported by the anthropic flavor; it has no effect with provider '{provider}'"
+        );
+    }
+
+    Ok((provider_spec, base_url))
+}
+
+async fn run_agent<M: CompletionModel + 'static>(
+    model: M,
+    ctx: AgentContext<'_>,
 ) -> anyhow::Result<()> {
-    let agent = build_agent(
-        model,
-        system_prompt,
-        policy,
-        max_tokens,
-        max_turns,
-        tool_sets,
-        thinking,
-        memory,
-        search,
-        skills,
-        #[cfg(feature = "browser")]
-        browser_state,
-        #[cfg(not(feature = "browser"))]
-        _browser_state,
-    );
-    dispatch_agent(
-        agent,
-        is_interactive,
-        session,
-        session_dir,
-        prompt_text,
-        context_window,
-    )
-    .await
+    let agent = build_agent(model, &ctx);
+    dispatch_agent(agent, ctx).await
 }
 
 async fn dispatch_agent<M: CompletionModel + 'static>(
     agent: rig_core::agent::Agent<M>,
-    is_interactive: bool,
-    session: &mut Session,
-    session_dir: &std::path::Path,
-    prompt_text: Option<String>,
-    context_window: Option<usize>,
+    ctx: AgentContext<'_>,
 ) -> anyhow::Result<()> {
-    if is_interactive {
-        run_interactive(agent, session, session_dir, prompt_text, context_window).await?;
-    } else if let Some(text) = prompt_text {
+    if ctx.is_interactive {
+        run_interactive(
+            agent,
+            ctx.session,
+            ctx.session_dir,
+            ctx.prompt_text,
+            ctx.context_window,
+        )
+        .await?;
+    } else if let Some(text) = ctx.prompt_text {
         run_oneshot(agent, &text).await?;
     } else {
         anyhow::bail!("No prompt provided. Pass a prompt argument or pipe text to stdin.");
@@ -500,109 +513,104 @@ fn anthropic_client(
     Ok(builder.build()?)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn build_agent<M: CompletionModel + 'static>(
     model: M,
-    system_prompt: &str,
-    policy: &Policy,
-    max_tokens: Option<usize>,
-    max_turns: usize,
-    tool_sets: Vec<tool::ToolSet>,
-    thinking: Option<usize>,
-    memory: Option<Arc<memory::Memory>>,
-    search: &config::SearchConfig,
-    skills: Arc<Vec<skills::Skill>>,
-    #[cfg(feature = "browser")] browser_state: Option<Arc<tools::BrowserState>>,
-    #[cfg(not(feature = "browser"))] _browser_state: Option<Arc<()>>,
+    ctx: &AgentContext<'_>,
 ) -> rig_core::agent::Agent<M> {
-    let can_read = policy.ask || policy.has_any_allow(&Action::Read);
-    let can_write = policy.ask || policy.has_any_allow(&Action::Write);
-    let can_web_fetch = policy.ask || policy.has_any_allow(&Action::WebFetch);
-    let can_web_search = policy.ask || policy.has_any_allow(&Action::WebSearch);
+    let can_read = ctx.policy.ask || ctx.policy.has_any_allow(&Action::Read);
+    let can_write = ctx.policy.ask || ctx.policy.has_any_allow(&Action::Write);
+    let can_web_fetch = ctx.policy.ask || ctx.policy.has_any_allow(&Action::WebFetch);
+    let can_web_search = ctx.policy.ask || ctx.policy.has_any_allow(&Action::WebSearch);
 
     let mut server = ToolServer::new();
 
     if can_read {
         server = server
-            .tool(tools::ReadFileTool::new(policy.clone()))
-            .tool(tools::ListDirTool::new(policy.clone()))
-            .tool(tools::SearchContentTool::new(policy.clone()))
-            .tool(tools::FindFilesTool::new(policy.clone()))
-            .tool(tools::FileInfoTool::new(policy.clone()))
-            .tool(tools::FileViewTool::new(policy.clone()))
-            .tool(tools::GitDiffTool::new(policy.clone()))
-            .tool(tools::GitLogTool::new(policy.clone()));
+            .tool(tools::ReadFileTool::new(ctx.policy.clone()))
+            .tool(tools::ListDirTool::new(ctx.policy.clone()))
+            .tool(tools::SearchContentTool::new(ctx.policy.clone()))
+            .tool(tools::FindFilesTool::new(ctx.policy.clone()))
+            .tool(tools::FileInfoTool::new(ctx.policy.clone()))
+            .tool(tools::FileViewTool::new(ctx.policy.clone()))
+            .tool(tools::GitDiffTool::new(ctx.policy.clone()))
+            .tool(tools::GitLogTool::new(ctx.policy.clone()));
     }
 
     if can_write {
         server = server
-            .tool(tools::WriteFileTool::new(policy.clone()))
-            .tool(tools::ReplaceInFileTool::new(policy.clone()))
-            .tool(tools::DeleteFileTool::new(policy.clone()))
-            .tool(tools::CreateDirectoryTool::new(policy.clone()))
-            .tool(tools::MoveFileTool::new(policy.clone()))
-            .tool(tools::CopyFileTool::new(policy.clone()));
+            .tool(tools::WriteFileTool::new(ctx.policy.clone()))
+            .tool(tools::ReplaceInFileTool::new(ctx.policy.clone()))
+            .tool(tools::DeleteFileTool::new(ctx.policy.clone()))
+            .tool(tools::CreateDirectoryTool::new(ctx.policy.clone()))
+            .tool(tools::MoveFileTool::new(ctx.policy.clone()))
+            .tool(tools::CopyFileTool::new(ctx.policy.clone()));
     }
 
-    server = server.tool(tools::ExecuteTool::new(policy.clone()));
+    server = server.tool(tools::ExecuteTool::new(ctx.policy.clone()));
 
     if can_web_fetch {
-        server = server.tool(tools::WebFetchTool::new(policy.clone()));
+        server = server.tool(tools::WebFetchTool::new(ctx.policy.clone()));
         #[cfg(feature = "browser")]
-        if let Some(ref bs) = browser_state {
+        if let Some(ref bs) = ctx.browser_state {
             server = server
                 .tool(tools::BrowserNavigateTool::new(
-                    policy.clone(),
+                    ctx.policy.clone(),
                     Arc::clone(bs),
                 ))
-                .tool(tools::BrowserClickTool::new(policy.clone(), Arc::clone(bs)))
+                .tool(tools::BrowserClickTool::new(
+                    ctx.policy.clone(),
+                    Arc::clone(bs),
+                ))
                 .tool(tools::BrowserEvaluateTool::new(
-                    policy.clone(),
+                    ctx.policy.clone(),
                     Arc::clone(bs),
                 ))
                 .tool(tools::BrowserGetContentTool::new(
-                    policy.clone(),
+                    ctx.policy.clone(),
                     Arc::clone(bs),
                 ))
                 .tool(tools::BrowserGetElementTool::new(
-                    policy.clone(),
+                    ctx.policy.clone(),
                     Arc::clone(bs),
                 ));
         }
     }
 
     if can_web_fetch && can_write {
-        server = server.tool(tools::DownloadFileTool::new(policy.clone()));
+        server = server.tool(tools::DownloadFileTool::new(ctx.policy.clone()));
     }
 
     if can_web_search {
-        server = server.tool(tools::WebSearchTool::new(policy.clone(), search.clone()));
+        server = server.tool(tools::WebSearchTool::new(
+            ctx.policy.clone(),
+            ctx.search.clone(),
+        ));
     }
 
-    if let Some(ref mem) = memory {
+    if let Some(ref mem) = ctx.memory {
         server = server
             .tool(tools::MemoryAddTool::new(Arc::clone(mem)))
             .tool(tools::MemoryDeleteTool::new(Arc::clone(mem)));
     }
 
-    if !skills.is_empty() {
-        server = server.tool(tools::LoadSkillTool::new(Arc::clone(&skills)));
+    if !ctx.skills.is_empty() {
+        server = server.tool(tools::LoadSkillTool::new(Arc::clone(&ctx.skills)));
     }
 
-    for set in tool_sets {
-        for tool in set.tools {
-            server = server.rmcp_tool(tool, set.sink.clone());
+    for set in &ctx.tool_sets {
+        for tool in &set.tools {
+            server = server.rmcp_tool(tool.clone(), set.sink.clone());
         }
     }
 
     let handle = server.run();
 
     let mut builder = AgentBuilder::new(model)
-        .preamble(system_prompt)
-        .default_max_turns(max_turns)
+        .preamble(ctx.system_prompt)
+        .default_max_turns(ctx.max_turns)
         .tool_server_handle(handle);
 
-    if let Some(budget) = thinking {
+    if let Some(budget) = ctx.thinking {
         builder = builder.additional_params(serde_json::json!({
             "thinking": {
                 "type": "enabled",
@@ -611,7 +619,7 @@ fn build_agent<M: CompletionModel + 'static>(
         }));
     }
 
-    match max_tokens {
+    match ctx.max_tokens {
         Some(tokens) => builder.max_tokens(tokens as u64).build(),
         None => builder.build(),
     }

@@ -30,6 +30,8 @@
 - **`Role` enum replaces stringly-typed roles** — `session::Message.role` is now a typed `Role { User, Assistant, System }` instead of a raw string. Session files remain backward compatible (`#[serde(rename_all = "lowercase")]` keeps the on-disk format). The `/compact` summary is now consistently persisted and resumed as a `system` message (previously it was stored as `system` but rebuilt as `user`, mislabeling the summary as a user turn).
 - **Shared HTTP client** — `web_fetch`, `web_search`, and `download_file` now reuse a single lazily-built `reqwest::Client` (connection pooling) instead of constructing a new client per request. A unified realistic browser user-agent is used across all three.
 - **JS-injection hardening** — selectors and search queries spliced into `page.evaluate(...)` are now emitted as proper JSON string literals via `js_literal()` (which escapes `\`, `"`, newlines, and unicode line separators) instead of ad-hoc backslash/single-quote escaping. Applies to `browser_click`, `browser_get_element`, and Google/Bing search.
+- **`AgentContext` deduplicates provider dispatch** — the two flavor arms in `run()` now construct only the client/model; the shared agent-building parameters are bundled into an `AgentContext` struct passed to `build_agent`/`dispatch_agent`. Removed the `#[allow(clippy::too_many_arguments)]` on `build_agent` and `run_agent`.
+- **`main()` decomposed** — split into a thin entry point plus a `run()` orchestrator, with extracted helpers: `assemble_system_prompt()`, `resolve_session()`, `resolve_prompt_text()`, `resolve_provider()`. `--list`/`--delete` now return before policy/skills/memory/prompt are built, so they no longer fail on a broken policy file.
 
 ## v0.2.0 – Bashkit Integration & Policy-Based Filesystem
 
