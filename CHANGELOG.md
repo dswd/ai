@@ -27,6 +27,7 @@
 - **Hand-rolled UTC conversions removed** — the duplicated date math in `main.rs` and `session.rs` is replaced with the `time` crate.
 - **Deduplicated byte-size formatting** — `fmt_bytes()` helper in `util.rs` shared by `file_info` and `download_file`.
 - **Docs/version drift fixed** — `Cargo.toml` bumped to `0.3.0` to match the changelog; README CLI reference regenerated (`--system`, `--skill` added, `/tools` removed, `-i` → `--ask`).
+- **`Role` enum replaces stringly-typed roles** — `session::Message.role` is now a typed `Role { User, Assistant, System }` instead of a raw string. Session files remain backward compatible (`#[serde(rename_all = "lowercase")]` keeps the on-disk format). The `/compact` summary is now consistently persisted and resumed as a `system` message (previously it was stored as `system` but rebuilt as `user`, mislabeling the summary as a user turn).
 
 ## v0.2.0 – Bashkit Integration & Policy-Based Filesystem
 

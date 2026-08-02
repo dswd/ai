@@ -2,9 +2,17 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    User,
+    Assistant,
+    System,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
-    pub role: String,
+    pub role: Role,
     pub content: String,
 }
 
@@ -33,9 +41,9 @@ impl Session {
         }
     }
 
-    pub fn add_message(&mut self, role: &str, content: &str) {
+    pub fn add_message(&mut self, role: Role, content: &str) {
         self.messages.push(Message {
-            role: role.to_string(),
+            role,
             content: content.to_string(),
         });
         self.updated = now_iso();
@@ -111,4 +119,49 @@ pub fn generate_session_name() -> String {
     let adj = adjectives[(nanos as usize) % adjectives.len()];
     let noun = nouns[(nanos.wrapping_mul(7) as usize) % nouns.len()];
     format!("{adj}-{noun}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_role_serde_roundtrip() {
+        for (role, json) in [
+            (Role::User, "\"user\""),
+            (Role::Assistant, "\"assistant\""),
+            (Role::System, "\"system\""),
+        ] {
+            let serialized = serde_json::to_string(&role).unwrap();
+            assert_eq!(serialized, json);
+            let parsed: Role = serde_json::from_str(json).unwrap();
+            assert_eq!(parsed, role);
+        }
+    }
+
+    #[test]
+    fn test_session_message_json_backward_compat() {
+        // Session files written before the Role enum stored roles as lowercase strings.
+        let msg: Message = serde_json::from_str(r#"{"role":"user","content":"hi"}"#).unwrap();
+        assert_eq!(msg.role, Role::User);
+        assert_eq!(msg.content, "hi");
+        let back = serde_json::to_string(&msg).unwrap();
+        assert!(back.contains(r#""role":"user""#));
+    }
+
+    #[test]
+    fn test_session_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("ai-session-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut s = Session::new("t".to_string(), "sys".to_string(), "m".to_string());
+        s.add_message(Role::User, "hello");
+        s.add_message(Role::Assistant, "hi there");
+        s.save(&dir).unwrap();
+        let loaded = Session::load("t", &dir).unwrap();
+        assert_eq!(loaded.messages.len(), 2);
+        assert_eq!(loaded.messages[0].role, Role::User);
+        assert_eq!(loaded.messages[1].role, Role::Assistant);
+        assert_eq!(loaded.messages[1].content, "hi there");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

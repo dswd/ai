@@ -28,7 +28,7 @@ use rig_core::{
     streaming::{StreamedAssistantContent, StreamingChat, StreamingPrompt},
     tool::server::ToolServer,
 };
-use session::Session;
+use session::{Role, Session};
 
 use futures::StreamExt;
 use std::io::Write;
@@ -137,7 +137,7 @@ async fn main() -> anyhow::Result<()> {
         let user_lines: Vec<String> = session
             .messages
             .iter()
-            .filter(|m| m.role == "user")
+            .filter(|m| m.role == Role::User)
             .map(|m| m.content.clone())
             .collect();
         io::load_session_history(&user_lines);
@@ -670,10 +670,10 @@ async fn run_interactive<M: CompletionModel + 'static>(
     let mut chat_history: Vec<Message> = session
         .messages
         .iter()
-        .map(|m| match m.role.as_str() {
-            "user" => Message::user(&m.content),
-            "assistant" => Message::assistant(&m.content),
-            _ => Message::user(&m.content),
+        .map(|m| match m.role {
+            Role::User => Message::user(&m.content),
+            Role::Assistant => Message::assistant(&m.content),
+            Role::System => Message::system(&m.content),
         })
         .collect();
 
@@ -681,16 +681,16 @@ async fn run_interactive<M: CompletionModel + 'static>(
         let last_user_idx = session
             .messages
             .iter()
-            .rposition(|m| m.role == "user")
+            .rposition(|m| m.role == Role::User)
             .unwrap_or(0);
         for msg in &session.messages[last_user_idx..] {
-            match msg.role.as_str() {
-                "assistant" => {
+            match msg.role {
+                Role::Assistant => {
                     output::stdout_push(&msg.content);
                     output::stdout_finish();
                 }
-                "user" => output::stderr_line(&format!("> {}", msg.content)),
-                _ => {}
+                Role::User => output::stderr_line(&format!("> {}", msg.content)),
+                Role::System => {}
             }
         }
     }
@@ -700,7 +700,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
     let mut last_input_tokens: u64 = 0;
 
     if let Some(text) = initial_prompt {
-        session.add_message("user", &text);
+        session.add_message(Role::User, &text);
         let hist = chat_history.clone();
         let result = async {
             let mut stream = agent.stream_chat(&text, hist).await;
@@ -711,7 +711,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
         match result {
             Ok(response) => {
                 last_input_tokens = response.usage.input_tokens;
-                session.add_message("assistant", &response.output);
+                session.add_message(Role::Assistant, &response.output);
                 total_usage = accumulate(&total_usage, &response.usage);
                 if let Some(messages) = response.messages {
                     chat_history.extend(messages);
@@ -766,10 +766,10 @@ async fn run_interactive<M: CompletionModel + 'static>(
                     match compact_result {
                         Ok(summary) => {
                             let est_tokens = summary.len() as u64 / 4;
-                            chat_history =
-                                vec![Message::user(format!("[Conversation summary: {summary}]"))];
+                            let summary_msg = format!("[Conversation summary: {summary}]");
+                            chat_history = vec![Message::system(summary_msg.clone())];
                             session.messages.clear();
-                            session.add_message("system", &summary);
+                            session.add_message(Role::System, &summary_msg);
                             last_input_tokens = est_tokens;
                             io::stderr_line(&format!(
                                 "[context compacted: {old_count} messages -> ~{t} tokens]",
@@ -794,7 +794,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
                     continue;
                 }
 
-                session.add_message("user", trimmed);
+                session.add_message(Role::User, trimmed);
 
                 let hist = chat_history.clone();
                 let result = async {
@@ -806,7 +806,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
                 match result {
                     Ok(response) => {
                         last_input_tokens = response.usage.input_tokens;
-                        session.add_message("assistant", &response.output);
+                        session.add_message(Role::Assistant, &response.output);
                         total_usage = accumulate(&total_usage, &response.usage);
                         if let Some(messages) = response.messages {
                             chat_history.extend(messages);
