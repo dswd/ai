@@ -1,3 +1,4 @@
+use crate::util::fmt_bytes;
 use ansi_color_constants::*;
 use log::{debug, info};
 use rig_core::tool::Tool;
@@ -59,13 +60,7 @@ impl Tool for FileInfoTool {
             .map_err(|e| ToolError::Message(format!("cannot read metadata: {e}")))?;
 
         let size = meta.len();
-        let size_str = if size < 1024 {
-            format!("{size} B")
-        } else if size < 1024 * 1024 {
-            format!("{:.1} KB", size as f64 / 1024.0)
-        } else {
-            format!("{:.1} MB", size as f64 / (1024.0 * 1024.0))
-        };
+        let size_str = fmt_bytes(size);
 
         let modified = meta
             .modified()

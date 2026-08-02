@@ -855,46 +855,13 @@ fn format_interactive_prompt(last_input_tokens: u64, context_window: Option<usiz
 }
 
 fn current_time() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let dur = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let total_secs = dur.as_secs();
-    let day_secs = total_secs % 86400;
-    let h = day_secs / 3600;
-    let mi = (day_secs % 3600) / 60;
-    let s = day_secs % 60;
-    let (y, mo, d) = days_to_date(total_secs / 86400);
-    format!("{y:04}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:02} UTC")
-}
+    use time::OffsetDateTime;
+    use time::format_description::FormatItem;
+    use time::macros::format_description;
 
-fn days_to_date(days: u64) -> (u64, u64, u64) {
-    let mut d = days as i64;
-    let mut y = 1970i64;
-    loop {
-        let diy: i64 = if leap(y) { 366 } else { 365 };
-        if d < diy {
-            break;
-        }
-        d -= diy;
-        y += 1;
-    }
-    let md = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let feb = if leap(y) { 29 } else { 28 };
-    let mut m = 0u64;
-    for (i, &days_in_month) in md.iter().enumerate() {
-        let limit = if i == 1 { feb } else { days_in_month };
-        if d < limit as i64 {
-            break;
-        }
-        d -= limit as i64;
-        m = i as u64 + 1;
-    }
-    (y as u64, m + 1, (d + 1) as u64)
-}
-
-fn leap(y: i64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
+    let now = OffsetDateTime::now_utc();
+    let fmt: &[FormatItem] = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+    format!("{} UTC", now.format(fmt).unwrap_or_default())
 }
 
 fn accumulate(total: &Usage, usage: &Usage) -> Usage {

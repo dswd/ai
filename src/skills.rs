@@ -166,7 +166,7 @@ fn parse_front_matter(content: &str) -> Option<SkillFrontMatter> {
     let close_idx = lines.iter().position(|l| *l == "---")?;
     let block = lines[..close_idx].join("\n");
 
-    match serde_yaml::from_str::<SkillFrontMatter>(&block) {
+    match serde_yaml_ng::from_str::<SkillFrontMatter>(&block) {
         Ok(fm) => Some(fm),
         Err(e) => {
             warn!("invalid front matter: {e}");

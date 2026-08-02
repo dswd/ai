@@ -11,8 +11,9 @@ A CLI agent for interacting with AI models, with tool use, filesystem and comman
 - **Sessions** — Save, list (`-l`), continue (`-s NAME`), and delete (`--delete NAME`) sessions with message history and system prompt preservation.
 - **Tool system** — Filesystem tools, code search, git diff/log, web fetch/search, command execution, downloads, document extraction, and more.
 - **Sandboxed command execution** — The `execute` tool runs through a virtual bash interpreter (bashkit) with 160+ in-process builtins; external commands require explicit policy approval.
-- **Policy engine** — Granular allow/deny rules for read, write, execute, web fetch, and web search. Supports policy files, CLI overrides, interactive approval (`-i`), and `--yolo` mode.
+- **Policy engine** — Granular allow/deny rules for read, write, execute, web fetch, and web search. Supports policy files, CLI overrides, interactive approval (`--ask`), and `--yolo` mode.
 - **Persistent memory** — Optional agent memory stored to disk and injected into the system prompt.
+- **Skills** — Load reusable skill definitions from `SKILL.md` files (via `--skill=PATH` or the skills folder), listed in the system prompt and loadable on demand with the `load_skill` tool.
 - **Extended thinking** — Optional reasoning budgets for models that support it.
 - **Headless browser** — Optional stealth-mode browser (Obscura) for web tools.
 - **MCP tool servers** — Connect to external MCP servers with `--tool URL`.
@@ -106,7 +107,7 @@ ai --web "find the latest docs for rig-core"
 ai --yolo "do whatever it takes"
 ```
 
-With `-i` (interactive approval), the agent can request access and you approve each request as it happens.
+With `--ask` (interactive approval), the agent can request access and you approve each request as it happens.
 
 ## Policy files
 
@@ -137,6 +138,7 @@ Available tools (enabled based on policy):
 | Git | `git_diff`, `git_log` |
 | Web | `web_fetch`, `web_search`, `download_file`, `browser_navigate`, `browser_click`, `browser_get_content`, `browser_get_element`, `browser_evaluate` |
 | Memory | `memory_add`, `memory_delete` |
+| Skills | `load_skill` (loads a skill's full instructions by name) |
 
 Tool output is capped (200 lines / ~100 KB) with offset/limit pagination and truncation notices.
 
@@ -149,6 +151,7 @@ Arguments:
   [PROMPT]...  Prompt text (if absent, read from stdin)
 
 Options:
+      --system=<PROMPT>      Set the system prompt
   -s, --session=[<NAME>]     Start an interactive session (or continue NAME, implies --ask)
   -m, --memory=[<FILE>]      Enable persistent memory
   -c, --config=<FILE>        Load configuration from FILE
@@ -161,6 +164,7 @@ Options:
       --web-fetch=<PATTERN>  Allow web fetch for matching URL pattern
       --web-search=<PATTERN> Allow web search with matching query pattern
   -p, --policy=<FILE>        Load policy from FILE
+      --skill=<PATH>         Load a skill (SKILL.md file or folder; repeatable)
   -i, --ask                  Ask for approval instead of denying
   -t, --tool=<URL>           Connect to an MCP tool server (repeatable)
   -y, --yolo                 Allow everything without asking (overrides all policy, dangerous)
@@ -182,7 +186,6 @@ Options:
 - `/clear` — clear the current conversation
 - `/compact` — summarize the conversation to reclaim context
 - `/session` — show the current session name
-- `/tools` — list available tools
 - `/help` — list commands
 
 ## Development

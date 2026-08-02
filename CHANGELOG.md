@@ -23,6 +23,10 @@
 - **`--list`, `--delete`, `--init`, and `--session` are now mutually exclusive** — these are standalone actions that bail out of `main()` early, so combining them was silently ignoring the extra flags. All combinations are now rejected at parse time.
 - **Provider flavors** — all providers now map to one of two client flavors: OpenAI-compatible or Anthropic-compatible, each with a default base URL. Previously only `openai` and `anthropic` worked at runtime while the init wizard advertised 9. Added generic `openai-compatible` and `anthropic-compatible` providers that require a user-supplied `api_base` (e.g. for proxies or self-hosted endpoints). `api_base` in config still overrides the provider default.
 - **Dependency security fixes** — replaced `markitdown` (which pinned vulnerable `lopdf 0.34`, `quick-xml 0.31/0.37`, and old `rig-core 0.8`) with `markdownify 0.3` + `pdf-extract 0.12` (`lopdf 0.42`, `quick-xml 0.41`). This resolves RUSTSEC-2026-0187 (lopdf stack overflow) and RUSTSEC-2026-0195/0194 (quick-xml DoS), which were previously ignored in CI. `file_view` routes PDFs to `pdf-extract` and all other formats through `markdownify`. The stale `ignore:` list was removed from the GitHub audit workflow. The four remaining advisories are all "unmaintained" warnings (not vulnerabilities) from the optional `obscura` browser crate and `lopdf`'s font parser.
+- **Deprecated `serde_yaml` replaced** — migrated to the maintained `serde_yaml_ng 0.10` fork.
+- **Hand-rolled UTC conversions removed** — the duplicated date math in `main.rs` and `session.rs` is replaced with the `time` crate.
+- **Deduplicated byte-size formatting** — `fmt_bytes()` helper in `util.rs` shared by `file_info` and `download_file`.
+- **Docs/version drift fixed** — `Cargo.toml` bumped to `0.3.0` to match the changelog; README CLI reference regenerated (`--system`, `--skill` added, `/tools` removed, `-i` → `--ask`).
 
 ## v0.2.0 – Bashkit Integration & Policy-Based Filesystem
 

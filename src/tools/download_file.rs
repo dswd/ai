@@ -1,3 +1,4 @@
+use crate::util::fmt_bytes;
 use ansi_color_constants::*;
 use log::info;
 use rig_core::tool::Tool;
@@ -115,13 +116,7 @@ impl Tool for DownloadFileTool {
         std::fs::write(path, &body)
             .map_err(|e| ToolError::Message(format!("cannot write file: {e}")))?;
 
-        let size_str = if body.len() < 1024 {
-            format!("{} B", body.len())
-        } else if body.len() < 1024 * 1024 {
-            format!("{:.1} KB", body.len() as f64 / 1024.0)
-        } else {
-            format!("{:.1} MB", body.len() as f64 / (1024.0 * 1024.0))
-        };
+        let size_str = fmt_bytes(body.len() as u64);
 
         let result = format!("Downloaded {} ({size_str})", args.url);
         Ok(result)

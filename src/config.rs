@@ -53,7 +53,7 @@ impl Config {
     pub fn from_file(path: &Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("reading config: {}", path.display()))?;
-        let config: Config = serde_yaml::from_str(&content)
+        let config: Config = serde_yaml_ng::from_str(&content)
             .with_context(|| format!("parsing config: {}", path.display()))?;
         Ok(config)
     }
@@ -103,7 +103,7 @@ impl Config {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let yaml = serde_yaml::to_string(self)?;
+        let yaml = serde_yaml_ng::to_string(self)?;
         std::fs::write(path, yaml)?;
         Ok(())
     }
