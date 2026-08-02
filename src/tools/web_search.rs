@@ -20,8 +20,6 @@ const UA: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firef
 pub struct WebSearchArgs {
     #[schemars(description = "The search query")]
     pub query: String,
-    #[schemars(description = "Number of results to return (default: 10, max: 20)")]
-    pub num_results: Option<usize>,
     #[schemars(description = "Line number to start reading from (0-based)")]
     pub offset: Option<usize>,
     #[schemars(description = "Maximum number of lines to return")]
@@ -77,7 +75,6 @@ impl Tool for WebSearchTool {
             )));
         }
 
-        let _num_results = args.num_results.unwrap_or(10).min(20);
         self.rate_limit_wait().await;
 
         // 1. Try custom SearXNG (if configured)
