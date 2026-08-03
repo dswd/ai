@@ -342,6 +342,7 @@ pub fn find_git_dir() -> Result<PathBuf, ToolError> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "browser")]
     use super::*;
 
     #[cfg(feature = "browser")]
