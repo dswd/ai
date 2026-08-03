@@ -48,6 +48,7 @@ pub fn discover(skill_args: &[String], skills_dir: &Path) -> Vec<Skill> {
             );
         }
     }
+    deduped.sort_by(|a, b| a.name.cmp(&b.name));
     deduped
 }
 
@@ -75,15 +76,16 @@ fn find_skills_in_dir(dir: &Path, out: &mut Vec<Skill>) {
     if !dir.exists() {
         return;
     }
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
+    let mut entries: Vec<_> = match std::fs::read_dir(dir) {
+        Ok(e) => e.flatten().collect(),
         Err(e) => {
             warn!("cannot read skills dir {}: {e}", dir.display());
             return;
         }
     };
+    entries.sort_by_key(|e| e.file_name());
 
-    for entry in entries.flatten() {
+    for entry in entries {
         let path = entry.path();
         let name = path
             .file_name()
@@ -243,9 +245,10 @@ mod tests {
         .unwrap();
         let skills = discover(&[], &dir);
         let s = summary(&skills);
-        assert!(s.contains("- **no-desc**\n"));
+        let lines: Vec<&str> = s.lines().collect();
+        assert!(lines.contains(&"- **no-desc**"));
         assert!(!s.contains("- **no-desc**:"));
-        assert!(s.contains("- **with-desc**: Has one"));
+        assert!(lines.contains(&"- **with-desc**: Has one"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
