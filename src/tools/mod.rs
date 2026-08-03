@@ -214,3 +214,80 @@ pub fn process_output(
 
     Ok(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_short() {
+        let s = "line1\nline2";
+        assert_eq!(truncate(s, 200, 100_000), s);
+    }
+
+    #[test]
+    fn test_truncate_line_limit() {
+        let s = "a\nb\nc";
+        let out = truncate(s, 2, 100_000);
+        assert!(out.contains("a"));
+        assert!(out.contains("b"));
+        assert!(!out.contains("\nc"));
+        assert!(out.ends_with("..."));
+    }
+
+    #[test]
+    fn test_fmt_offset_limit() {
+        assert_eq!(fmt_offset_limit(None, None), "");
+        assert_eq!(fmt_offset_limit(Some(10), None), " [offset=10]");
+        assert_eq!(fmt_offset_limit(None, Some(5)), " [limit=5]");
+        assert_eq!(fmt_offset_limit(Some(10), Some(5)), " [offset=10, limit=5]");
+    }
+
+    #[test]
+    fn test_process_output_full() {
+        let raw = "a\nb\nc";
+        let out = process_output(raw, None, None).unwrap();
+        assert!(out.contains("(3 lines total)"));
+        assert!(out.contains("a\nb\nc"));
+    }
+
+    #[test]
+    fn test_process_output_offset() {
+        let raw = "a\nb\nc\nd";
+        let out = process_output(raw, Some(2), None).unwrap();
+        assert!(out.contains("c\nd"));
+        assert!(out.contains("showing 3..4"));
+    }
+
+    #[test]
+    fn test_process_output_limit() {
+        let raw = "a\nb\nc\nd";
+        let out = process_output(raw, Some(1), Some(2)).unwrap();
+        assert!(out.contains("b\nc"));
+        assert!(out.contains("showing 2..3"));
+    }
+
+    #[test]
+    fn test_process_output_offset_out_of_range() {
+        let raw = "a\nb";
+        let err = process_output(raw, Some(10), None).unwrap_err();
+        assert!(err.contains("out of range"));
+    }
+
+    #[test]
+    fn test_process_output_zero_limit() {
+        let err = process_output("a\nb", None, Some(0)).unwrap_err();
+        assert!(err.contains("limit must be greater than 0"));
+    }
+
+    #[test]
+    fn test_process_output_caps() {
+        let raw = (0..MAX_OUTPUT_LINES + 50)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let out = process_output(&raw, None, None).unwrap();
+        assert!(out.contains("output capped"));
+        assert!(out.lines().count() <= MAX_OUTPUT_LINES + 2);
+    }
+}

@@ -108,3 +108,114 @@ impl Config {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_defaults() {
+        let c = Config::default();
+        assert_eq!(c.provider, "openai");
+        assert_eq!(c.model, "gpt-4o");
+        assert!(c.api_key.is_none());
+        assert!(c.session_dir.is_none());
+    }
+
+    #[test]
+    fn test_from_file_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("ai-config-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.yaml");
+        let c = Config {
+            provider: "anthropic".to_string(),
+            api_key: Some("env:ANTHROPIC_API_KEY".to_string()),
+            api_base: Some("https://example.com".to_string()),
+            model: "claude-sonnet-4-20250514".to_string(),
+            ..Config::default()
+        };
+        c.save(&path).unwrap();
+        let loaded = Config::from_file(&path).unwrap();
+        assert_eq!(loaded.provider, "anthropic");
+        assert_eq!(loaded.model, "claude-sonnet-4-20250514");
+        assert_eq!(loaded.api_key.as_deref(), Some("env:ANTHROPIC_API_KEY"));
+        assert_eq!(loaded.api_base.as_deref(), Some("https://example.com"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_parse_partial_config_uses_defaults() {
+        let yaml = "provider: groq\nmodel: llama-3.3-70b-versatile\n";
+        let c: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(c.provider, "groq");
+        assert_eq!(c.model, "llama-3.3-70b-versatile");
+        assert!(c.api_key.is_none());
+        assert!(c.system_prompt.is_none());
+        assert!(c.search.searxng_url.is_none());
+    }
+
+    #[test]
+    fn test_resolve_api_key_env() {
+        let c = Config {
+            api_key: Some("env:AI_TEST_KEY".to_string()),
+            ..Config::default()
+        };
+        // SAFETY: env mutation is contained to this uniquely-named test key.
+        unsafe {
+            std::env::set_var("AI_TEST_KEY", "secret-value");
+        }
+        assert_eq!(c.resolve_api_key().as_deref(), Some("secret-value"));
+        unsafe {
+            std::env::remove_var("AI_TEST_KEY");
+        }
+    }
+
+    #[test]
+    fn test_resolve_api_key_plain() {
+        let c = Config {
+            api_key: Some("sk-plain".to_string()),
+            ..Config::default()
+        };
+        assert_eq!(c.resolve_api_key().as_deref(), Some("sk-plain"));
+    }
+
+    #[test]
+    fn test_resolve_api_key_missing_env() {
+        let c = Config {
+            api_key: Some("env:AI_MISSING_KEY".to_string()),
+            ..Config::default()
+        };
+        unsafe {
+            std::env::remove_var("AI_MISSING_KEY");
+        }
+        assert_eq!(c.resolve_api_key(), None);
+    }
+
+    #[test]
+    fn test_resolved_paths_override() {
+        let c = Config {
+            session_dir: Some(PathBuf::from("/custom/sessions")),
+            skills_dir: Some(PathBuf::from("/custom/skills")),
+            memory: Some(PathBuf::from("/custom/memory.json")),
+            ..Config::default()
+        };
+        assert_eq!(c.session_dir_resolved(), PathBuf::from("/custom/sessions"));
+        assert_eq!(c.skills_dir_resolved(), PathBuf::from("/custom/skills"));
+        assert_eq!(
+            c.memory_path_resolved(),
+            PathBuf::from("/custom/memory.json")
+        );
+    }
+
+    #[test]
+    fn test_resolved_paths_defaults() {
+        let c = Config::default();
+        let base = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("ai");
+        assert_eq!(c.session_dir_resolved(), base.join("sessions"));
+        assert_eq!(c.skills_dir_resolved(), base.join("skills"));
+        assert_eq!(c.memory_path_resolved(), base.join("memory.json"));
+    }
+}

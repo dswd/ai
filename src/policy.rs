@@ -460,4 +460,45 @@ mod tests {
         assert_eq!(normalize_path_segments("/foo/../bar"), "/bar");
         assert_eq!(normalize_path_segments("/a/b/../c/./d"), "/a/c/d");
     }
+
+    #[test]
+    fn test_resolve_policy_pattern_relative() {
+        let cwd = std::path::Path::new("/work");
+        assert_eq!(resolve_policy_pattern("src/**", cwd), "/work/src/**");
+        // Bare-glob patterns (no path prefix) keep the wildcard glued to the
+        // resolved base (current behavior).
+        assert_eq!(resolve_policy_pattern("*.rs", cwd), "/work*.rs");
+    }
+
+    #[test]
+    fn test_resolve_policy_pattern_absolute_and_wildcards() {
+        let cwd = std::path::Path::new("/work");
+        assert_eq!(resolve_policy_pattern("/etc/passwd", cwd), "/etc/passwd");
+        assert_eq!(resolve_policy_pattern("**", cwd), "**");
+        assert_eq!(resolve_policy_pattern("*", cwd), "*");
+        assert_eq!(
+            resolve_policy_pattern("/tmp/**/*.log", cwd),
+            "/tmp/**/*.log"
+        );
+    }
+
+    #[test]
+    fn test_resolve_policy_pattern_home() {
+        let home = home_dir();
+        let home_str = home.to_string_lossy();
+        let cwd = std::path::Path::new("/work");
+        assert_eq!(
+            resolve_policy_pattern("~/projects/**", cwd),
+            format!("{home_str}/projects/**")
+        );
+    }
+
+    #[test]
+    fn test_resolve_policy_pattern_dot_segments() {
+        let cwd = std::path::Path::new("/work");
+        assert_eq!(
+            resolve_policy_pattern("./src/../lib/**", cwd),
+            "/work/lib/**"
+        );
+    }
 }

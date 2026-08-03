@@ -85,3 +85,57 @@ impl Memory {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_memory(name: &str) -> (PathBuf, Memory) {
+        let dir =
+            std::env::temp_dir().join(format!("ai-memory-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("memory.json");
+        (dir, Memory::load(&path).unwrap())
+    }
+
+    #[test]
+    fn test_empty_memory() {
+        let (dir, mem) = temp_memory("empty");
+        assert_eq!(mem.to_markdown(), "## Memory\nNo memory entries yet.");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_add_and_to_markdown() {
+        let (dir, mem) = temp_memory("add");
+        let key = mem.add("some data".to_string()).unwrap();
+        let md = mem.to_markdown();
+        assert!(md.contains(&format!("- **{key}**: some data")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_delete() {
+        let (dir, mem) = temp_memory("delete");
+        let key = mem.add("data".to_string()).unwrap();
+        assert!(mem.delete(&key).is_ok());
+        assert!(mem.delete(&key).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_reload_persists() {
+        let (dir, mem) = temp_memory("reload");
+        let path = dir.join("memory.json");
+        let key = mem.add("persisted".to_string()).unwrap();
+        drop(mem);
+        let reloaded = Memory::load(&path).unwrap();
+        assert!(
+            reloaded
+                .to_markdown()
+                .contains(&format!("- **{key}**: persisted"))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

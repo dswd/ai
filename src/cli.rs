@@ -273,3 +273,48 @@ impl Cli {
             && self.delete.is_none()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Cli {
+        Cli::parse_from(std::iter::once("ai").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn test_prompt_text() {
+        assert_eq!(parse(&[]).prompt_text(), None);
+        assert_eq!(parse(&["hello"]).prompt_text().as_deref(), Some("hello"));
+        assert_eq!(
+            parse(&["hello", "world"]).prompt_text().as_deref(),
+            Some("hello world")
+        );
+    }
+
+    #[test]
+    fn test_is_interactive() {
+        assert!(!parse(&[]).is_interactive());
+        assert!(parse(&["-s"]).is_interactive());
+        assert!(parse(&["-s=foo"]).is_interactive());
+    }
+
+    #[test]
+    fn test_is_vanilla_empty() {
+        assert!(parse(&[]).is_vanilla());
+    }
+
+    #[test]
+    fn test_is_vanilla_with_flags() {
+        assert!(!parse(&["-r=."]).is_vanilla());
+        assert!(!parse(&["--web"]).is_vanilla());
+        assert!(!parse(&["-y"]).is_vanilla());
+        assert!(!parse(&["--model=gpt-4o"]).is_vanilla());
+        assert!(!parse(&["--skill=/tmp/s"]).is_vanilla());
+    }
+
+    #[test]
+    fn test_prompt_makes_non_vanilla() {
+        assert!(!parse(&["hi"]).is_vanilla());
+    }
+}
