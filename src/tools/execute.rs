@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::process::Command as TokioCommand;
 
 use super::policy_fs::PolicyFsBackend;
 use super::shared::{ToolError, commands_in_string, is_bashkit_builtin};
@@ -56,14 +57,15 @@ impl Builtin for ExtBuiltin {
                 1,
             ));
         }
-        match std::process::Command::new(&self.name)
+        match TokioCommand::new(&self.name)
             .args(ctx.args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .kill_on_drop(true)
             .spawn()
         {
             Ok(child) => {
-                let output = match child.wait_with_output() {
+                let output = match child.wait_with_output().await {
                     Ok(o) => o,
                     Err(e) => {
                         return Ok(ExecResult::err(format!("failed to collect output: {e}"), 1));
@@ -192,6 +194,8 @@ impl Tool for ExecuteTool {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::policy::PolicyRule;
     use bashkit::{Bash, ExecutionLimits, FileSystem, PosixFs, RealFs, RealFsMode};
     use std::sync::Arc;
     use std::time::Duration;
@@ -239,5 +243,84 @@ mod tests {
         let mut bash = test_bash().await;
         let result = bash.exec("false").await.unwrap();
         assert_eq!(result.exit_code, 1);
+    }
+
+    fn test_bash_with_limits(timeout: Duration) -> bashkit::BashBuilder {
+        let fs_backend = RealFs::open("/", RealFsMode::ReadWrite);
+        let fs_backend = futures::executor::block_on(fs_backend).unwrap();
+        let fs: Arc<dyn FileSystem> = Arc::new(PosixFs::new(fs_backend));
+        let limits = ExecutionLimits {
+            timeout,
+            ..Default::default()
+        };
+        Bash::builder().fs(fs).limits(limits)
+    }
+
+    fn allow_execute(policy: &Policy, name: &str) -> Policy {
+        let mut p = policy.clone();
+        p.add_cli_rule(PolicyRule::Allow(Action::Execute, name.to_string()));
+        p
+    }
+
+    #[tokio::test]
+    async fn test_ext_builtin_fast_command() {
+        let policy = allow_execute(&Policy::default(), "echo");
+        let mut bash = test_bash_with_limits(Duration::from_secs(10))
+            .builtin(
+                "echo",
+                Box::new(ExtBuiltin {
+                    name: "echo".to_string(),
+                    policy,
+                }),
+            )
+            .build();
+        let result = bash.exec("echo hello").await.unwrap();
+        assert_eq!(result.stdout.trim(), "hello");
+        assert_eq!(result.exit_code, 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_ext_builtin_timeout_kills_process() {
+        // External commands must be killed by the bashkit timeout, not run to
+        // completion. Before the tokio::process rewrite, the blocking
+        // wait_with_output() never yielded, so `sleep 10` would run the full
+        // 10s and only then report a timeout.
+        let policy = allow_execute(&Policy::default(), "sleep");
+        let mut bash = test_bash_with_limits(Duration::from_millis(500))
+            .builtin(
+                "sleep",
+                Box::new(ExtBuiltin {
+                    name: "sleep".to_string(),
+                    policy,
+                }),
+            )
+            .build();
+
+        let start = std::time::Instant::now();
+        let result = bash.exec("sleep 10").await;
+        let elapsed = start.elapsed();
+        assert!(result.is_err(), "expected timeout, got {result:?}");
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "timeout did not interrupt the process promptly: {elapsed:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_ext_builtin_exit_code() {
+        let policy = allow_execute(&Policy::default(), "sh");
+        let mut bash = test_bash_with_limits(Duration::from_secs(10))
+            .builtin(
+                "sh",
+                Box::new(ExtBuiltin {
+                    name: "sh".to_string(),
+                    policy,
+                }),
+            )
+            .build();
+        let result = bash.exec("sh -c 'exit 7'").await.unwrap();
+        assert_eq!(result.exit_code, 7);
     }
 }
