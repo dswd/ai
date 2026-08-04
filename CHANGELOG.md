@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Fresh timestamps via `get_current_time`** — the system prompt no longer bakes in a `Current time:` line at startup (it went stale in long-running sessions). The agent now fetches the current UTC time on demand with the new `get_current_time` tool, which is always available.
+
+### Added
+
+- **Missing-permissions guidance** — when a permission group isn't granted, the system prompt now lists the missing capability and the exact flag to re-run with (`-r <PATH>`, `-w <PATH>`, `-x <PATTERN>`, `--web`), so the agent can tell the user how to enable what it needs.
+
 ## v0.3.0 – Skills, Provider Flavors & Security
 
 ### Added

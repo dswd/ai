@@ -173,7 +173,7 @@ impl Policy {
         if self.ask {
             lines.push("You may ask for more permissions — the user will be asked to approve each request.".to_string());
         } else {
-            lines.push("Do not try additional permissions.".to_string());
+            lines.push("Do not attempt actions beyond granted permissions; you may suggest the user re-run with the appropriate flag.".to_string());
         }
 
         lines.join("\n")

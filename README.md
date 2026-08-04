@@ -125,6 +125,8 @@ allow web-search **
 
 Load it with `ai -p=~/.config/ai/policy.txt ...`.
 
+If a task needs a capability that isn't granted, the agent will suggest the exact flag to re-run with (e.g. `-r=.`, `-w=./src`, `-x=cargo,git`, `--web`).
+
 ## Agent tools
 
 Available tools (enabled based on policy):
