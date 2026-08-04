@@ -139,6 +139,7 @@ Available tools (enabled based on policy):
 | Web | `web_fetch`, `web_search`, `download_file`, `browser_navigate`, `browser_click`, `browser_get_content`, `browser_get_element`, `browser_evaluate` |
 | Memory | `memory_add`, `memory_delete` |
 | Skills | `load_skill` (loads a skill's full instructions by name) |
+| Utility | `get_current_time` (current UTC date/time) |
 
 Tool output is capped (200 lines / ~100 KB) with offset/limit pagination and truncation notices.
 

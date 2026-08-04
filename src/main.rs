@@ -176,9 +176,6 @@ fn assemble_system_prompt(
         .or_else(|| config.system_prompt.clone())
         .unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string());
 
-    let now = current_time();
-    system_prompt = format!("{system_prompt}\n\nCurrent time: {now}");
-
     let memory = if let Some(memory_path) = &cli.memory {
         let path = if memory_path.is_empty() {
             config.memory_path_resolved()
@@ -546,7 +543,9 @@ fn build_agent<M: CompletionModel + 'static>(
             .tool(tools::CopyFileTool::new(ctx.policy.clone()));
     }
 
-    server = server.tool(tools::ExecuteTool::new(ctx.policy.clone()));
+    server = server
+        .tool(tools::ExecuteTool::new(ctx.policy.clone()))
+        .tool(tools::GetCurrentTimeTool::new());
 
     if can_web_fetch {
         server = server.tool(tools::WebFetchTool::new(ctx.policy.clone()));
@@ -860,16 +859,6 @@ fn format_interactive_prompt(last_input_tokens: u64, context_window: Option<usiz
         }
         _ => "> ".to_string(),
     }
-}
-
-fn current_time() -> String {
-    use time::OffsetDateTime;
-    use time::format_description::FormatItem;
-    use time::macros::format_description;
-
-    let now = OffsetDateTime::now_utc();
-    let fmt: &[FormatItem] = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
-    format!("{} UTC", now.format(fmt).unwrap_or_default())
 }
 
 fn accumulate(total: &Usage, usage: &Usage) -> Usage {

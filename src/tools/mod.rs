@@ -2,6 +2,7 @@
 pub mod browser;
 pub mod copy_file;
 pub mod create_directory;
+pub mod current_time;
 pub mod delete_file;
 pub mod download_file;
 pub mod execute;
@@ -31,6 +32,7 @@ pub use browser::{
 };
 pub use copy_file::CopyFileTool;
 pub use create_directory::CreateDirectoryTool;
+pub use current_time::GetCurrentTimeTool;
 pub use delete_file::DeleteFileTool;
 pub use download_file::DownloadFileTool;
 pub use execute::ExecuteTool;
