@@ -4,20 +4,59 @@ use std::time::Duration;
 
 use regex::Regex;
 
+use rand::RngExt;
+
 /// Realistic browser user-agent used for all web requests.
 pub(crate) const DEFAULT_UA: &str =
     "Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0";
 
+/// A small pool of realistic user-agents, rotated per request to avoid
+/// fingerprinting via a single fixed UA.
+pub(crate) const USER_AGENTS: &[&str] = &[
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
+];
+
+/// Pick a random user-agent from the pool.
+pub(crate) fn random_ua() -> &'static str {
+    let idx = rand::rng().random_range(0..USER_AGENTS.len());
+    USER_AGENTS[idx]
+}
+
 /// Shared HTTP client with connection pooling, built once and reused across tools.
+/// A cookie jar is enabled so consent/verification cookies carry across requests
+/// within a process run.
 pub(crate) fn http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .user_agent(DEFAULT_UA)
+            .cookie_store(true)
             .timeout(Duration::from_secs(30))
             .build()
             .expect("failed to build HTTP client")
     })
+}
+
+/// Browser-like request headers to set per request on top of the shared client
+/// defaults. UA is chosen per request so consecutive requests differ.
+pub(crate) fn browser_headers(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    request
+        .header(reqwest::header::USER_AGENT, random_ua())
+        .header(
+            reqwest::header::ACCEPT,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        )
+        .header(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.9")
+        .header(reqwest::header::REFERER, "https://www.google.com/")
+        .header("Sec-Fetch-Dest", "document")
+        .header("Sec-Fetch-Mode", "navigate")
+        .header("Sec-Fetch-Site", "cross-site")
+        .header("Upgrade-Insecure-Requests", "1")
+        .header("DNT", "1")
 }
 
 /// Emit a JS string literal (JSON strings are valid JS string literals; `serde_json`
@@ -342,8 +381,15 @@ pub fn find_git_dir() -> Result<PathBuf, ToolError> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "browser")]
     use super::*;
+
+    #[test]
+    fn test_random_ua_is_member_of_pool() {
+        for _ in 0..50 {
+            let ua = random_ua();
+            assert!(USER_AGENTS.contains(&ua), "UA not in pool: {ua}");
+        }
+    }
 
     #[cfg(feature = "browser")]
     #[test]

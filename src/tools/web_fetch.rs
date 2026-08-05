@@ -6,7 +6,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use super::shared::{ToolError, http_client};
+#[cfg(feature = "browser")]
+use super::browser::BrowserState;
+use super::shared::{ToolError, browser_headers, http_client};
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::policy::{Action, Policy};
 
@@ -27,11 +29,22 @@ pub struct WebFetchArgs {
 #[derive(Debug, Clone)]
 pub struct WebFetchTool {
     policy: Policy,
+    #[cfg(feature = "browser")]
+    browser: Option<Arc<BrowserState>>,
 }
 
+#[cfg(feature = "browser")]
+use std::sync::Arc;
+
 impl WebFetchTool {
+    #[cfg(not(feature = "browser"))]
     pub fn new(policy: Policy) -> Self {
         Self { policy }
+    }
+
+    #[cfg(feature = "browser")]
+    pub fn with_browser(policy: Policy, browser: Option<Arc<BrowserState>>) -> Self {
+        Self { policy, browser }
     }
 }
 
@@ -86,6 +99,8 @@ impl Tool for WebFetchTool {
         let timeout_secs = args.timeout.unwrap_or(30).min(120);
 
         let mut last_err = String::new();
+        #[cfg(feature = "browser")]
+        let mut block_signaled = false;
         for attempt in 0..2 {
             if attempt > 0 {
                 debug!("{DIM}  retrying fetch (attempt 2)...{RESET}");
@@ -105,7 +120,32 @@ impl Tool for WebFetchTool {
                         .map_err(ToolError::Message);
                 }
                 Err(e) => {
+                    #[cfg(feature = "browser")]
+                    {
+                        block_signaled = is_block_error(&e);
+                    }
                     last_err = e;
+                }
+            }
+        }
+
+        #[cfg(feature = "browser")]
+        if block_signaled && let Some(ref bs) = self.browser {
+            debug!("{DIM}  escalating to stealth browser...{RESET}");
+            match bs.fetch_html(&args.url).await {
+                Ok(html) => {
+                    let result = convert_body(&html, &format)?;
+                    let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
+                    debug!(
+                        "{DIM} {} \n{truncated}\n {} {RESET}",
+                        bar_title(&args.url),
+                        bar_line()
+                    );
+                    return process_output(&result, args.offset, args.limit)
+                        .map_err(ToolError::Message);
+                }
+                Err(e) => {
+                    last_err = format!("{last_err}; browser fallback failed: {e}");
                 }
             }
         }
@@ -116,23 +156,30 @@ impl Tool for WebFetchTool {
     }
 }
 
+#[cfg(feature = "browser")]
+fn is_block_error(e: &str) -> bool {
+    e.contains("blocked")
+        || e.contains("Cloudflare")
+        || e.contains("CAPTCHA")
+        || e.contains("rate limited")
+        || e.contains("HTTP 403")
+        || e.contains("HTTP 503")
+        || e.contains("empty body")
+}
+
 async fn fetch_url(url: &str, timeout_secs: u64) -> Result<String, String> {
-    let resp = http_client()
-        .get(url)
+    let resp = browser_headers(http_client().get(url))
         .timeout(Duration::from_secs(timeout_secs))
-        .header(
-            "Accept",
-            "text/html, application/xhtml+xml, text/plain;q=0.9",
-        )
-        .header("Accept-Language", "en-US,en;q=0.9")
-        .header("DNT", "1")
-        .header("Upgrade-Insecure-Requests", "1")
         .send()
         .await
         .map_err(|e| format!("request failed: {e}"))?;
 
     if resp.status().as_u16() == 429 {
         return Err("rate limited (HTTP 429). Try again in a few seconds.".to_string());
+    }
+
+    if resp.status().as_u16() == 403 || resp.status().as_u16() == 503 {
+        return Err(format!("possibly blocked (HTTP {})", resp.status()));
     }
 
     if !resp.status().is_success() {
@@ -144,17 +191,12 @@ async fn fetch_url(url: &str, timeout_secs: u64) -> Result<String, String> {
         .await
         .map_err(|e| format!("failed to read response body: {e}"))?;
 
-    if body.contains("cf-browser-verification")
-        || body.contains("Just a moment")
-        || body.contains("Checking your browser")
-    {
-        return Err(
-            "URL is protected by Cloudflare and cannot be fetched automatically.".to_string(),
-        );
+    if body.trim().is_empty() {
+        return Err("empty body (possibly blocked)".to_string());
     }
 
-    if body.contains("g-recaptcha") || body.contains("recaptcha") {
-        return Err("URL requires a CAPTCHA and cannot be fetched.".to_string());
+    if let Some(marker) = block_marker(&body) {
+        return Err(marker.to_string());
     }
 
     const MAX_SIZE: usize = 5 * 1024 * 1024;
@@ -167,6 +209,28 @@ async fn fetch_url(url: &str, timeout_secs: u64) -> Result<String, String> {
     }
 
     Ok(body)
+}
+
+/// Detect anti-bot challenge markers in a response body. Returns a description
+/// of the block type, or `None` if the body looks like a normal page.
+fn block_marker(body: &str) -> Option<&'static str> {
+    if body.contains("cf-browser-verification")
+        || body.contains("Just a moment")
+        || body.contains("Checking your browser")
+        || body.contains("cf-chl")
+    {
+        return Some("URL is protected by Cloudflare and cannot be fetched automatically.");
+    }
+
+    if body.contains("g-recaptcha") || body.contains("recaptcha") {
+        return Some("URL requires a CAPTCHA and cannot be fetched.");
+    }
+
+    if body.contains("Access denied") || body.contains("access denied") {
+        return Some("URL returned 'Access denied'.");
+    }
+
+    None
 }
 
 fn convert_body(body: &str, format: &str) -> Result<String, ToolError> {
@@ -198,4 +262,63 @@ fn convert_body(body: &str, format: &str) -> Result<String, ToolError> {
     };
 
     result.map_err(|e| ToolError::Message(format!("failed to convert: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_block_marker_cloudflare() {
+        for body in [
+            "<html>Just a moment...</html>",
+            "cf-browser-verification",
+            "Checking your browser before accessing",
+            "challenge platform cf-chl",
+        ] {
+            let marker = block_marker(body);
+            assert!(marker.is_some(), "expected marker for: {body}");
+            assert!(marker.unwrap().contains("Cloudflare"));
+        }
+    }
+
+    #[test]
+    fn test_block_marker_captcha() {
+        for body in ["g-recaptcha", "recaptcha v2"] {
+            let marker = block_marker(body);
+            assert!(marker.is_some(), "expected marker for: {body}");
+            assert!(marker.unwrap().contains("CAPTCHA"));
+        }
+    }
+
+    #[test]
+    fn test_block_marker_access_denied() {
+        let marker = block_marker("Access denied. Please try again later.");
+        assert!(marker.is_some());
+    }
+
+    #[test]
+    fn test_block_marker_none() {
+        for body in [
+            "<html><head><title>ok</title></head><body><p>hello</p></body></html>",
+            "plain text page",
+        ] {
+            assert!(
+                block_marker(body).is_none(),
+                "unexpected marker for: {body}"
+            );
+        }
+    }
+
+    #[cfg(feature = "browser")]
+    #[test]
+    fn test_is_block_error() {
+        assert!(is_block_error("possibly blocked (HTTP 403)"));
+        assert!(is_block_error("rate limited (HTTP 429)."));
+        assert!(is_block_error("URL is protected by Cloudflare"));
+        assert!(is_block_error("empty body (possibly blocked)"));
+        assert!(is_block_error("URL requires a CAPTCHA"));
+        assert!(!is_block_error("HTTP 404"));
+        assert!(!is_block_error("request failed: connection reset"));
+    }
 }

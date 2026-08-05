@@ -31,7 +31,7 @@ serde_yaml_ng = "0.10"
 time = { version = "0.3", features = ["formatting", "macros"] }
 html2text = "0.17.1"
 urlencoding = "2"
-reqwest = { version = "0.13", features = ["gzip"] }
+reqwest = { version = "0.13", features = ["gzip", "cookies"] }
 rustyline = { version = "18.0.1", default-features = false, features = [
     "custom-bindings",
 ] }

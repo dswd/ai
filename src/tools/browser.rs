@@ -21,6 +21,13 @@ pub struct BrowserState {
     last_url: Arc<Mutex<Option<String>>>,
 }
 
+impl BrowserState {
+    /// Shared reference to the underlying stealth browser.
+    pub fn browser(&self) -> Arc<obscura::Browser> {
+        Arc::clone(&self.browser)
+    }
+}
+
 impl std::fmt::Debug for BrowserState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BrowserState").finish()
@@ -37,6 +44,40 @@ impl BrowserState {
             browser: Arc::new(browser),
             last_url: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// Navigate to `url` in the shared stealth browser and return the page HTML.
+    /// Used as a fallback when plain HTTP fetch is blocked.
+    pub async fn fetch_html(&self, url: &str) -> Result<String, String> {
+        let browser = Arc::clone(&self.browser);
+        let url = url.to_string();
+        let result = tokio::time::timeout(
+            Duration::from_secs(30),
+            tokio::task::spawn_blocking(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| format!("browser rt: {e}"))?;
+                rt.block_on(async {
+                    let mut page = browser.new_page().await.map_err(|e| format!("page: {e}"))?;
+                    page.goto(&url).await.map_err(|e| format!("goto: {e}"))?;
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    let html = page.content();
+                    if html.trim().is_empty() {
+                        return Err("empty page content".to_string());
+                    }
+                    Ok(html)
+                })
+            }),
+        )
+        .await;
+
+        match result {
+            Ok(Ok(Ok(html))) => Ok(html),
+            Ok(Ok(Err(e))) => Err(e),
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(_) => Err("browser fetch timed out after 30s".to_string()),
+        }
     }
 }
 

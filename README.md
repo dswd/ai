@@ -145,6 +145,21 @@ Available tools (enabled based on policy):
 
 Tool output is capped (200 lines / ~100 KB) with offset/limit pagination and truncation notices.
 
+### Debugging web access
+
+Search engines sometimes block automated requests. To see which engines work from
+your current network, run the hidden probe flag:
+
+```
+ai --probe-web="your query"
+```
+
+It runs each engine in the search ladder (SearXNG → DuckDuckGo → Google → Bing) and
+prints per-engine diagnostics: HTTP outcome, latency, response size, and the reason
+an engine was rejected (e.g. a detected Cloudflare/CAPTCHA marker). Web requests use
+rotating user-agents and a shared cookie jar; `web_fetch` automatically retries
+through the stealth browser when it detects a block.
+
 ## CLI reference
 
 ```

@@ -61,6 +61,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     if let Some(ref name) = cli.delete {
         return cmd_delete_session(name, &session_dir);
     }
+    if let Some(ref query) = cli.probe_web {
+        return cmd_probe_web(query, &config).await;
+    }
 
     let policy = load_policy(&cli, &config)?;
     let skills = Arc::new(skills::discover(&cli.skill, &config.skills_dir_resolved()));
@@ -376,6 +379,56 @@ async fn dispatch_agent<M: CompletionModel + 'static>(
     Ok(())
 }
 
+async fn cmd_probe_web(query: &str, config: &Config) -> anyhow::Result<()> {
+    #[cfg(feature = "browser")]
+    let browser = match tools::BrowserState::new().await {
+        Ok(bs) => Some(Arc::new(bs)),
+        Err(e) => {
+            output::stderr_line(&format!("warning: browser unavailable: {e}"));
+            None
+        }
+    };
+
+    println!("Probing web search engines for query: {query}");
+    println!();
+
+    #[cfg(feature = "browser")]
+    let results = tools::web_search::probe_web_search(query, &config.search, browser).await;
+    #[cfg(not(feature = "browser"))]
+    let results = tools::web_search::probe_web_search(query, &config.search).await;
+
+    let mut any_ok = false;
+    for r in &results {
+        let status = if r.ok { "✅ OK " } else { "❌ FAIL" };
+        let bytes = if r.ok {
+            format!("{} bytes", r.bytes)
+        } else {
+            String::new()
+        };
+        println!(
+            "{status}  {:<12} {}{:>8} ms  {}",
+            r.engine,
+            if r.ok { "" } else { " " },
+            r.latency_ms,
+            bytes
+        );
+        if !r.ok {
+            println!("            reason: {}", r.detail);
+        }
+        if r.ok {
+            any_ok = true;
+        }
+    }
+
+    println!();
+    if any_ok {
+        println!("Result: at least one engine works.");
+    } else {
+        println!("Result: all engines failed. Check network / proxy / blocked markers above.");
+    }
+    Ok(())
+}
+
 fn cmd_list_sessions(dir: &std::path::Path) -> anyhow::Result<()> {
     let names = Session::list(dir)?;
     if names.is_empty() {
@@ -605,7 +658,14 @@ fn build_agent<M: CompletionModel + 'static>(
         .tool(tools::GetCurrentTimeTool::new());
 
     if can_web_fetch {
-        server = server.tool(tools::WebFetchTool::new(ctx.policy.clone()));
+        #[cfg(feature = "browser")]
+        let web_fetch_tool = tools::WebFetchTool::with_browser(
+            ctx.policy.clone(),
+            ctx.browser_state.as_ref().map(Arc::clone),
+        );
+        #[cfg(not(feature = "browser"))]
+        let web_fetch_tool = tools::WebFetchTool::new(ctx.policy.clone());
+        server = server.tool(web_fetch_tool);
         #[cfg(feature = "browser")]
         if let Some(ref bs) = ctx.browser_state {
             server = server
@@ -637,10 +697,15 @@ fn build_agent<M: CompletionModel + 'static>(
     }
 
     if can_web_search {
-        server = server.tool(tools::WebSearchTool::new(
+        #[cfg(feature = "browser")]
+        let web_search_tool = tools::WebSearchTool::with_browser(
             ctx.policy.clone(),
             ctx.search.clone(),
-        ));
+            ctx.browser_state.as_ref().map(Arc::clone),
+        );
+        #[cfg(not(feature = "browser"))]
+        let web_search_tool = tools::WebSearchTool::new(ctx.policy.clone(), ctx.search.clone());
+        server = server.tool(web_search_tool);
     }
 
     if let Some(ref mem) = ctx.memory {

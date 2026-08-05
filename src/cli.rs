@@ -215,6 +215,15 @@ pub struct Cli {
     pub delete: Option<String>,
 
     #[arg(
+        long = "probe-web",
+        help = "Probe each web search engine and report per-engine diagnostics",
+        value_name = "QUERY",
+        require_equals = true,
+        hide = true
+    )]
+    pub probe_web: Option<String>,
+
+    #[arg(
         short = 'v',
         long = "verbose",
         help = "Enable verbose mode",
@@ -266,6 +275,7 @@ impl Cli {
             && self.max_tokens.is_none()
             && self.max_turns == 100
             && self.thinking.is_none()
+            && self.probe_web.is_none()
             && !self.verbose
             && !self.quiet
             && self.init.is_none()
@@ -311,6 +321,7 @@ mod tests {
         assert!(!parse(&["-y"]).is_vanilla());
         assert!(!parse(&["--model=gpt-4o"]).is_vanilla());
         assert!(!parse(&["--skill=/tmp/s"]).is_vanilla());
+        assert!(!parse(&["--probe-web=test"]).is_vanilla());
     }
 
     #[test]

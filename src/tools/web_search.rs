@@ -10,11 +10,39 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "browser")]
+use super::browser::BrowserState;
+#[cfg(feature = "browser")]
 use super::shared::js_literal;
-use super::shared::{ToolError, http_client};
+use super::shared::{ToolError, browser_headers, http_client};
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::config::SearchConfig;
 use crate::policy::{Action, Policy};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchEngine {
+    Searxng,
+    DuckDuckGo,
+    Google,
+    Bing,
+}
+
+impl SearchEngine {
+    pub fn name(&self) -> &'static str {
+        match self {
+            SearchEngine::Searxng => "SearXNG",
+            SearchEngine::DuckDuckGo => "DuckDuckGo",
+            SearchEngine::Google => "Google",
+            SearchEngine::Bing => "Bing",
+        }
+    }
+
+    pub const ALL: [SearchEngine; 4] = [
+        SearchEngine::Searxng,
+        SearchEngine::DuckDuckGo,
+        SearchEngine::Google,
+        SearchEngine::Bing,
+    ];
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WebSearchArgs {
@@ -31,14 +59,31 @@ pub struct WebSearchTool {
     policy: Policy,
     search: SearchConfig,
     last_request: Arc<Mutex<Option<Instant>>>,
+    #[cfg(feature = "browser")]
+    browser: Option<Arc<BrowserState>>,
 }
 
 impl WebSearchTool {
+    #[cfg(not(feature = "browser"))]
     pub fn new(policy: Policy, search: SearchConfig) -> Self {
         Self {
             policy,
             search,
             last_request: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    #[cfg(feature = "browser")]
+    pub fn with_browser(
+        policy: Policy,
+        search: SearchConfig,
+        browser: Option<Arc<BrowserState>>,
+    ) -> Self {
+        Self {
+            policy,
+            search,
+            last_request: Arc::new(Mutex::new(None)),
+            browser,
         }
     }
 }
@@ -77,81 +122,20 @@ impl Tool for WebSearchTool {
 
         self.rate_limit_wait().await;
 
-        // 1. Try custom SearXNG (if configured)
-        if let Some(url) = &self.search.searxng_url.as_ref().filter(|u| !u.is_empty()) {
-            let search_url = url.replacen("{query}", &args.query, 1);
-            debug!("{DIM}  trying SearXNG (custom){RESET}");
-            match fetch(&search_url).await {
-                Ok(body) => {
-                    let md = html_to_markdown(&body);
-                    match check_quality(&md) {
-                        Ok(()) => {
-                            let result = format!(
-                                "Search results for \"{}\" via SearXNG:\n\n{}",
-                                args.query, md
-                            );
-                            return finalize(result, args.offset, args.limit);
-                        }
-                        Err(reason) => debug!("{DIM}  SearXNG rejected: {reason}{RESET}"),
-                    }
+        for engine in SearchEngine::ALL {
+            debug!("{DIM}  trying {}{RESET}", engine.name());
+            match self.run_engine(engine, &args.query).await {
+                Ok(md) => {
+                    let result = format!(
+                        "Search results for \"{}\" via {}:\n\n{}",
+                        args.query,
+                        engine.name(),
+                        md
+                    );
+                    return finalize(result, args.offset, args.limit);
                 }
-                Err(e) => debug!("{DIM}  SearXNG: {e}{RESET}"),
+                Err(reason) => debug!("{DIM}  {} rejected: {reason}{RESET}", engine.name()),
             }
-        }
-
-        // 2. Try DuckDuckGo
-        debug!("{DIM}  trying DuckDuckGo{RESET}");
-        match self.search_ddg(&args.query).await {
-            Ok(html) => {
-                let md = html_to_markdown(&html);
-                match check_quality(&md) {
-                    Ok(()) => {
-                        let result = format!(
-                            "Search results for \"{}\" via DuckDuckGo:\n\n{}",
-                            args.query, md
-                        );
-                        return finalize(result, args.offset, args.limit);
-                    }
-                    Err(reason) => debug!("{DIM}  DuckDuckGo rejected: {reason}{RESET}"),
-                }
-            }
-            Err(e) => debug!("{DIM}  DuckDuckGo: {e}{RESET}"),
-        }
-
-        // 3. Try Google
-        debug!("{DIM}  trying Google{RESET}");
-        match self.search_google(&args.query).await {
-            Ok(html) => {
-                let md = html_to_markdown(&html);
-                match check_quality(&md) {
-                    Ok(()) => {
-                        let result = format!(
-                            "Search results for \"{}\" via Google:\n\n{}",
-                            args.query, md
-                        );
-                        return finalize(result, args.offset, args.limit);
-                    }
-                    Err(reason) => debug!("{DIM}  Google rejected: {reason}{RESET}"),
-                }
-            }
-            Err(e) => debug!("{DIM}  Google: {e}{RESET}"),
-        }
-
-        // 4. Try Bing
-        debug!("{DIM}  trying Bing{RESET}");
-        match self.search_bing(&args.query).await {
-            Ok(html) => {
-                let md = html_to_markdown(&html);
-                match check_quality(&md) {
-                    Ok(()) => {
-                        let result =
-                            format!("Search results for \"{}\" via Bing:\n\n{}", args.query, md);
-                        return finalize(result, args.offset, args.limit);
-                    }
-                    Err(reason) => debug!("{DIM}  Bing rejected: {reason}{RESET}"),
-                }
-            }
-            Err(e) => debug!("{DIM}  Bing: {e}{RESET}"),
         }
 
         Err(ToolError::Message(
@@ -168,7 +152,7 @@ impl WebSearchTool {
             if let Some(t) = *last {
                 let elapsed = t.elapsed();
                 if elapsed < Duration::from_secs(2) {
-                    let jitter = rand::rng().random_range(1..=5);
+                    let jitter = rand::rng().random_range(1..=6);
                     Some(Duration::from_secs(jitter))
                 } else {
                     None
@@ -187,6 +171,52 @@ impl WebSearchTool {
         *self.last_request.lock().unwrap() = Some(Instant::now());
     }
 
+    /// Run a single engine and return the final result text (or an error with
+    /// the rejection reason). Shared between the normal ladder and `--probe-web`.
+    async fn run_engine(&self, engine: SearchEngine, query: &str) -> Result<String, String> {
+        match engine {
+            SearchEngine::Searxng => {
+                let Some(url) = self.search.searxng_url.as_ref().filter(|u| !u.is_empty()) else {
+                    return Err("not configured".to_string());
+                };
+                let search_url = url.replacen("{query}", query, 1);
+                let body = fetch(&search_url)
+                    .await
+                    .map_err(|e| format!("fetch: {e}"))?;
+                let md = html_to_markdown(&body);
+                check_quality(&md).map_err(|e| format!("quality: {e}"))?;
+                Ok(md)
+            }
+            SearchEngine::DuckDuckGo => {
+                let html = self
+                    .search_ddg(query)
+                    .await
+                    .map_err(|e| format!("fetch: {e}"))?;
+                let md = html_to_markdown(&html);
+                check_quality(&md).map_err(|e| format!("quality: {e}"))?;
+                Ok(md)
+            }
+            SearchEngine::Google => {
+                let html = self
+                    .search_google(query)
+                    .await
+                    .map_err(|e| format!("fetch: {e}"))?;
+                let md = html_to_markdown(&html);
+                check_quality(&md).map_err(|e| format!("quality: {e}"))?;
+                Ok(md)
+            }
+            SearchEngine::Bing => {
+                let html = self
+                    .search_bing(query)
+                    .await
+                    .map_err(|e| format!("fetch: {e}"))?;
+                let md = html_to_markdown(&html);
+                check_quality(&md).map_err(|e| format!("quality: {e}"))?;
+                Ok(md)
+            }
+        }
+    }
+
     async fn search_ddg(&self, query: &str) -> Result<String, String> {
         let url = format!(
             "https://html.duckduckgo.com/html/?q={}",
@@ -197,6 +227,15 @@ impl WebSearchTool {
 
     #[cfg(feature = "browser")]
     async fn search_google(&self, query: &str) -> Result<String, String> {
+        let browser = match &self.browser {
+            Some(bs) => bs.browser(),
+            None => Arc::new(
+                obscura::Browser::builder()
+                    .stealth(true)
+                    .build()
+                    .map_err(|e| format!("browser: {e}"))?,
+            ),
+        };
         let query = query.to_string();
         let query_escaped = js_literal(&query);
         tokio::time::timeout(
@@ -207,10 +246,6 @@ impl WebSearchTool {
                     .build()
                     .map_err(|e| format!("browser rt: {e}"))?;
                 rt.block_on(async {
-                    let browser = obscura::Browser::builder()
-                        .stealth(true)
-                        .build()
-                        .map_err(|e| format!("browser: {e}"))?;
                     let mut page = browser
                         .new_page()
                         .await
@@ -255,9 +290,17 @@ impl WebSearchTool {
 
     #[cfg(feature = "browser")]
     async fn search_bing(&self, query: &str) -> Result<String, String> {
+        let browser = match &self.browser {
+            Some(bs) => bs.browser(),
+            None => Arc::new(
+                obscura::Browser::builder()
+                    .stealth(true)
+                    .build()
+                    .map_err(|e| format!("browser: {e}"))?,
+            ),
+        };
         let query = query.to_string();
         let query_escaped = js_literal(&query);
-        debug!("{DIM}  Obscura Bing: spawning browser...{RESET}");
         tokio::time::timeout(
             Duration::from_secs(30),
             tokio::task::spawn_blocking(move || {
@@ -266,10 +309,6 @@ impl WebSearchTool {
                     .build()
                     .map_err(|e| format!("browser rt: {e}"))?;
                 rt.block_on(async {
-                    let browser = obscura::Browser::builder()
-                        .stealth(true)
-                        .build()
-                        .map_err(|e| format!("browser: {e}"))?;
                     let mut page = browser
                         .new_page()
                         .await
@@ -313,6 +352,53 @@ impl WebSearchTool {
     }
 }
 
+/// Result of probing a single search engine via `--probe-web`.
+pub struct ProbeResult {
+    pub engine: &'static str,
+    pub ok: bool,
+    pub latency_ms: u64,
+    pub bytes: usize,
+    pub detail: String,
+}
+
+/// Probe every engine in the ladder and report per-engine diagnostics, without
+/// taking the policy into account. Used by the hidden `--probe-web` flag.
+#[allow(unused_variables)]
+pub async fn probe_web_search(
+    query: &str,
+    search: &SearchConfig,
+    #[cfg(feature = "browser")] browser: Option<Arc<BrowserState>>,
+) -> Vec<ProbeResult> {
+    #[cfg(feature = "browser")]
+    let tool = WebSearchTool::with_browser(Policy::default(), search.clone(), browser);
+    #[cfg(not(feature = "browser"))]
+    let tool = WebSearchTool::new(Policy::default(), search.clone());
+
+    let mut results = Vec::new();
+    for engine in SearchEngine::ALL {
+        let start = Instant::now();
+        let outcome = tool.run_engine(engine, query).await;
+        let latency_ms = start.elapsed().as_millis() as u64;
+        match outcome {
+            Ok(md) => results.push(ProbeResult {
+                engine: engine.name(),
+                ok: true,
+                latency_ms,
+                bytes: md.len(),
+                detail: "ok".to_string(),
+            }),
+            Err(reason) => results.push(ProbeResult {
+                engine: engine.name(),
+                ok: false,
+                latency_ms,
+                bytes: 0,
+                detail: reason,
+            }),
+        }
+    }
+    results
+}
+
 // ----- HTML to markdown conversion -----
 
 pub(crate) fn html_to_markdown(html: &str) -> String {
@@ -328,16 +414,27 @@ fn check_quality(md: &str) -> Result<(), String> {
         return Err("empty output".to_string());
     }
 
+    let lower = md.to_lowercase();
+    let bad = [
+        "unusual traffic",
+        "captcha",
+        "blocked",
+        "verify you are human",
+        "enable javascript",
+        "access denied",
+        "cf-chl",
+        "turning on",
+        "g-recaptcha",
+        "recaptcha",
+        "just a moment",
+    ];
+    if let Some(word) = bad.iter().find(|w| lower.contains(**w)) {
+        return Err(format!("blocked marker: {word}"));
+    }
+
     let link_count = md.matches("](").count();
     if link_count < 5 {
         return Err(format!("too few links: {link_count}"));
-    }
-
-    let lower = md.to_lowercase();
-    let bad = ["unusual traffic", "captcha", "blocked"];
-    let total_bad: usize = bad.iter().map(|w| lower.matches(w).count()).sum();
-    if total_bad > 2 {
-        return Err(format!("bad words: {total_bad}"));
     }
 
     Ok(())
@@ -360,17 +457,8 @@ fn finalize(
 // ----- HTTP fetch -----
 
 async fn fetch(url: &str) -> Result<String, String> {
-    let resp = http_client()
-        .get(url)
+    let resp = browser_headers(http_client().get(url))
         .timeout(Duration::from_secs(12))
-        .header(
-            "Accept",
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        )
-        .header("Accept-Language", "en-US,en;q=0.5")
-        .header("Accept-Encoding", "gzip, deflate")
-        .header("DNT", "1")
-        .header("Upgrade-Insecure-Requests", "1")
         .send()
         .await
         .map_err(|e| format!("request: {e}"))?;
@@ -379,9 +467,63 @@ async fn fetch(url: &str) -> Result<String, String> {
         return Err("HTTP 429 (rate limited)".to_string());
     }
 
+    if resp.status().as_u16() == 403 || resp.status().as_u16() == 503 {
+        return Err(format!("possibly blocked (HTTP {})", resp.status()));
+    }
+
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
     }
 
     resp.text().await.map_err(|e| format!("read: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_check_quality_empty() {
+        assert!(check_quality("").is_err());
+        assert!(check_quality("   \n  ").is_err());
+    }
+
+    #[test]
+    fn test_check_quality_too_few_links() {
+        assert!(check_quality("just one [link](https://x.com)").is_err());
+    }
+
+    #[test]
+    fn test_check_quality_blocked_markers() {
+        for body in [
+            "unusual traffic from your computer network",
+            "captcha required",
+            "access denied",
+            "verify you are human",
+            "please enable javascript",
+            "cf-chl challenge",
+            "g-recaptcha",
+            "just a moment...",
+        ] {
+            let md = format!(
+                "[a](https://a.com) [b](https://b.com) [c](https://c.com) [d](https://d.com) [e](https://e.com) {body}"
+            );
+            let err = check_quality(&md).unwrap_err();
+            assert!(err.contains("blocked marker"), "unexpected err: {err}");
+        }
+    }
+
+    #[test]
+    fn test_check_quality_ok() {
+        let md = "[a](https://a.com) [b](https://b.com) [c](https://c.com) [d](https://d.com) [e](https://e.com)";
+        assert!(check_quality(md).is_ok());
+    }
+
+    #[test]
+    fn test_engine_names() {
+        assert_eq!(SearchEngine::Searxng.name(), "SearXNG");
+        assert_eq!(SearchEngine::DuckDuckGo.name(), "DuckDuckGo");
+        assert_eq!(SearchEngine::Google.name(), "Google");
+        assert_eq!(SearchEngine::Bing.name(), "Bing");
+    }
 }
