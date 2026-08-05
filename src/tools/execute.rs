@@ -315,8 +315,7 @@ mod tests {
     async fn test_policy_fs_symlink_cannot_escape_read_policy() {
         use std::os::unix::fs::symlink;
 
-        let base =
-            std::env::temp_dir().join(format!("ai-symlink-policy-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("ai-symlink-policy-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let allowed = base.join("allowed");
         let denied = base.join("denied");

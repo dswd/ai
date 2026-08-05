@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+use log::warn;
 use regex::Regex;
 
 use rand::RngExt;
@@ -26,19 +28,40 @@ pub(crate) fn random_ua() -> &'static str {
     USER_AGENTS[idx]
 }
 
-/// Shared HTTP client with connection pooling, built once and reused across tools.
-/// A cookie jar is enabled so consent/verification cookies carry across requests
-/// within a process run.
-pub(crate) fn http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .user_agent(DEFAULT_UA)
-            .cookie_store(true)
-            .timeout(Duration::from_secs(30))
-            .build()
-            .expect("failed to build HTTP client")
-    })
+/// Shared HTTP client with connection pooling, built once per proxy
+/// configuration and reused across tools. A cookie jar is enabled so
+/// consent/verification cookies carry across requests within a process run.
+///
+/// When `proxy` is `None`, the client honors the standard environment
+/// variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`) via
+/// reqwest's default system-proxy handling. When `Some(url)`, requests are
+/// routed through that proxy (HTTP, HTTPS, or SOCKS5 such as
+/// `socks5h://127.0.0.1:1080`).
+pub(crate) fn http_client(proxy: Option<&str>) -> reqwest::Client {
+    static CLIENTS: OnceLock<Mutex<HashMap<Option<String>, reqwest::Client>>> = OnceLock::new();
+    let cache = CLIENTS.get_or_init(|| Mutex::new(HashMap::new()));
+    let key = proxy.map(str::to_string);
+    if let Some(client) = cache.lock().unwrap().get(&key) {
+        return client.clone();
+    }
+
+    let mut builder = reqwest::Client::builder()
+        .user_agent(DEFAULT_UA)
+        .cookie_store(true)
+        .timeout(Duration::from_secs(30));
+    if let Some(url) = proxy {
+        match reqwest::Proxy::all(url) {
+            Ok(proxy) => {
+                builder = builder.proxy(proxy);
+            }
+            Err(e) => {
+                warn!("invalid proxy URL {url:?}: {e}; continuing without explicit proxy");
+            }
+        }
+    }
+    let client = builder.build().expect("failed to build HTTP client");
+    cache.lock().unwrap().insert(key, client.clone());
+    client
 }
 
 /// Browser-like request headers to set per request on top of the shared client

@@ -111,6 +111,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         thinking,
         memory: memory.as_ref().map(Arc::clone),
         search: &config.search,
+        proxy: config.proxy.as_deref(),
         skills: Arc::clone(&skills),
         #[cfg(feature = "browser")]
         browser_state,
@@ -152,6 +153,7 @@ struct AgentContext<'a> {
     thinking: Option<usize>,
     memory: Option<Arc<memory::Memory>>,
     search: &'a config::SearchConfig,
+    proxy: Option<&'a str>,
     skills: Arc<Vec<skills::Skill>>,
     #[cfg(feature = "browser")]
     browser_state: Option<Arc<tools::BrowserState>>,
@@ -393,9 +395,12 @@ async fn cmd_probe_web(query: &str, config: &Config) -> anyhow::Result<()> {
     println!();
 
     #[cfg(feature = "browser")]
-    let results = tools::web_search::probe_web_search(query, &config.search, browser).await;
+    let results =
+        tools::web_search::probe_web_search(query, &config.search, config.proxy.clone(), browser)
+            .await;
     #[cfg(not(feature = "browser"))]
-    let results = tools::web_search::probe_web_search(query, &config.search).await;
+    let results =
+        tools::web_search::probe_web_search(query, &config.search, config.proxy.clone()).await;
 
     let mut any_ok = false;
     for r in &results {
@@ -531,6 +536,9 @@ fn apply_cli_overrides(cli: &Cli, config: &mut Config) {
     if let Some(ref provider) = cli.provider {
         config.provider = provider.clone();
     }
+    if let Some(ref proxy) = cli.proxy {
+        config.proxy = Some(proxy.clone());
+    }
 }
 
 fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> {
@@ -661,10 +669,12 @@ fn build_agent<M: CompletionModel + 'static>(
         #[cfg(feature = "browser")]
         let web_fetch_tool = tools::WebFetchTool::with_browser(
             ctx.policy.clone(),
+            ctx.proxy.map(str::to_string),
             ctx.browser_state.as_ref().map(Arc::clone),
         );
         #[cfg(not(feature = "browser"))]
-        let web_fetch_tool = tools::WebFetchTool::new(ctx.policy.clone());
+        let web_fetch_tool =
+            tools::WebFetchTool::new(ctx.policy.clone(), ctx.proxy.map(str::to_string));
         server = server.tool(web_fetch_tool);
         #[cfg(feature = "browser")]
         if let Some(ref bs) = ctx.browser_state {
@@ -693,7 +703,10 @@ fn build_agent<M: CompletionModel + 'static>(
     }
 
     if can_web_fetch && can_write {
-        server = server.tool(tools::DownloadFileTool::new(ctx.policy.clone()));
+        server = server.tool(tools::DownloadFileTool::new(
+            ctx.policy.clone(),
+            ctx.proxy.map(str::to_string),
+        ));
     }
 
     if can_web_search {
@@ -701,10 +714,15 @@ fn build_agent<M: CompletionModel + 'static>(
         let web_search_tool = tools::WebSearchTool::with_browser(
             ctx.policy.clone(),
             ctx.search.clone(),
+            ctx.proxy.map(str::to_string),
             ctx.browser_state.as_ref().map(Arc::clone),
         );
         #[cfg(not(feature = "browser"))]
-        let web_search_tool = tools::WebSearchTool::new(ctx.policy.clone(), ctx.search.clone());
+        let web_search_tool = tools::WebSearchTool::new(
+            ctx.policy.clone(),
+            ctx.search.clone(),
+            ctx.proxy.map(str::to_string),
+        );
         server = server.tool(web_search_tool);
     }
 

@@ -25,6 +25,9 @@ pub struct Config {
     pub policy: Option<PathBuf>,
     pub memory: Option<PathBuf>,
     pub context_window: Option<usize>,
+    /// Optional proxy for web requests (HTTP, HTTPS, or SOCKS5 URL).
+    /// Falls back to HTTP_PROXY/HTTPS_PROXY/ALL_PROXY environment variables.
+    pub proxy: Option<String>,
     #[serde(default)]
     pub search: SearchConfig,
 }
@@ -44,6 +47,7 @@ impl Default for Config {
             policy: None,
             memory: None,
             context_window: None,
+            proxy: None,
             search: SearchConfig::default(),
         }
     }
@@ -190,6 +194,23 @@ mod tests {
             std::env::remove_var("AI_MISSING_KEY");
         }
         assert_eq!(c.resolve_api_key(), None);
+    }
+
+    #[test]
+    fn test_proxy_field_roundtrip_and_default() {
+        assert!(Config::default().proxy.is_none());
+        let c = Config {
+            proxy: Some("socks5h://127.0.0.1:1080".to_string()),
+            ..Config::default()
+        };
+        let dir = std::env::temp_dir().join(format!("ai-proxy-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.yaml");
+        c.save(&path).unwrap();
+        let loaded = Config::from_file(&path).unwrap();
+        assert_eq!(loaded.proxy.as_deref(), Some("socks5h://127.0.0.1:1080"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

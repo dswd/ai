@@ -119,6 +119,14 @@ pub struct Cli {
     pub web_search: Vec<String>,
 
     #[arg(
+        long = "proxy",
+        help = "Route web requests through a proxy (e.g. http://127.0.0.1:8080 or socks5h://127.0.0.1:1080)",
+        value_name = "URL",
+        require_equals = true
+    )]
+    pub proxy: Option<String>,
+
+    #[arg(
         short = 'p',
         long = "policy",
         help = "Load policy from FILE",
@@ -267,6 +275,7 @@ impl Cli {
             && !self.web
             && self.web_fetch.is_empty()
             && self.web_search.is_empty()
+            && self.proxy.is_none()
             && self.policy.is_none()
             && self.skill.is_empty()
             && !self.ask
@@ -322,6 +331,7 @@ mod tests {
         assert!(!parse(&["--model=gpt-4o"]).is_vanilla());
         assert!(!parse(&["--skill=/tmp/s"]).is_vanilla());
         assert!(!parse(&["--probe-web=test"]).is_vanilla());
+        assert!(!parse(&["--proxy=socks5h://127.0.0.1:1080"]).is_vanilla());
     }
 
     #[test]

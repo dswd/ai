@@ -6,6 +6,7 @@ use regex::Regex;
 use rig_core::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -18,7 +19,16 @@ use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output
 use crate::config::SearchConfig;
 use crate::policy::{Action, Policy};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Minimum time between two requests to the same engine.
+const ENGINE_MIN_INTERVAL: Duration = Duration::from_secs(3);
+/// Cooldown after a transient failure (network, timeout, rate limit).
+const TRANSIENT_COOLDOWN: Duration = Duration::from_secs(20);
+/// Cooldown after an engine returns a block page (CAPTCHA, Cloudflare, ...).
+const BLOCK_COOLDOWN: Duration = Duration::from_secs(60);
+/// Extra attempts per engine after the first try (backoff 2s per retry).
+const ENGINE_RETRIES: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SearchEngine {
     Searxng,
     DuckDuckGo,
@@ -44,6 +54,40 @@ impl SearchEngine {
     ];
 }
 
+/// Structured failure from a search engine, used to decide whether to retry
+/// and how long to cool the engine down.
+#[derive(Debug)]
+enum EngineError {
+    NotConfigured,
+    Fetch(String),
+    Quality(String),
+}
+
+impl EngineError {
+    fn detail(&self) -> String {
+        match self {
+            EngineError::NotConfigured => "not configured".to_string(),
+            EngineError::Fetch(e) => format!("fetch: {e}"),
+            EngineError::Quality(e) => format!("quality: {e}"),
+        }
+    }
+
+    /// Errors worth one retry: anything that reached the network and failed
+    /// (timeouts, rate limits, 403/503, browser failures). Configuration and
+    /// quality failures are treated as permanent for this call.
+    fn is_transient(&self) -> bool {
+        matches!(self, EngineError::Fetch(_))
+    }
+
+    /// Errors that indicate the engine is blocking us (CAPTCHA, Cloudflare,
+    /// challenge pages). These get a longer cooldown so the ladder skips the
+    /// engine for a while instead of hammering it.
+    fn is_block(&self) -> bool {
+        matches!(self, EngineError::Quality(e)
+            if e.contains("blocked marker") || e.contains("no results area found"))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WebSearchArgs {
     #[schemars(description = "The search query")]
@@ -58,18 +102,24 @@ pub struct WebSearchArgs {
 pub struct WebSearchTool {
     policy: Policy,
     search: SearchConfig,
+    proxy: Option<String>,
     last_request: Arc<Mutex<Option<Instant>>>,
+    engine_last: Arc<Mutex<HashMap<SearchEngine, Instant>>>,
+    engine_cooldown: Arc<Mutex<HashMap<SearchEngine, Instant>>>,
     #[cfg(feature = "browser")]
     browser: Option<Arc<BrowserState>>,
 }
 
 impl WebSearchTool {
     #[cfg(not(feature = "browser"))]
-    pub fn new(policy: Policy, search: SearchConfig) -> Self {
+    pub fn new(policy: Policy, search: SearchConfig, proxy: Option<String>) -> Self {
         Self {
             policy,
             search,
+            proxy,
             last_request: Arc::new(Mutex::new(None)),
+            engine_last: Arc::new(Mutex::new(HashMap::new())),
+            engine_cooldown: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -77,12 +127,16 @@ impl WebSearchTool {
     pub fn with_browser(
         policy: Policy,
         search: SearchConfig,
+        proxy: Option<String>,
         browser: Option<Arc<BrowserState>>,
     ) -> Self {
         Self {
             policy,
             search,
+            proxy,
             last_request: Arc::new(Mutex::new(None)),
+            engine_last: Arc::new(Mutex::new(HashMap::new())),
+            engine_cooldown: Arc::new(Mutex::new(HashMap::new())),
             browser,
         }
     }
@@ -123,8 +177,11 @@ impl Tool for WebSearchTool {
         self.rate_limit_wait().await;
 
         for engine in SearchEngine::ALL {
-            debug!("{DIM}  trying {}{RESET}", engine.name());
-            match self.run_engine(engine, &args.query).await {
+            if self.engine_cooling_down(engine) {
+                debug!("{DIM}  skipping {} (cooldown){RESET}", engine.name());
+                continue;
+            }
+            match self.run_engine_with_retry(engine, &args.query).await {
                 Ok(md) => {
                     let result = format!(
                         "Search results for \"{}\" via {}:\n\n{}",
@@ -134,7 +191,14 @@ impl Tool for WebSearchTool {
                     );
                     return finalize(result, args.offset, args.limit);
                 }
-                Err(reason) => debug!("{DIM}  {} rejected: {reason}{RESET}", engine.name()),
+                Err(reason) => {
+                    self.record_engine_failure(engine, &reason);
+                    debug!(
+                        "{DIM}  {} rejected: {}{RESET}",
+                        engine.name(),
+                        reason.detail()
+                    );
+                }
             }
         }
 
@@ -171,47 +235,142 @@ impl WebSearchTool {
         *self.last_request.lock().unwrap() = Some(Instant::now());
     }
 
-    /// Run a single engine and return the final result text (or an error with
-    /// the rejection reason). Shared between the normal ladder and `--probe-web`.
-    async fn run_engine(&self, engine: SearchEngine, query: &str) -> Result<String, String> {
+    /// Whether `engine` is on cooldown and should be skipped in the ladder.
+    fn engine_cooling_down(&self, engine: SearchEngine) -> bool {
+        self.engine_cooldown
+            .lock()
+            .unwrap()
+            .get(&engine)
+            .map(|t| *t > Instant::now())
+            .unwrap_or(false)
+    }
+
+    /// Wait out the minimum interval between requests to the same engine.
+    async fn wait_for_engine(&self, engine: SearchEngine) {
+        let wait = {
+            let map = self.engine_last.lock().unwrap();
+            map.get(&engine).and_then(|t| {
+                let elapsed = t.elapsed();
+                if elapsed < ENGINE_MIN_INTERVAL {
+                    Some(ENGINE_MIN_INTERVAL - elapsed)
+                } else {
+                    None
+                }
+            })
+        };
+        if let Some(wait) = wait {
+            debug!(
+                "{DIM}  rate limit: sleeping {:.1}s before {}{RESET}",
+                wait.as_secs_f64(),
+                engine.name()
+            );
+            tokio::time::sleep(wait).await;
+        }
+    }
+
+    fn mark_engine_hit(&self, engine: SearchEngine) {
+        self.engine_last
+            .lock()
+            .unwrap()
+            .insert(engine, Instant::now());
+    }
+
+    /// Put an engine on cooldown after a failure. Transient errors get a short
+    /// cooldown; block pages a long one; configuration errors none (they will
+    /// never start working in this process).
+    fn record_engine_failure(&self, engine: SearchEngine, err: &EngineError) {
+        let cooldown = if err.is_block() {
+            BLOCK_COOLDOWN
+        } else if err.is_transient() {
+            TRANSIENT_COOLDOWN
+        } else {
+            return;
+        };
+        debug!(
+            "{DIM}  putting {} on cooldown for {}s{RESET}",
+            engine.name(),
+            cooldown.as_secs()
+        );
+        self.engine_cooldown
+            .lock()
+            .unwrap()
+            .insert(engine, Instant::now() + cooldown);
+    }
+
+    /// Run one engine, retrying transient failures with a 2s backoff.
+    /// Returns the final result text or the last error.
+    async fn run_engine_with_retry(
+        &self,
+        engine: SearchEngine,
+        query: &str,
+    ) -> Result<String, EngineError> {
+        let mut last_err = None;
+        for attempt in 0..=ENGINE_RETRIES {
+            self.wait_for_engine(engine).await;
+            if attempt > 0 {
+                let backoff = Duration::from_secs(2 * attempt as u64);
+                debug!(
+                    "{DIM}  retrying {} (attempt {}/{})...{RESET}",
+                    engine.name(),
+                    attempt + 1,
+                    ENGINE_RETRIES + 1
+                );
+                tokio::time::sleep(backoff).await;
+            }
+            self.mark_engine_hit(engine);
+            match self.run_engine(engine, query).await {
+                Ok(md) => return Ok(md),
+                Err(e) if e.is_transient() => last_err = Some(e),
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_err.unwrap_or(EngineError::Fetch("unknown error".to_string())))
+    }
+
+    /// Run a single engine and return the final result text (or a structured
+    /// error). Shared between the normal ladder and `--probe-web`.
+    async fn run_engine(&self, engine: SearchEngine, query: &str) -> Result<String, EngineError> {
         match engine {
             SearchEngine::Searxng => {
                 let Some(url) = self.search.searxng_url.as_ref().filter(|u| !u.is_empty()) else {
-                    return Err("not configured".to_string());
+                    return Err(EngineError::NotConfigured);
                 };
-                let search_url = url.replacen("{query}", query, 1);
-                let body = fetch(&search_url)
+                let search_url = searxng_search_url(url, query);
+                let body = fetch(&search_url, self.proxy.as_deref())
                     .await
-                    .map_err(|e| format!("fetch: {e}"))?;
+                    .map_err(EngineError::Fetch)?;
                 let md = html_to_markdown(&body);
-                check_quality(&md).map_err(|e| format!("quality: {e}"))?;
+                check_quality(&md).map_err(EngineError::Quality)?;
                 Ok(md)
             }
             SearchEngine::DuckDuckGo => {
-                let html = self
-                    .search_ddg(query)
-                    .await
-                    .map_err(|e| format!("fetch: {e}"))?;
+                let html = self.search_ddg(query).await.map_err(EngineError::Fetch)?;
                 let md = html_to_markdown(&html);
-                check_quality(&md).map_err(|e| format!("quality: {e}"))?;
+                check_quality(&md).map_err(EngineError::Quality)?;
                 Ok(md)
             }
             SearchEngine::Google => {
-                let html = self
-                    .search_google(query)
-                    .await
-                    .map_err(|e| format!("fetch: {e}"))?;
+                let html = self.search_google(query).await.map_err(|e| {
+                    if e == "no results area found" {
+                        EngineError::Quality(e)
+                    } else {
+                        EngineError::Fetch(e)
+                    }
+                })?;
                 let md = html_to_markdown(&html);
-                check_quality(&md).map_err(|e| format!("quality: {e}"))?;
+                check_quality(&md).map_err(EngineError::Quality)?;
                 Ok(md)
             }
             SearchEngine::Bing => {
-                let html = self
-                    .search_bing(query)
-                    .await
-                    .map_err(|e| format!("fetch: {e}"))?;
+                let html = self.search_bing(query).await.map_err(|e| {
+                    if e == "no results area found" {
+                        EngineError::Quality(e)
+                    } else {
+                        EngineError::Fetch(e)
+                    }
+                })?;
                 let md = html_to_markdown(&html);
-                check_quality(&md).map_err(|e| format!("quality: {e}"))?;
+                check_quality(&md).map_err(EngineError::Quality)?;
                 Ok(md)
             }
         }
@@ -222,7 +381,9 @@ impl WebSearchTool {
             "https://html.duckduckgo.com/html/?q={}",
             urlencoding::encode(query)
         );
-        fetch(&url).await.map_err(|e| format!("DDG: {e}"))
+        fetch(&url, self.proxy.as_deref())
+            .await
+            .map_err(|e| format!("DDG: {e}"))
     }
 
     #[cfg(feature = "browser")]
@@ -367,12 +528,13 @@ pub struct ProbeResult {
 pub async fn probe_web_search(
     query: &str,
     search: &SearchConfig,
+    proxy: Option<String>,
     #[cfg(feature = "browser")] browser: Option<Arc<BrowserState>>,
 ) -> Vec<ProbeResult> {
     #[cfg(feature = "browser")]
-    let tool = WebSearchTool::with_browser(Policy::default(), search.clone(), browser);
+    let tool = WebSearchTool::with_browser(Policy::default(), search.clone(), proxy, browser);
     #[cfg(not(feature = "browser"))]
-    let tool = WebSearchTool::new(Policy::default(), search.clone());
+    let tool = WebSearchTool::new(Policy::default(), search.clone(), proxy);
 
     let mut results = Vec::new();
     for engine in SearchEngine::ALL {
@@ -392,7 +554,7 @@ pub async fn probe_web_search(
                 ok: false,
                 latency_ms,
                 bytes: 0,
-                detail: reason,
+                detail: reason.detail(),
             }),
         }
     }
@@ -454,8 +616,20 @@ fn finalize(
 
 // ----- HTTP fetch -----
 
-async fn fetch(url: &str) -> Result<String, String> {
-    let resp = browser_headers(http_client().get(url))
+/// Build a SearXNG search URL from a configured base. The base may contain a
+/// `{query}` placeholder; if it doesn't, `?q=` / `&q=` is appended so a bare
+/// instance URL like `http://localhost:8080/search` still works.
+fn searxng_search_url(base: &str, query: &str) -> String {
+    if base.contains("{query}") {
+        base.replacen("{query}", &urlencoding::encode(query), 1)
+    } else {
+        let sep = if base.contains('?') { '&' } else { '?' };
+        format!("{base}{sep}q={}", urlencoding::encode(query))
+    }
+}
+
+async fn fetch(url: &str, proxy: Option<&str>) -> Result<String, String> {
+    let resp = browser_headers(http_client(proxy).get(url))
         .timeout(Duration::from_secs(12))
         .send()
         .await
@@ -523,5 +697,52 @@ mod tests {
         assert_eq!(SearchEngine::DuckDuckGo.name(), "DuckDuckGo");
         assert_eq!(SearchEngine::Google.name(), "Google");
         assert_eq!(SearchEngine::Bing.name(), "Bing");
+    }
+
+    #[test]
+    fn test_searxng_search_url_placeholder() {
+        let url = searxng_search_url("http://localhost:8080/search?q={query}", "hello world");
+        assert_eq!(url, "http://localhost:8080/search?q=hello%20world");
+    }
+
+    #[test]
+    fn test_searxng_search_url_appends_query() {
+        let url = searxng_search_url("http://localhost:8080/search", "a b");
+        assert_eq!(url, "http://localhost:8080/search?q=a%20b");
+        let url = searxng_search_url("http://localhost:8080/search?lang=en", "a b");
+        assert_eq!(url, "http://localhost:8080/search?lang=en&q=a%20b");
+    }
+
+    #[test]
+    fn test_searxng_search_url_placeholder_replaced_once() {
+        let url = searxng_search_url("http://x/{query}?q={query}", "hi");
+        assert_eq!(url, "http://x/hi?q={query}");
+    }
+
+    #[test]
+    fn test_engine_error_classification() {
+        assert!(
+            EngineError::NotConfigured
+                .detail()
+                .contains("not configured")
+        );
+        assert!(!EngineError::NotConfigured.is_transient());
+        assert!(!EngineError::NotConfigured.is_block());
+
+        let fetch = EngineError::Fetch("request: timeout".to_string());
+        assert!(fetch.is_transient());
+        assert!(!fetch.is_block());
+        assert!(fetch.detail().starts_with("fetch: "));
+
+        let quality_block = EngineError::Quality("blocked marker: captcha".to_string());
+        assert!(!quality_block.is_transient());
+        assert!(quality_block.is_block());
+        assert!(quality_block.detail().starts_with("quality: "));
+
+        let quality_no_results = EngineError::Quality("no results area found".to_string());
+        assert!(quality_no_results.is_block());
+
+        let quality_few_links = EngineError::Quality("too few links: 2".to_string());
+        assert!(!quality_few_links.is_block());
     }
 }

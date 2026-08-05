@@ -29,6 +29,7 @@ pub struct WebFetchArgs {
 #[derive(Debug, Clone)]
 pub struct WebFetchTool {
     policy: Policy,
+    proxy: Option<String>,
     #[cfg(feature = "browser")]
     browser: Option<Arc<BrowserState>>,
 }
@@ -38,13 +39,21 @@ use std::sync::Arc;
 
 impl WebFetchTool {
     #[cfg(not(feature = "browser"))]
-    pub fn new(policy: Policy) -> Self {
-        Self { policy }
+    pub fn new(policy: Policy, proxy: Option<String>) -> Self {
+        Self { policy, proxy }
     }
 
     #[cfg(feature = "browser")]
-    pub fn with_browser(policy: Policy, browser: Option<Arc<BrowserState>>) -> Self {
-        Self { policy, browser }
+    pub fn with_browser(
+        policy: Policy,
+        proxy: Option<String>,
+        browser: Option<Arc<BrowserState>>,
+    ) -> Self {
+        Self {
+            policy,
+            proxy,
+            browser,
+        }
     }
 }
 
@@ -101,13 +110,22 @@ impl Tool for WebFetchTool {
         let mut last_err = String::new();
         #[cfg(feature = "browser")]
         let mut block_signaled = false;
-        for attempt in 0..2 {
+        // Up to 3 attempts with exponential backoff (1s, 2s). Transient
+        // failures (network, rate limits, 403/503, empty bodies) are retried;
+        // hard errors like HTTP 404 or a detected Cloudflare/CAPTCHA page
+        // stop the loop immediately so a block can escalate to the browser.
+        for attempt in 0..3 {
             if attempt > 0 {
-                debug!("{DIM}  retrying fetch (attempt 2)...{RESET}");
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                let backoff = Duration::from_secs(1 << (attempt - 1));
+                debug!(
+                    "{DIM}  retrying fetch (attempt {}, +{}s)...{RESET}",
+                    attempt + 1,
+                    backoff.as_secs()
+                );
+                tokio::time::sleep(backoff).await;
             }
 
-            match fetch_url(&args.url, timeout_secs).await {
+            match fetch_url(&args.url, timeout_secs, self.proxy.as_deref()).await {
                 Ok(body) => {
                     let result = convert_body(&body, &format)?;
                     let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
@@ -127,6 +145,9 @@ impl Tool for WebFetchTool {
                         block_signaled |= is_block_error(&e);
                     }
                     last_err = e;
+                    if !should_retry_fetch(&last_err) {
+                        break;
+                    }
                 }
             }
         }
@@ -169,8 +190,21 @@ fn is_block_error(e: &str) -> bool {
         || e.contains("empty body")
 }
 
-async fn fetch_url(url: &str, timeout_secs: u64) -> Result<String, String> {
-    let resp = browser_headers(http_client().get(url))
+/// Whether a fetch error is worth retrying: network hiccups, rate limits,
+/// transient 403/503 blocks, and empty bodies. Hard failures (HTTP 404/5xx,
+/// or an explicit Cloudflare/CAPTCHA marker) should not be retried — blocks
+/// escalate straight to the stealth browser instead.
+fn should_retry_fetch(e: &str) -> bool {
+    e.contains("request failed")
+        || e.contains("rate limited")
+        || e.contains("timed out")
+        || e.contains("possibly blocked")
+        || e.contains("empty body")
+        || e.contains("failed to read")
+}
+
+async fn fetch_url(url: &str, timeout_secs: u64, proxy: Option<&str>) -> Result<String, String> {
+    let resp = browser_headers(http_client(proxy).get(url))
         .timeout(Duration::from_secs(timeout_secs))
         .send()
         .await
@@ -322,5 +356,28 @@ mod tests {
         assert!(is_block_error("URL requires a CAPTCHA"));
         assert!(!is_block_error("HTTP 404"));
         assert!(!is_block_error("request failed: connection reset"));
+    }
+
+    #[test]
+    fn test_should_retry_fetch() {
+        assert!(should_retry_fetch("request failed: connection reset"));
+        assert!(should_retry_fetch(
+            "rate limited (HTTP 429). Try again in a few seconds."
+        ));
+        assert!(should_retry_fetch("possibly blocked (HTTP 503)"));
+        assert!(should_retry_fetch("empty body (possibly blocked)"));
+        assert!(should_retry_fetch(
+            "failed to read response body: unexpected eof"
+        ));
+        // Hard failures must not be retried.
+        assert!(!should_retry_fetch("HTTP 404 Not Found"));
+        assert!(!should_retry_fetch("HTTP 500 Internal Server Error"));
+        assert!(!should_retry_fetch(
+            "URL is protected by Cloudflare and cannot be fetched automatically."
+        ));
+        assert!(!should_retry_fetch(
+            "URL requires a CAPTCHA and cannot be fetched."
+        ));
+        assert!(!should_retry_fetch("URL returned 'Access denied'."));
     }
 }

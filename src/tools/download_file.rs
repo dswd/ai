@@ -19,11 +19,12 @@ pub struct DownloadFileArgs {
 #[derive(Debug, Clone)]
 pub struct DownloadFileTool {
     policy: Policy,
+    proxy: Option<String>,
 }
 
 impl DownloadFileTool {
-    pub fn new(policy: Policy) -> Self {
-        Self { policy }
+    pub fn new(policy: Policy, proxy: Option<String>) -> Self {
+        Self { policy, proxy }
     }
 }
 
@@ -63,7 +64,7 @@ impl Tool for DownloadFileTool {
             )));
         }
 
-        let resp = http_client()
+        let resp = http_client(self.proxy.as_deref())
             .get(&args.url)
             .timeout(std::time::Duration::from_secs(30))
             .send()

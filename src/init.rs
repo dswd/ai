@@ -95,6 +95,17 @@ pub fn run(target_path: Option<String>) -> anyhow::Result<()> {
         .interact_text()?;
     let context_window = cw_input.parse::<usize>().ok().filter(|&n| n > 0);
 
+    // Step 6: SearXNG instance (optional but recommended for reliable search)
+    let searxng_url: String = Input::with_theme(&theme)
+        .with_prompt("SearXNG instance URL (optional; e.g. http://localhost:8080/search?q={query})")
+        .allow_empty(true)
+        .interact_text()?;
+    let searxng_url = if searxng_url.trim().is_empty() {
+        None
+    } else {
+        Some(searxng_url.trim().to_string())
+    };
+
     // Summary
     println!();
     println!("  ─────────────────────────────");
@@ -115,6 +126,9 @@ pub fn run(target_path: Option<String>) -> anyhow::Result<()> {
     println!("  Model:         {model}");
     if let Some(cw) = context_window {
         println!("  Context window: {cw}");
+    }
+    if let Some(ref url) = searxng_url {
+        println!("  SearXNG:       {url}");
     }
     println!("  ─────────────────────────────");
     println!();
@@ -143,7 +157,8 @@ pub fn run(target_path: Option<String>) -> anyhow::Result<()> {
         policy: None,
         memory: None,
         context_window,
-        search: SearchConfig::default(),
+        proxy: None,
+        search: SearchConfig { searxng_url },
     };
 
     let path = if let Some(ref p) = target_path {

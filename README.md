@@ -55,6 +55,7 @@ api_key: "sk-..."          # or "env:OPENAI_API_KEY"
 api_base: "https://api.openai.com/v1"
 model: "gpt-4o"
 context_window: 128000
+# proxy: "http://127.0.0.1:8080"   # optional: route web requests through a proxy
 ```
 
 API keys can also be supplied via environment variables (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`).
@@ -160,6 +161,50 @@ an engine was rejected (e.g. a detected Cloudflare/CAPTCHA marker). Web requests
 rotating user-agents and a shared cookie jar; `web_fetch` automatically retries
 through the stealth browser when it detects a block.
 
+### Avoiding search-engine blocks
+
+Search engines rate-limit and block automated clients. In order of effectiveness:
+
+1. **Run your own SearXNG instance (recommended).** SearXNG aggregates results
+   from many upstream engines and rotates them itself, so your IP is rarely the
+   one being blocked. Minimal setup:
+
+   ```yaml
+   # docker-compose.yml
+   services:
+     searxng:
+       image: searxng/searxng:latest
+       ports: ["8080:8080"]
+   ```
+
+   Then point the agent at it (also offered during `ai --init`):
+
+   ```yaml
+   # ~/.config/ai/config.yaml
+   search:
+     searxng_url: "http://localhost:8080/search?q={query}"
+   ```
+
+   Searches use your instance first; if it is unreachable the ladder falls back
+   to DuckDuckGo, Google, and Bing. The `{query}` placeholder is optional — a
+   bare instance URL gets `?q=` appended automatically.
+
+2. **Route through a proxy.** Pass `--proxy=http://127.0.0.1:8080` (or
+   `--proxy=socks5h://127.0.0.1:1080` for SOCKS5), or set `proxy` in
+   `config.yaml`. Without an explicit proxy, the standard environment variables
+   (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`) are honored. The
+   explicit proxy applies to the HTTP-based tools (`web_fetch`, `web_search`,
+   `download_file`); browser-based engines (Google/Bing under the `browser`
+   feature) use the browser's own network stack, which honors the environment
+   variables above.
+
+3. **Let the built-in throttling work.** Requests are rate-limited (a 2s floor
+   with jitter between searches, at least 3s between hits to the same engine),
+   transient failures are retried with backoff, and engines that return a block
+   page are put on a cooldown and skipped for a while instead of being hammered.
+   Avoid back-to-back runs against the same engine — that is the fastest way to
+   get blocked.
+
 ## CLI reference
 
 ```
@@ -181,6 +226,7 @@ Options:
       --web                  Allow all web access (fetch and search)
       --web-fetch=<PATTERN>  Allow web fetch for matching URL pattern
       --web-search=<PATTERN> Allow web search with matching query pattern
+      --proxy=<URL>          Route web requests through a proxy (http://… or socks5h://…)
   -p, --policy=<FILE>        Load policy from FILE
       --skill=<PATH>         Load a skill (SKILL.md file or folder; repeatable)
   -i, --ask                  Ask for approval instead of denying

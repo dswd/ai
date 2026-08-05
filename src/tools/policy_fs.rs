@@ -64,7 +64,8 @@ impl<B: FsBackend> PolicyFsBackend<B> {
                 _ => break,
             }
         }
-        let mut resolved = std::fs::canonicalize(ancestor).unwrap_or_else(|_| ancestor.to_path_buf());
+        let mut resolved =
+            std::fs::canonicalize(ancestor).unwrap_or_else(|_| ancestor.to_path_buf());
         for name in missing.iter().rev() {
             resolved.push(name);
         }
