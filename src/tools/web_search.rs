@@ -418,12 +418,10 @@ fn check_quality(md: &str) -> Result<(), String> {
     let bad = [
         "unusual traffic",
         "captcha",
-        "blocked",
         "verify you are human",
         "enable javascript",
         "access denied",
         "cf-chl",
-        "turning on",
         "g-recaptcha",
         "recaptcha",
         "just a moment",

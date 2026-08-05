@@ -241,6 +241,20 @@ pub fn resolve_policy_pattern(pattern: &str, relative_to: &Path) -> String {
 
     let (prefix, suffix) = split_at_wildcard(&pattern);
 
+    // A pattern that starts with a wildcard (e.g. `*.rs`, `**/*.rs`) has an
+    // empty prefix. Resolve it against the base directory as a whole; joining
+    // an empty prefix would otherwise produce `base*.rs`, which matches nothing
+    // under the base.
+    if prefix.is_empty() {
+        let relative_str = normalize_path_separators(&relative_to.to_string_lossy());
+        let base = if relative_str.is_empty() {
+            String::from(".")
+        } else {
+            relative_str
+        };
+        return normalize_path_segments(&format!("{base}/{pattern}"));
+    }
+
     let resolved = if let Some(rest) = prefix.strip_prefix('~') {
         let home = home_dir();
         let home_str = normalize_path_separators(&home.to_string_lossy());
@@ -465,9 +479,11 @@ mod tests {
     fn test_resolve_policy_pattern_relative() {
         let cwd = std::path::Path::new("/work");
         assert_eq!(resolve_policy_pattern("src/**", cwd), "/work/src/**");
-        // Bare-glob patterns (no path prefix) keep the wildcard glued to the
-        // resolved base (current behavior).
-        assert_eq!(resolve_policy_pattern("*.rs", cwd), "/work*.rs");
+        // Bare-glob patterns keep the wildcard relative to the resolved base:
+        // `*.rs` must match files under /work, not `/work*.rs`.
+        assert_eq!(resolve_policy_pattern("*.rs", cwd), "/work/*.rs");
+        assert_eq!(resolve_policy_pattern("**/*.rs", cwd), "/work/**/*.rs");
+        assert_eq!(resolve_policy_pattern("**/test", cwd), "/work/**/test");
     }
 
     #[test]

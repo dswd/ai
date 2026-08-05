@@ -122,7 +122,9 @@ impl Tool for WebFetchTool {
                 Err(e) => {
                     #[cfg(feature = "browser")]
                     {
-                        block_signaled = is_block_error(&e);
+                        // Keep the flag if ANY attempt signaled a block; the
+                        // last attempt may fail for an unrelated reason.
+                        block_signaled |= is_block_error(&e);
                     }
                     last_err = e;
                 }

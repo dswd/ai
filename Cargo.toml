@@ -53,4 +53,3 @@ html2md = "0.2"
 ansi_color_constants = "4.0.0"
 obscura = { git = "https://github.com/h4ckf0r0day/obscura", optional = true }
 bashkit = { version = "0.14", features = ["realfs"] }
-openssl = { version = "0.10", features = ["vendored"] }

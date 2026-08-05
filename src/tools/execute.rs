@@ -108,7 +108,10 @@ impl Tool for ExecuteTool {
         let timeout_secs = args.timeout.unwrap_or(30).min(300);
 
         let full_command = if let Some(ref cwd) = args.cwd {
-            format!("cd {} && {}", cwd, args.command)
+            // Single-quote the directory so spaces or shell metacharacters in
+            // `cwd` cannot inject additional commands into the string.
+            let quoted = format!("'{}'", cwd.replace('\'', "'\\''"));
+            format!("cd {quoted} && {}", args.command)
         } else {
             args.command.clone()
         };
@@ -305,6 +308,52 @@ mod tests {
             elapsed < Duration::from_secs(5),
             "timeout did not interrupt the process promptly: {elapsed:?}"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_policy_fs_symlink_cannot_escape_read_policy() {
+        use std::os::unix::fs::symlink;
+
+        let base =
+            std::env::temp_dir().join(format!("ai-symlink-policy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let allowed = base.join("allowed");
+        let denied = base.join("denied");
+        std::fs::create_dir_all(&allowed).unwrap();
+        std::fs::create_dir_all(&denied).unwrap();
+        std::fs::write(denied.join("secret.txt"), "TOP-SECRET").unwrap();
+        symlink(denied.join("secret.txt"), allowed.join("link.txt")).unwrap();
+
+        let mut policy = Policy::default();
+        policy.add_cli_rule(PolicyRule::Allow(
+            Action::Read,
+            format!("{}/**", allowed.display()),
+        ));
+        policy.add_cli_rule(PolicyRule::Deny(
+            Action::Read,
+            format!("{}/**", denied.display()),
+        ));
+
+        let fs_backend = RealFs::open("/", RealFsMode::ReadWrite).await.unwrap();
+        let policy_backend = PolicyFsBackend::new(fs_backend, policy);
+        let fs: Arc<dyn FileSystem> = Arc::new(PosixFs::new(policy_backend));
+        let limits = ExecutionLimits {
+            timeout: Duration::from_secs(10),
+            ..Default::default()
+        };
+        let mut bash = Bash::builder().fs(fs).limits(limits).build();
+
+        let result = bash
+            .exec(&format!("cat {}", allowed.join("link.txt").display()))
+            .await
+            .unwrap();
+        assert!(
+            !result.stdout.contains("TOP-SECRET"),
+            "symlink bypassed read policy: {:?}",
+            result.stdout
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[cfg(unix)]

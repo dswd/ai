@@ -92,23 +92,41 @@ impl Tool for DownloadFileTool {
         }
 
         let path = std::path::Path::new(&args.path);
-        if let Some(parent) = path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| ToolError::Message(format!("cannot create parent dirs: {e}")))?;
-        }
 
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        // Resolve the destination to an absolute path before checking policy:
+        // `canonicalize` fails for a not-yet-existing file, so resolve the
+        // parent and re-append the file name (same approach as write_file).
+        // Without this, relative destinations never match absolute allow
+        // patterns and every download to a new file is denied.
+        let canonical = if path.exists() {
+            path.canonicalize()
+                .map_err(|e| ToolError::Message(format!("cannot resolve path: {e}")))?
+        } else if let Some(parent) = path.parent() {
+            parent
+                .canonicalize()
+                .map_err(|e| ToolError::Message(format!("cannot resolve parent: {e}")))?
+                .join(path.file_name().unwrap_or_default())
+        } else {
+            path.to_path_buf()
+        };
         let path_str = canonical.to_string_lossy().to_string();
 
+        // Check policy BEFORE creating anything so a denied write has no
+        // side effects (the old code created parent dirs first).
         if !self.policy.is_allowed(&Action::Write, &path_str) {
             return Err(ToolError::Message(format!(
                 "write access denied for: {path_str}"
             )));
         }
 
-        std::fs::write(path, &body)
+        if let Some(parent) = canonical.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| ToolError::Message(format!("cannot create parent dirs: {e}")))?;
+        }
+
+        std::fs::write(&canonical, &body)
             .map_err(|e| ToolError::Message(format!("cannot write file: {e}")))?;
 
         let size_str = fmt_bytes(body.len() as u64);
