@@ -426,6 +426,18 @@ async fn cmd_probe_web(query: &str, config: &Config) -> anyhow::Result<()> {
     }
 
     println!();
+    println!("--- Results as returned to the AI ---");
+    for r in &results {
+        println!();
+        println!("=== {} ===", r.engine);
+        if r.ok {
+            println!("{}", r.output);
+        } else {
+            println!("(no results — rejected: {})", r.detail);
+        }
+    }
+
+    println!();
     if any_ok {
         println!("Result: at least one engine works.");
     } else {

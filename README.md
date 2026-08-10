@@ -157,9 +157,10 @@ ai --probe-web="your query"
 
 It runs each engine in the search ladder (SearXNG → DuckDuckGo → Google → Bing) and
 prints per-engine diagnostics: HTTP outcome, latency, response size, and the reason
-an engine was rejected (e.g. a detected Cloudflare/CAPTCHA marker). Web requests use
-rotating user-agents and a shared cookie jar; `web_fetch` automatically retries
-through the stealth browser when it detects a block.
+an engine was rejected (e.g. a detected Cloudflare/CAPTCHA marker). It also prints
+each engine's results exactly as they would be returned to the AI, so you can inspect
+what the model sees. Web requests use rotating user-agents and a shared cookie jar;
+`web_fetch` automatically retries through the stealth browser when it detects a block.
 
 ### Avoiding search-engine blocks
 

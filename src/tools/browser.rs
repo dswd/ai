@@ -36,14 +36,55 @@ impl std::fmt::Debug for BrowserState {
 
 impl BrowserState {
     pub async fn new() -> Result<Self, String> {
+        let storage_dir = dirs::data_local_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("ai")
+            .join("browser");
         let browser = obscura::Browser::builder()
             .stealth(true)
+            .storage_dir(storage_dir)
             .build()
             .map_err(|e| format!("obscura: {e}"))?;
         Ok(Self {
             browser: Arc::new(browser),
             last_url: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// Try to dismiss a consent / cookie banner on the current page. Waits
+    /// briefly for known consent buttons and clicks the first one found.
+    /// Returns `true` if a button was clicked.
+    #[allow(clippy::unused_self)]
+    pub async fn accept_consent(&self, page: &mut obscura::Page) -> Result<bool, String> {
+        let selectors = [
+            "#L2AGLb",
+            "#bnp_btn_accept",
+            "#bnp_hfly_cta",
+            "button[aria-label='Accept all']",
+            "button[aria-label='I agree']",
+        ];
+        for sel in selectors {
+            match page
+                .wait_for_selector(sel, Duration::from_millis(600))
+                .await
+            {
+                Ok(el) => {
+                    el.click().map_err(|e| format!("consent click: {e}"))?;
+                    page.settle(500).await;
+                    return Ok(true);
+                }
+                Err(_) => continue,
+            }
+        }
+
+        // Generic fallback: any button whose text matches accept/agree.
+        let js = r#"(function(){var b=document.querySelectorAll('button,[role="button"]');for(var i=0;i<b.length;i++){var t=b[i].textContent.trim().toLowerCase();if(/^(accept all|accept|i agree|agree|ok|yes)$/i.test(t)){b[i].click();return true;}}return false;})()"#;
+        let clicked = page.evaluate(js);
+        if clicked.as_bool().unwrap_or(false) {
+            page.settle(500).await;
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// Navigate to `url` in the shared stealth browser and return the page HTML.
