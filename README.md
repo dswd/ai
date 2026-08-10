@@ -136,7 +136,7 @@ Available tools (enabled based on policy):
 | --- | --- |
 | Filesystem | `read_file`, `write_file`, `list_dir`, `file_info`, `find_files`, `search_content` |
 | File mutation | `replace_in_file`, `delete_file`, `create_directory`, `move_file`, `copy_file` |
-| Documents | `file_view` (extracts text from PDF, DOCX, XLSX, …) |
+| Documents | `file_view` (extracts text from PDF, DOCX, XLSX, PPTX, ODT, RTF, EPUB, CSV, HTML, …) |
 | Command execution | `execute` (bashkit builtins sandboxed; external commands need `-x`) |
 | Git | `git_diff`, `git_log` |
 | Web | `web_fetch`, `web_search`, `download_file`, `browser_navigate`, `browser_click`, `browser_get_content`, `browser_get_element`, `browser_evaluate` |

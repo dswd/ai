@@ -13,6 +13,7 @@
 ### Changed
 
 - **Fresh timestamps via `get_current_time`** — the system prompt no longer bakes in a `Current time:` line at startup (it went stale in long-running sessions). The agent now fetches the current UTC time on demand with the new `get_current_time` tool, which is always available.
+- **Document conversion switched to `anydoc`** — replaced `markdownify` + `pdf-extract` with [anydoc](https://github.com/firecrawl/anydoc). Adds legacy Word/PowerPoint/Excel (`.doc`/`.ppt`/`.xls`), RTF, and EPUB, with consistent GitHub-Flavored Markdown output and a smaller dependency tree (drops pdf-extract's ~95-crate stack). HTML preview now uses `html2text`; ZIP/image/audio/video preview is no longer offered. `pdf-inspector` is pinned to its git main to inherit the lopdf 0.42 security fix (RUSTSEC-2026-0187).
 
 ## v0.3.0 – Skills, Provider Flavors & Security
 
