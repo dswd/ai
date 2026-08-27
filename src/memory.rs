@@ -9,7 +9,8 @@ use rand::RngExt;
 const MAX_ENTRIES: usize = 1000;
 pub const TOP_K: usize = 5;
 const MIN_SCORE: f64 = 0.2;
-const UPSERT_SCORE: f64 = 0.7;
+const UPSERT_JACCARD: f64 = 0.7;
+const UPSERT_MIN_SHARED: usize = 2;
 const KEYWORD_BONUS: f64 = 2.0;
 const BM25_K1: f64 = 1.2;
 const BM25_B: f64 = 0.75;
@@ -125,16 +126,16 @@ impl Memory {
         if !entries.is_empty() {
             let query = tokenize(&text);
             if !query.is_empty() {
-                let avgdl = avg_doc_len(&entries);
                 let mut best: Option<(usize, f64)> = None;
                 for i in 0..entries.len() {
-                    let score = bm25_score(&entries, i, &query, avgdl);
+                    let score = jaccard_overlap(&query, &tokenize(&entries[i].text));
                     if best.is_none_or(|(_, bs)| score > bs) {
                         best = Some((i, score));
                     }
                 }
                 if let Some((i, score)) = best
-                    && score >= UPSERT_SCORE
+                    && score >= UPSERT_JACCARD
+                    && shared_terms(&query, &tokenize(&entries[i].text)) >= UPSERT_MIN_SHARED
                 {
                     let entry = &mut entries[i];
                     let id = entry.id.clone();
@@ -237,13 +238,33 @@ fn avg_doc_len(entries: &[MemoryEntry]) -> f64 {
     (total as f64 / entries.len() as f64).max(1.0)
 }
 
+/// Jaccard overlap between two token sets. Scale-independent, so it works
+/// equally well with few or many entries (unlike raw BM25 scores).
+fn jaccard_overlap(a: &[String], b: &[String]) -> f64 {
+    if a.is_empty() && b.is_empty() {
+        return 1.0;
+    }
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let set_a: HashSet<&str> = a.iter().map(String::as_str).collect();
+    let set_b: HashSet<&str> = b.iter().map(String::as_str).collect();
+    let shared = set_a.intersection(&set_b).count();
+    shared as f64 / (set_a.len() + set_b.len() - shared).max(1) as f64
+}
+
+fn shared_terms(a: &[String], b: &[String]) -> usize {
+    let set_a: HashSet<&str> = a.iter().map(String::as_str).collect();
+    b.iter().filter(|t| set_a.contains(t.as_str())).count()
+}
+
 fn bm25_score(entries: &[MemoryEntry], idx: usize, qterms: &[String], avgdl: f64) -> f64 {
+    let mut score = 0.0;
     let doc = &entries[idx];
     let terms = tokenize(&doc.text);
     let dl = terms.len() as f64;
     let n = entries.len() as f64;
 
-    let mut score = 0.0;
     for qt in qterms {
         let df = entries
             .iter()
@@ -384,6 +405,30 @@ mod tests {
         let all = mem.retrieve("dark mode", 5);
         assert_eq!(all.len(), 1);
         assert!(all[0].text.contains("dark mode theme"));
+        cleanup(dir);
+    }
+
+    #[test]
+    fn test_distinct_entries_with_shared_keyword_not_merged() {
+        let (dir, mem) = temp_memory("distinct");
+        let id1 = mem
+            .add(
+                "user prefers dark mode".to_string(),
+                vec!["preference".to_string()],
+            )
+            .unwrap();
+        let id2 = mem
+            .add(
+                "user's favorite color is blue".to_string(),
+                vec!["preference".to_string()],
+            )
+            .unwrap();
+        assert_ne!(
+            id1, id2,
+            "distinct facts sharing a keyword must not overwrite each other"
+        );
+        let all = mem.retrieve("user preference", 10);
+        assert_eq!(all.len(), 2);
         cleanup(dir);
     }
 
