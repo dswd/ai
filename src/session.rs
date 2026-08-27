@@ -26,6 +26,9 @@ pub struct Session {
     pub system_prompt: String,
     pub model: String,
     pub messages: Vec<Message>,
+    /// Index into `messages` up to which memory reconciliation has already run.
+    #[serde(default)]
+    pub reconciled_until: usize,
 }
 
 impl Session {
@@ -38,6 +41,7 @@ impl Session {
             system_prompt,
             model,
             messages: Vec::new(),
+            reconciled_until: 0,
         }
     }
 

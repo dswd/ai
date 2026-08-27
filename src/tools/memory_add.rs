@@ -13,6 +13,11 @@ use crate::memory::Memory;
 pub struct MemoryAddArgs {
     #[schemars(description = "The data to store in memory")]
     pub data: String,
+    #[schemars(
+        description = "Optional keywords to improve retrieval (e.g. topics, entities, names)"
+    )]
+    #[serde(default)]
+    pub keywords: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -34,7 +39,7 @@ impl Tool for MemoryAddTool {
     type Error = ToolError;
 
     fn description(&self) -> String {
-        "Store a piece of data in persistent memory. Returns a unique key that can be used to reference or delete the entry later.".to_string()
+        "Store a piece of data in persistent memory. Optionally provide keywords to improve retrieval later. Returns a unique key that can be used to reference or delete the entry later.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -43,7 +48,7 @@ impl Tool for MemoryAddTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!("{DIM}🧠 memory add '{}'{RESET}", args.data);
-        match self.memory.add(args.data) {
+        match self.memory.add(args.data, args.keywords) {
             Ok(key) => {
                 info!("{DIM}  \u{2192} stored as {key}{RESET}");
                 Ok(format!("Stored as {key}"))

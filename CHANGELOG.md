@@ -4,6 +4,10 @@
 
 ### Added
 
+- **Retrieval-based memory system** — replaces the flat ≤100-entry JSON map dumped wholesale into the system prompt with a versioned single-file database of memory entries (id, text, keywords, timestamps, source session). Memories are scored locally with BM25 + keyword overlap and retrieved per user message; relevant entries are injected as a `## Relevant memory` context block ahead of the user prompt (no embeddings API, no extra latency). Existing `memory.json` files migrate automatically.
+- **Keyword-assisted memory adds** — `memory_add` now accepts optional `keywords` to improve retrieval; near-duplicate adds update the existing entry (upsert) instead of duplicating.
+- **`memory_search` tool** — lets the agent query the memory database directly, returning the best-matching entries with their unique keys (optional `limit`, capped at 50).
+- **LLM memory reconciliation** — in session mode, the unreconciled part of the conversation is reviewed at session exit for durable facts (user preferences, decisions, commitments) and stored as new/updated memory entries. The model uses the memory tools (`memory_search` + `memory_add`) to check existing entries and store facts, instead of receiving the full memory index in the prompt. Non-fatal: failures log and continue.
 - **Example config** — new `config.example.yaml` documenting every configuration key (provider, api_key with `env:` support, api_base, model, system_prompt, max_tokens, thinking, context_window, session_dir, skills_dir, policy, memory, proxy, and search/searxng_url) for use as a template.
 - **Markdown console formatting** — assistant output is now rendered with ANSI styling when stdout is a terminal (respects `NO_COLOR`): `**bold**`, `*italic*`, `***both***`, inline `` `code` ``, `~~strikethrough~~`, dimmed ``` ``` ``` fenced code blocks, and bold `# headers`. Rendering streams incrementally via line-buffering in `src/format.rs`; piped output stays byte-identical raw markdown.
 - **`AGENTS.md`** — project guide for AI agents covering commands, module map, tool architecture, conventions, and the release process.

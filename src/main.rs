@@ -77,6 +77,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let thinking = cli.thinking.or(config.thinking);
 
     let mut session = resolve_session(&cli, &session_dir, &system_prompt, &model_name)?;
+    if let Some(ref mem) = memory {
+        mem.set_session_name(&session.name);
+    }
     let prompt_text = resolve_prompt_text(&cli).await;
     let (provider_spec, base_url) = resolve_provider(&config, thinking)?;
 
@@ -244,7 +247,7 @@ fn assemble_system_prompt(
             std::path::PathBuf::from(memory_path)
         };
         let mem = Arc::new(memory::Memory::load(&path)?);
-        let md = mem.to_markdown();
+        let md = mem.summary();
         system_prompt = format!("{system_prompt}\n\n{md}");
         Some(mem)
     } else {
@@ -372,10 +375,11 @@ async fn dispatch_agent<M: CompletionModel + 'static>(
             ctx.session_dir,
             ctx.prompt_text,
             ctx.context_window,
+            ctx.memory.as_ref().map(Arc::clone),
         )
         .await?;
     } else if let Some(text) = ctx.prompt_text {
-        run_oneshot(agent, &text).await?;
+        run_oneshot(agent, &text, ctx.memory.as_ref().map(Arc::clone)).await?;
     } else {
         anyhow::bail!("No prompt provided. Pass a prompt argument or pipe text to stdin.");
     }
@@ -742,6 +746,7 @@ fn build_agent<M: CompletionModel + 'static>(
     if let Some(ref mem) = ctx.memory {
         server = server
             .tool(tools::MemoryAddTool::new(Arc::clone(mem)))
+            .tool(tools::MemorySearchTool::new(Arc::clone(mem)))
             .tool(tools::MemoryDeleteTool::new(Arc::clone(mem)));
     }
 
@@ -812,9 +817,13 @@ async fn stream_response<R>(stream: &mut StreamingResult<R>) -> anyhow::Result<P
 async fn run_oneshot<M: CompletionModel + 'static>(
     agent: rig_core::agent::Agent<M>,
     prompt: &str,
+    memory: Option<Arc<memory::Memory>>,
 ) -> anyhow::Result<()> {
     let start = Instant::now();
-    let mut stream = agent.stream_prompt(prompt).await;
+    let augmented = augment_prompt(prompt, memory.as_deref());
+    let mut stream = agent
+        .stream_prompt(augmented.as_deref().unwrap_or(prompt))
+        .await;
     let response = stream_response(&mut stream).await?;
     print_usage(&response.usage, start.elapsed());
     Ok(())
@@ -826,6 +835,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
     session_dir: &std::path::Path,
     initial_prompt: Option<String>,
     context_window: Option<usize>,
+    memory: Option<Arc<memory::Memory>>,
 ) -> anyhow::Result<()> {
     let mut chat_history: Vec<Message> = session
         .messages
@@ -862,6 +872,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
     if let Some(text) = initial_prompt {
         session.add_message(Role::User, &text);
         let hist = chat_history.clone();
+        let text = augment_prompt(&text, memory.as_deref()).unwrap_or(text);
         let result = async {
             let mut stream = agent.stream_chat(&text, hist).await;
             let response = stream_response(&mut stream).await?;
@@ -902,6 +913,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
                 if trimmed == "/clear" {
                     session.messages.clear();
                     chat_history.clear();
+                    session.reconciled_until = 0;
                     last_input_tokens = 0;
                     io::stderr_line("[session cleared]");
                     continue;
@@ -930,6 +942,7 @@ async fn run_interactive<M: CompletionModel + 'static>(
                             chat_history = vec![Message::system(summary_msg.clone())];
                             session.messages.clear();
                             session.add_message(Role::System, &summary_msg);
+                            session.reconciled_until = session.messages.len();
                             last_input_tokens = est_tokens;
                             io::stderr_line(&format!(
                                 "[context compacted: {old_count} messages -> ~{t} tokens]",
@@ -957,8 +970,10 @@ async fn run_interactive<M: CompletionModel + 'static>(
                 session.add_message(Role::User, trimmed);
 
                 let hist = chat_history.clone();
+                let text = augment_prompt(trimmed, memory.as_deref())
+                    .unwrap_or_else(|| trimmed.to_string());
                 let result = async {
-                    let mut stream = agent.stream_chat(trimmed, hist).await;
+                    let mut stream = agent.stream_chat(&text, hist).await;
                     let response = stream_response(&mut stream).await?;
                     Ok::<_, anyhow::Error>(response)
                 }
@@ -985,6 +1000,10 @@ async fn run_interactive<M: CompletionModel + 'static>(
         }
     }
 
+    if let Some(ref mem) = memory {
+        reconcile_memory(&agent, session, mem).await;
+    }
+
     if !session.messages.is_empty() {
         session.save(session_dir)?;
         print_usage(&total_usage, start.elapsed());
@@ -993,6 +1012,90 @@ async fn run_interactive<M: CompletionModel + 'static>(
     }
 
     Ok(())
+}
+
+/// Ask the model to review the unreconciled part of the conversation and store
+/// durable facts in memory using the memory tools. Non-fatal: failures log and continue.
+async fn reconcile_memory<M: CompletionModel + 'static>(
+    agent: &rig_core::agent::Agent<M>,
+    session: &mut Session,
+    memory: &memory::Memory,
+) {
+    let start = session.reconciled_until.min(session.messages.len());
+    if start >= session.messages.len() {
+        return;
+    }
+
+    let conversation = session.messages[start..]
+        .iter()
+        .map(|m| match m.role {
+            Role::User => format!("user: {}", m.content),
+            Role::Assistant => format!("assistant: {}", m.content),
+            Role::System => format!("system: {}", m.content),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let prompt = format!(
+        "The following is a portion of a user conversation. Review it and store any durable \
+         facts a long-term memory should keep: user preferences, personal details, decisions, \
+         and commitments explicitly stated in the conversation. Ignore transient requests, \
+         greetings, and task-specific instructions.\n\n\
+         Conversation:\n{conversation}\n\n\
+         Use the memory_search tool to check whether a fact is already stored; if it is, do \
+         not store it again. Use the memory_add tool to store each new fact, providing 2-5 \
+         short keywords for retrieval. Reply with a short summary of what you stored."
+    );
+
+    let before: Vec<memory::MemoryEntry> = memory.list();
+    let mut hist = Vec::<Message>::new();
+    match agent.chat(&prompt, &mut hist).await {
+        Ok(_) => {}
+        Err(e) => {
+            log::warn!("Memory reconciliation failed: {e}");
+        }
+    }
+
+    let after: Vec<memory::MemoryEntry> = memory.list();
+    let before_by_id: std::collections::HashMap<String, String> = before
+        .iter()
+        .map(|e| (e.id.clone(), e.updated.clone()))
+        .collect();
+    let mut added = 0;
+    let mut updated = 0;
+    for entry in &after {
+        match before_by_id.get(&entry.id) {
+            Some(prev_updated) if prev_updated != &entry.updated => updated += 1,
+            None => added += 1,
+            _ => {}
+        }
+    }
+
+    session.reconciled_until = session.messages.len();
+    if added + updated > 0 {
+        output::stderr_line(&format!(
+            "  🧠 memory reconciled: {added} new, {updated} updated"
+        ));
+    }
+}
+
+fn augment_prompt(prompt: &str, memory: Option<&memory::Memory>) -> Option<String> {
+    let mem = memory?;
+    let hits = mem.retrieve(prompt, memory::TOP_K);
+    if hits.is_empty() {
+        return None;
+    }
+    for entry in &hits {
+        output::stderr_line(&format!("{GREY}🧠 from memory: {}{RESET}", entry.text));
+    }
+    let context = hits
+        .iter()
+        .map(|e| format!("- ({}) {}", e.id, e.text))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(format!(
+        "## Relevant memory\n{context}\n\n## User message\n{prompt}"
+    ))
 }
 
 fn format_interactive_prompt(last_input_tokens: u64, context_window: Option<usize>) -> String {
