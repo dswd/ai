@@ -47,7 +47,8 @@ Run the interactive setup wizard to pick a provider, enter an API key, and choos
 ai --init
 ```
 
-The config is written to `~/.config/ai/config.yaml` (or the path you pass to `--init`):
+The config is written to `~/.config/ai/config.yaml` (or the path you pass to `--init`).
+A fully-commented template with every supported key lives at [`config.example.yaml`](config.example.yaml):
 
 ```yaml
 provider: openai

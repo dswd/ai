@@ -4,6 +4,7 @@
 
 ### Added
 
+- **Example config** — new `config.example.yaml` documenting every configuration key (provider, api_key with `env:` support, api_base, model, system_prompt, max_tokens, thinking, context_window, session_dir, skills_dir, policy, memory, proxy, and search/searxng_url) for use as a template.
 - **Markdown console formatting** — assistant output is now rendered with ANSI styling when stdout is a terminal (respects `NO_COLOR`): `**bold**`, `*italic*`, `***both***`, inline `` `code` ``, `~~strikethrough~~`, dimmed ``` ``` ``` fenced code blocks, and bold `# headers`. Rendering streams incrementally via line-buffering in `src/format.rs`; piped output stays byte-identical raw markdown.
 - **`AGENTS.md`** — project guide for AI agents covering commands, module map, tool architecture, conventions, and the release process.
 - **Proxy support for web tools** — route `web_fetch`, `web_search`, and `download_file` through a proxy via `--proxy=<URL>` (HTTP, HTTPS, or SOCKS5 such as `socks5h://127.0.0.1:1080`) or the `proxy` key in `config.yaml`. Without an explicit proxy, the standard `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` environment variables are honored. HTTP clients are pooled per proxy configuration.

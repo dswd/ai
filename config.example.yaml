@@ -1,0 +1,54 @@
+# Example configuration for `ai`.
+# Copy to ~/.config/ai/config.yaml (or pass a path with `ai -c=FILE` / `ai --init=FILE`),
+# then customize. All keys are optional; unset values fall back to defaults.
+# Generate a starting point interactively with `ai --init`.
+
+# Provider name. One of: openai, anthropic, ollama, groq, deepseek, google,
+# mistral, openrouter, xai, openai-compatible, anthropic-compatible.
+provider: openai
+
+# API key. Use a plain key, or "env:VAR_NAME" to read it from an environment
+# variable at runtime instead of storing it in this file.
+api_key: "env:OPENAI_API_KEY"
+
+# Base URL override. Omitted for standard providers; required for the
+# openai-compatible / anthropic-compatible providers (custom endpoints).
+api_base: "https://api.openai.com/v1"
+
+# Model to use (see the provider registry in src/providers.rs for defaults).
+model: "gpt-4o"
+
+# Optional system prompt that guides agent behavior.
+system_prompt: "You are a concise, helpful CLI assistant."
+
+# Maximum tokens per response. Unset uses the provider default.
+# max_tokens: 4096
+
+# Extended thinking budget in tokens (Anthropic flavor). Unset disables thinking.
+# thinking: 16000
+
+# Context window size in tokens; used for the interactive token-count indicator.
+# context_window: 128000
+
+# Where sessions are stored (default: <data-dir>/ai/sessions).
+# session_dir: "~/.local/share/ai/sessions"
+
+# Where skills are discovered from (default: <data-dir>/ai/skills).
+# skills_dir: "~/.local/share/ai/skills"
+
+# Policy file with allow/deny rules (default: no rules — deny everything).
+# policy: "~/.config/ai/policy.txt"
+
+# Persistent memory file (enabled with `ai -m`).
+# memory: "~/.local/share/ai/memory.json"
+
+# Optional proxy for web tools (HTTP, HTTPS, or SOCKS5).
+# Falls back to HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY environment variables.
+# proxy: "http://127.0.0.1:8080"
+# proxy: "socks5h://127.0.0.1:1080"
+
+# Web-search settings.
+# search:
+#   # SearXNG instance for the first search ladder engine.
+#   # A bare URL works; a "{query}" placeholder is appended with ?q= automatically.
+#   searxng_url: "http://localhost:8080/search?q={query}"
