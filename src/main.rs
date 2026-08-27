@@ -1,5 +1,6 @@
 mod cli;
 mod config;
+mod format;
 mod init;
 mod io;
 mod memory;

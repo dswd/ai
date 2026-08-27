@@ -4,6 +4,8 @@
 
 ### Added
 
+- **Markdown console formatting** — assistant output is now rendered with ANSI styling when stdout is a terminal (respects `NO_COLOR`): `**bold**`, `*italic*`, `***both***`, inline `` `code` ``, `~~strikethrough~~`, dimmed ``` ``` ``` fenced code blocks, and bold `# headers`. Rendering streams incrementally via line-buffering in `src/format.rs`; piped output stays byte-identical raw markdown.
+- **`AGENTS.md`** — project guide for AI agents covering commands, module map, tool architecture, conventions, and the release process.
 - **Proxy support for web tools** — route `web_fetch`, `web_search`, and `download_file` through a proxy via `--proxy=<URL>` (HTTP, HTTPS, or SOCKS5 such as `socks5h://127.0.0.1:1080`) or the `proxy` key in `config.yaml`. Without an explicit proxy, the standard `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` environment variables are honored. HTTP clients are pooled per proxy configuration.
 - **SearXNG as a first-class option** — `ai --init` now asks for an optional SearXNG instance URL, and a configured URL no longer requires a `{query}` placeholder (a bare instance URL gets `?q=` appended automatically). Documented a docker-compose setup in the README.
 - **Per-engine throttling and backoff for search** — at least 3s between requests to the same engine; transient failures (network, timeouts, rate limits) are retried once with a 2s backoff; engines that return a block page are put on a 60s cooldown (20s for transient errors) so the ladder skips them instead of hammering them.
