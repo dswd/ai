@@ -12,6 +12,17 @@ pub fn bar_title(title: &str) -> String {
     format!("{} {} {}", bar(10), title, bar(80 - 12 - title.len()))
 }
 
+/// Current UTC time as an ISO-8601 string.
+pub fn now_iso() -> String {
+    use time::OffsetDateTime;
+    use time::format_description::FormatItem;
+    use time::macros::format_description;
+
+    let now = OffsetDateTime::now_utc();
+    let fmt: &[FormatItem] = format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]Z");
+    now.format(fmt).unwrap_or_default()
+}
+
 /// Format a byte count as a human-readable size (B, KB, MB, GB).
 pub fn fmt_bytes(n: u64) -> String {
     if n < 1024 {

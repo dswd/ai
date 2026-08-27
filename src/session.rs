@@ -33,7 +33,7 @@ pub struct Session {
 
 impl Session {
     pub fn new(name: String, system_prompt: String, model: String) -> Self {
-        let now = now_iso();
+        let now = crate::util::now_iso();
         Self {
             name,
             created: now.clone(),
@@ -50,7 +50,7 @@ impl Session {
             role,
             content: content.to_string(),
         });
-        self.updated = now_iso();
+        self.updated = crate::util::now_iso();
     }
 
     pub fn save(&self, dir: &Path) -> anyhow::Result<()> {
@@ -88,17 +88,6 @@ impl Session {
         names.sort();
         Ok(names)
     }
-}
-
-fn now_iso() -> String {
-    use time::OffsetDateTime;
-    use time::format_description::FormatItem;
-    use time::macros::format_description;
-
-    let now = OffsetDateTime::now_utc();
-    let fmt: &[FormatItem] =
-        format_description!("[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z");
-    now.format(fmt).unwrap_or_default()
 }
 
 pub fn generate_session_name() -> String {

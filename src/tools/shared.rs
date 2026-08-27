@@ -96,6 +96,26 @@ pub enum ToolError {
     Message(String),
 }
 
+/// Anti-bot challenge phrases used to detect block pages in raw HTML and
+/// converted search results. Shared by `web_search::detect_block_marker` and
+/// `web_search::check_quality`. "consent" is intentionally absent — it appears
+/// in normal results pages, so consent is detected by URL host instead.
+pub(crate) const BLOCK_MARKERS: &[&str] = &[
+    "unusual traffic",
+    "captcha",
+    "verify you are human",
+    "enable javascript",
+    "enable js",
+    "please enable",
+    "access denied",
+    "cf-chl",
+    "g-recaptcha",
+    "recaptcha",
+    "just a moment",
+    "our systems have detected",
+    "please show you're not a robot",
+];
+
 pub fn commands_in_string(command: &str) -> Vec<String> {
     let re = Regex::new(r"&&|\|\||[|;&]").unwrap();
     re.split(command)

@@ -11,10 +11,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "browser")]
-use super::browser::BrowserState;
+use super::browser::{BrowserState, with_page};
 #[cfg(feature = "browser")]
 use super::shared::js_literal;
-use super::shared::{ToolError, browser_headers, http_client};
+use super::shared::{BLOCK_MARKERS, ToolError, browser_headers, http_client};
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::config::SearchConfig;
 use crate::policy::{Action, Policy};
@@ -446,23 +446,14 @@ impl WebSearchTool {
         let selectors_json = serde_json::to_string(&selectors_owned).unwrap_or_default();
         let fallback_url = search_url_from(&home_url, &query);
 
-        tokio::time::timeout(
-            Duration::from_secs(30),
-            tokio::task::spawn_blocking(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| format!("browser rt: {e}"))?;
-                rt.block_on(async {
-                    let mut page = browser
-                        .new_page()
-                        .await
-                        .map_err(|e| format!("page: {e}"))?;
-
-                    page.goto(&home_url)
-                        .await
-                        .map_err(|e| format!("goto: {e}"))?;
-                    tokio::time::sleep(Duration::from_millis(800)).await;
+        with_page(
+            browser,
+            "search timed out after 30s",
+            move |mut page| async move {
+                page.goto(&home_url)
+                    .await
+                    .map_err(|e| format!("goto: {e}"))?;
+                tokio::time::sleep(Duration::from_millis(800)).await;
 
                     // Accept consent: try clicking in-page banners first, then, if
                     // the engine redirected us to a dedicated consent host, accept
@@ -623,12 +614,9 @@ impl WebSearchTool {
                         ));
                     }
                     Ok(html)
-                })
-            }),
+                },
         )
         .await
-        .map_err(|_| "search timed out after 30s".to_string())?
-        .map_err(|e| e.to_string())?
     }
 }
 
@@ -792,23 +780,12 @@ return'no-form';
 /// detected precisely by URL host (consent.google / sorry) in `browser_search`.
 #[cfg(feature = "browser")]
 fn detect_block_marker(body: &str, title: &str) -> Option<&'static str> {
-    const MARKERS: &[&str] = &[
-        "unusual traffic",
-        "captcha",
-        "verify you are human",
-        "enable javascript",
-        "enable js",
-        "please enable",
-        "access denied",
-        "cf-chl",
-        "g-recaptcha",
-        "recaptcha",
-        "just a moment",
-        "our systems have detected",
-        "please show you're not a robot",
-    ];
     let lower_body = body.to_lowercase();
-    if let Some(m) = MARKERS.iter().copied().find(|m| lower_body.contains(m)) {
+    if let Some(m) = BLOCK_MARKERS
+        .iter()
+        .copied()
+        .find(|m| lower_body.contains(m))
+    {
         return Some(m);
     }
     let lower_title = title.to_lowercase();
@@ -887,18 +864,7 @@ fn check_quality(md: &str) -> Result<(), String> {
     }
 
     let lower = md.to_lowercase();
-    let bad = [
-        "unusual traffic",
-        "captcha",
-        "verify you are human",
-        "enable javascript",
-        "access denied",
-        "cf-chl",
-        "g-recaptcha",
-        "recaptcha",
-        "just a moment",
-    ];
-    if let Some(word) = bad.iter().find(|w| lower.contains(**w)) {
+    if let Some(word) = BLOCK_MARKERS.iter().copied().find(|w| lower.contains(w)) {
         return Err(format!("blocked marker: {word}"));
     }
 

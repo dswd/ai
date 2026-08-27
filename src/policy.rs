@@ -1,6 +1,5 @@
 use ansi_color_constants::*;
 use log::{debug, warn};
-use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -114,26 +113,6 @@ impl Policy {
             );
             false
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn effective_allow_list(&self, action: &Action) -> Vec<String> {
-        let mut allowed = Vec::new();
-        let mut denied: HashMap<&str, bool> = HashMap::new();
-
-        for rule in self.cli_rules.iter().chain(self.rules.iter()) {
-            match rule {
-                PolicyRule::Allow(a, pattern) if a == action => {
-                    allowed.push(pattern.clone());
-                }
-                PolicyRule::Deny(a, pattern) if a == action => {
-                    denied.insert(pattern, true);
-                }
-                _ => {}
-            }
-        }
-
-        allowed
     }
 
     pub fn has_any_allow(&self, action: &Action) -> bool {

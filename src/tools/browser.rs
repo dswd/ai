@@ -15,6 +15,42 @@ use super::web_search::html_to_markdown;
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, process_output, truncate};
 use crate::policy::{Action, Policy};
 
+/// Run `f` with a fresh page in the shared browser, on a dedicated
+/// single-threaded runtime, with a 30s timeout. The closure receives an owned
+/// page and may use blocking-style obscura APIs.
+pub(crate) async fn with_page<T, F, Fut>(
+    browser: Arc<obscura::Browser>,
+    timeout_msg: &str,
+    f: F,
+) -> Result<T, String>
+where
+    F: FnOnce(obscura::Page) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T, String>>,
+    T: Send + 'static,
+{
+    let result = tokio::time::timeout(
+        Duration::from_secs(30),
+        tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("browser rt: {e}"))?;
+            let page = rt
+                .block_on(browser.new_page())
+                .map_err(|e| format!("page: {e}"))?;
+            rt.block_on(f(page))
+        }),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(Ok(v))) => Ok(v),
+        Ok(Ok(Err(e))) => Err(e),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err(timeout_msg.to_string()),
+    }
+}
+
 #[derive(Clone)]
 pub struct BrowserState {
     browser: Arc<obscura::Browser>,
@@ -92,33 +128,20 @@ impl BrowserState {
     pub async fn fetch_html(&self, url: &str) -> Result<String, String> {
         let browser = Arc::clone(&self.browser);
         let url = url.to_string();
-        let result = tokio::time::timeout(
-            Duration::from_secs(30),
-            tokio::task::spawn_blocking(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| format!("browser rt: {e}"))?;
-                rt.block_on(async {
-                    let mut page = browser.new_page().await.map_err(|e| format!("page: {e}"))?;
-                    page.goto(&url).await.map_err(|e| format!("goto: {e}"))?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                    let html = page.content();
-                    if html.trim().is_empty() {
-                        return Err("empty page content".to_string());
-                    }
-                    Ok(html)
-                })
-            }),
+        with_page(
+            browser,
+            "browser fetch timed out after 30s",
+            move |mut page| async move {
+                page.goto(&url).await.map_err(|e| format!("goto: {e}"))?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                let html = page.content();
+                if html.trim().is_empty() {
+                    return Err("empty page content".to_string());
+                }
+                Ok(html)
+            },
         )
-        .await;
-
-        match result {
-            Ok(Ok(Ok(html))) => Ok(html),
-            Ok(Ok(Err(e))) => Err(e),
-            Ok(Err(e)) => Err(e.to_string()),
-            Err(_) => Err("browser fetch timed out after 30s".to_string()),
-        }
+        .await
     }
 }
 
@@ -183,39 +206,23 @@ impl Tool for BrowserNavigateTool {
         let url_label = args.url;
         let browser = Arc::clone(&self.browser);
         let last_url = Arc::clone(&self.last_url);
-        let result = tokio::time::timeout(
-            Duration::from_secs(30),
-            tokio::task::spawn_blocking(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| format!("browser rt: {e}"))?;
-                rt.block_on(async {
-                    let mut page = browser.new_page().await.map_err(|e| format!("page: {e}"))?;
-                    page.goto(&url).await.map_err(|e| format!("goto: {e}"))?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                    let title = page
-                        .evaluate("document.title")
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string();
-                    let size = page.content().len();
-                    Ok((title, size))
-                })
-            }),
+        let (title, size) = with_page(
+            browser,
+            "browser timed out after 30s",
+            move |mut page| async move {
+                page.goto(&url).await.map_err(|e| format!("goto: {e}"))?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                let title = page
+                    .evaluate("document.title")
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+                let size = page.content().len();
+                Ok((title, size))
+            },
         )
-        .await;
-
-        let (title, size) = match result {
-            Ok(Ok(Ok(v))) => v,
-            Ok(Ok(Err(e))) => return Err(ToolError::Message(e)),
-            Ok(Err(e)) => return Err(ToolError::Message(e.to_string())),
-            Err(_) => {
-                return Err(ToolError::Message(
-                    "browser timed out after 30s".to_string(),
-                ));
-            }
-        };
+        .await
+        .map_err(ToolError::Message)?;
 
         *last_url.lock().unwrap() = Some(url_label.clone());
         Ok(format!(
@@ -298,50 +305,28 @@ impl Tool for BrowserClickTool {
         let browser = Arc::clone(&self.browser);
 
         let sel_for_closure = selector_label.clone();
-        let result = tokio::time::timeout(
-            Duration::from_secs(30),
-            tokio::task::spawn_blocking(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| format!("browser rt: {e}"))?;
+        let html = with_page(
+            browser,
+            "browser timed out after 30s",
+            move |mut page| async move {
                 let sel = js_literal(&selector);
-                rt.block_on(async {
-                    let mut page = browser
-                        .new_page()
-                        .await
-                        .map_err(|e| format!("page: {e}"))?;
+                page.goto(&url).await.map_err(|e| format!("goto: {e}"))?;
+                tokio::time::sleep(Duration::from_millis(800)).await;
 
-                    page.goto(&url)
-                        .await
-                        .map_err(|e| format!("goto: {e}"))?;
-                    tokio::time::sleep(Duration::from_millis(800)).await;
+                let click_js = format!(
+                    r#"(function(){{var e=document.querySelector({sel});if(!e)return'not found';e.dispatchEvent(new MouseEvent('click',{{bubbles:true}}));return'clicked'}})()"#
+                );
+                let clicked = page.evaluate(&click_js);
+                if clicked.as_str() == Some("not found") {
+                    return Err(format!("element not found: {}", sel_for_closure));
+                }
+                tokio::time::sleep(Duration::from_millis(1500)).await;
 
-                    let click_js = format!(
-                        r#"(function(){{var e=document.querySelector({sel});if(!e)return'not found';e.dispatchEvent(new MouseEvent('click',{{bubbles:true}}));return'clicked'}})()"#
-                    );
-                    let clicked = page.evaluate(&click_js);
-                    if clicked.as_str() == Some("not found") {
-                        return Err(format!("element not found: {}", sel_for_closure));
-                    }
-                    tokio::time::sleep(Duration::from_millis(1500)).await;
-
-                    Ok(page.content())
-                })
-            }),
+                Ok(page.content())
+            },
         )
-        .await;
-
-        let html = match result {
-            Ok(Ok(Ok(h))) => h,
-            Ok(Ok(Err(e))) => return Err(ToolError::Message(e)),
-            Ok(Err(e)) => return Err(ToolError::Message(e.to_string())),
-            Err(_) => {
-                return Err(ToolError::Message(
-                    "browser timed out after 30s".to_string(),
-                ));
-            }
-        };
+        .await
+        .map_err(ToolError::Message)?;
 
         let title = {
             let re = Regex::new(r"<title>(.*?)</title>").unwrap();
@@ -421,33 +406,17 @@ impl Tool for BrowserGetContentTool {
         let want_html = args.format.as_deref() == Some("html");
         let browser = Arc::clone(&self.browser);
 
-        let result = tokio::time::timeout(
-            Duration::from_secs(30),
-            tokio::task::spawn_blocking(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| format!("browser rt: {e}"))?;
-                rt.block_on(async {
-                    let mut page = browser.new_page().await.map_err(|e| format!("page: {e}"))?;
-                    page.goto(&url).await.map_err(|e| format!("goto: {e}"))?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                    Ok(page.content())
-                })
-            }),
+        let html = with_page(
+            browser,
+            "browser timed out after 30s",
+            move |mut page| async move {
+                page.goto(&url).await.map_err(|e| format!("goto: {e}"))?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                Ok(page.content())
+            },
         )
-        .await;
-
-        let html = match result {
-            Ok(Ok(Ok(h))) => h,
-            Ok(Ok(Err(e))) => return Err(ToolError::Message(e)),
-            Ok(Err(e)) => return Err(ToolError::Message(e.to_string())),
-            Err(_) => {
-                return Err(ToolError::Message(
-                    "browser timed out after 30s".to_string(),
-                ));
-            }
-        };
+        .await
+        .map_err(ToolError::Message)?;
 
         let output = if want_html {
             html
@@ -533,48 +502,27 @@ impl Tool for BrowserGetElementTool {
         let selector = args.selector.clone();
         let browser = Arc::clone(&self.browser);
 
-        let result = tokio::time::timeout(
-            Duration::from_secs(30),
-            tokio::task::spawn_blocking(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| format!("browser rt: {e}"))?;
+        let inner_html = with_page(
+            browser,
+            "browser timed out after 30s",
+            move |mut page| async move {
                 let sel = js_literal(&selector);
-                rt.block_on(async {
-                    let mut page = browser
-                        .new_page()
-                        .await
-                        .map_err(|e| format!("page: {e}"))?;
-                    page.goto(&url)
-                        .await
-                        .map_err(|e| format!("goto: {e}"))?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
+                page.goto(&url).await.map_err(|e| format!("goto: {e}"))?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
 
-                    let js = format!(
-                        r#"(function(){{var e=document.querySelector({sel});return e?e.innerHTML:'__not_found__'}})()"#
-                    );
-                    let raw = page.evaluate(&js);
-                    let inner = raw.as_str().unwrap_or("");
-                    if inner == "__not_found__" {
-                        return Err(format!("element not found: {}", selector));
-                    }
-                    Ok(inner.to_string())
-                })
-            }),
+                let js = format!(
+                    r#"(function(){{var e=document.querySelector({sel});return e?e.innerHTML:'__not_found__'}})()"#
+                );
+                let raw = page.evaluate(&js);
+                let inner = raw.as_str().unwrap_or("");
+                if inner == "__not_found__" {
+                    return Err(format!("element not found: {}", selector));
+                }
+                Ok(inner.to_string())
+            },
         )
-        .await;
-
-        let inner_html = match result {
-            Ok(Ok(Ok(h))) => h,
-            Ok(Ok(Err(e))) => return Err(ToolError::Message(e)),
-            Ok(Err(e)) => return Err(ToolError::Message(e.to_string())),
-            Err(_) => {
-                return Err(ToolError::Message(
-                    "browser timed out after 30s".to_string(),
-                ));
-            }
-        };
+        .await
+        .map_err(ToolError::Message)?;
 
         let output = if want_html {
             inner_html
@@ -657,35 +605,20 @@ impl Tool for BrowserEvaluateTool {
         let browser = Arc::clone(&self.browser);
         let expression = args.expression;
 
-        let result = tokio::time::timeout(
-            Duration::from_secs(30),
-            tokio::task::spawn_blocking(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| format!("browser rt: {e}"))?;
-                rt.block_on(async {
-                    let mut page = browser.new_page().await.map_err(|e| format!("page: {e}"))?;
+        with_page(
+            browser,
+            "browser timed out after 30s",
+            move |mut page| async move {
+                if !url.is_empty() {
+                    page.goto(&url).await.map_err(|e| format!("goto: {e}"))?;
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
 
-                    if !url.is_empty() {
-                        page.goto(&url).await.map_err(|e| format!("goto: {e}"))?;
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                    }
-
-                    let value = page.evaluate(&expression);
-                    Ok(format!("{value}"))
-                })
-            }),
+                let value = page.evaluate(&expression);
+                Ok(format!("{value}"))
+            },
         )
-        .await;
-
-        match result {
-            Ok(Ok(Ok(v))) => Ok(v),
-            Ok(Ok(Err(e))) => Err(ToolError::Message(e)),
-            Ok(Err(e)) => Err(ToolError::Message(e.to_string())),
-            Err(_) => Err(ToolError::Message(
-                "browser timed out after 30s".to_string(),
-            )),
-        }
+        .await
+        .map_err(ToolError::Message)
     }
 }

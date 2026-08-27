@@ -6,8 +6,6 @@ use rmcp::{
 };
 
 pub struct ToolSet {
-    #[allow(dead_code)]
-    pub url: String,
     pub tools: Vec<rmcp::model::Tool>,
     pub sink: ServerSink,
 }
@@ -44,7 +42,6 @@ async fn connect_one(url: &str) -> anyhow::Result<ToolSet> {
     info!("Found {} tools on tool server: {url}", tools.len());
 
     Ok(ToolSet {
-        url: url.to_string(),
         tools,
         sink: service.peer().clone(),
     })

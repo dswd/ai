@@ -17,12 +17,6 @@ impl GetCurrentTimeTool {
     }
 }
 
-impl Default for GetCurrentTimeTool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Tool for GetCurrentTimeTool {
     const NAME: &'static str = "get_current_time";
 
@@ -40,18 +34,8 @@ impl Tool for GetCurrentTimeTool {
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!("🕒 get current time");
-        Ok(utc_now_iso())
+        Ok(crate::util::now_iso())
     }
-}
-
-fn utc_now_iso() -> String {
-    use time::OffsetDateTime;
-    use time::format_description::FormatItem;
-    use time::macros::format_description;
-
-    let now = OffsetDateTime::now_utc();
-    let fmt: &[FormatItem] = format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]Z");
-    now.format(fmt).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -59,8 +43,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_utc_now_iso_shape() {
-        let out = utc_now_iso();
+    fn test_now_iso_shape() {
+        let out = crate::util::now_iso();
         let re = regex::Regex::new(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$").unwrap();
         assert!(re.is_match(&out), "unexpected shape: {out}");
     }

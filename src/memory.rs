@@ -58,13 +58,7 @@ pub struct Memory {
 }
 
 fn now_iso() -> String {
-    use time::OffsetDateTime;
-    use time::format_description::FormatItem;
-    use time::macros::format_description;
-
-    let now = OffsetDateTime::now_utc();
-    let fmt: &[FormatItem] = format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]Z");
-    now.format(fmt).unwrap_or_default()
+    crate::util::now_iso()
 }
 
 impl Memory {
