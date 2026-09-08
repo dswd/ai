@@ -16,6 +16,8 @@
 - **Per-engine throttling and backoff for search** — at least 3s between requests to the same engine; transient failures (network, timeouts, rate limits) are retried once with a 2s backoff; engines that return a block page are put on a 60s cooldown (20s for transient errors) so the ladder skips them instead of hammering them.
 - **Retry with backoff for `web_fetch`** — up to 3 attempts with 1s/2s exponential backoff. Transient failures are retried; hard errors (HTTP 404/5xx, detected Cloudflare/CAPTCHA pages) stop the loop so blocks escalate straight to the stealth browser.
 - **Missing-permissions guidance** — when a permission group isn't granted, the system prompt now lists the missing capability and the exact flag to re-run with (`-r <PATH>`, `-w <PATH>`, `-x <PATTERN>`, `--web`), so the agent can tell the user how to enable what it needs.
+- **Memory-injection notice** — when relevant memory entries are injected into a message, stderr prints a light-grey `🧠 N memory entr{y|ies} injected` line followed by each entry's full text, so the user can see what context the model received.
+- **`x-opencode-session` header** — when the provider base URL contains `opencode` (i.e. a custom opencode-compatible endpoint), every request carries an `x-opencode-session` header with the current session id so the proxy can correlate sessions.
 
 ### Changed
 
