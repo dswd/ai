@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 #[cfg(feature = "browser")]
-use super::browser::BrowserState;
+use super::browser_state::BrowserState;
 use super::shared::{ToolError, browser_headers, http_client};
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::policy::{Action, Policy};

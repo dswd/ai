@@ -1,5 +1,15 @@
 #[cfg(feature = "browser")]
-pub mod browser;
+pub mod browser_click;
+#[cfg(feature = "browser")]
+pub mod browser_evaluate;
+#[cfg(feature = "browser")]
+pub mod browser_get_content;
+#[cfg(feature = "browser")]
+pub mod browser_get_element;
+#[cfg(feature = "browser")]
+pub mod browser_navigate;
+#[cfg(feature = "browser")]
+pub mod browser_state;
 pub mod copy_file;
 pub mod create_directory;
 pub mod current_time;
@@ -20,17 +30,27 @@ pub mod move_file;
 pub mod policy_fs;
 pub mod read_file;
 pub mod replace_in_file;
+pub mod search_browser;
 pub mod search_content;
+pub mod search_html;
+pub mod search_probe;
 pub mod shared;
 pub mod web_fetch;
 pub mod web_search;
 pub mod write_file;
 
 #[cfg(feature = "browser")]
-pub use browser::{
-    BrowserClickTool, BrowserEvaluateTool, BrowserGetContentTool, BrowserGetElementTool,
-    BrowserNavigateTool, BrowserState,
-};
+pub use browser_click::BrowserClickTool;
+#[cfg(feature = "browser")]
+pub use browser_evaluate::BrowserEvaluateTool;
+#[cfg(feature = "browser")]
+pub use browser_get_content::BrowserGetContentTool;
+#[cfg(feature = "browser")]
+pub use browser_get_element::BrowserGetElementTool;
+#[cfg(feature = "browser")]
+pub use browser_navigate::BrowserNavigateTool;
+#[cfg(feature = "browser")]
+pub use browser_state::BrowserState;
 pub use copy_file::CopyFileTool;
 pub use create_directory::CreateDirectoryTool;
 pub use current_time::GetCurrentTimeTool;

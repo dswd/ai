@@ -37,6 +37,13 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `init.rs` | Interactive config wizard |
 | `io.rs` | Line editor / stdin handling |
 | `util.rs` | Small helpers (formatting bars, byte sizes) |
+| `agent.rs` | `AgentContext`, tool registration (`build_agent`), streaming and oneshot dispatch |
+| `prompt.rs` | System prompt assembly, permission availability, missing-permission guidance |
+| `setup.rs` | Config/policy/session/provider resolution and CLI override application |
+| `clients.rs` | OpenAI/Anthropic client construction, `x-opencode-session` header |
+| `commands.rs` | Non-agent subcommands: `--probe-web`, `--list`, `--delete` sessions |
+| `logging.rs` | Console logger, log-level setup |
+| `interactive.rs` | Interactive session loop, `/` commands, memory reconciliation, usage reporting |
 
 ## Tool architecture
 
@@ -52,7 +59,10 @@ allow rule. Filesystem ops are policy-checked via `policy_fs.rs` (`PolicyFsBacke
 - `policy_fs.rs` — `FsBackend` shim that checks Read/Write policy on every file op.
 - `shared.rs` — shared helpers: `BASHKIT_BUILTINS` list, `is_bashkit_builtin`, output
 limit/offset helpers, search/walk utilities.
-- `browser.rs` — Obscura headless browser tools (feature-gated).
+- `browser_state.rs` + `browser_*.rs` — Obscura headless browser state and one tool per
+file (feature-gated). `search_browser.rs` holds the browser-driven search-engine fallback.
+- `search_html.rs` / `search_probe.rs` — search-result HTML/markdown/quality helpers and the
+`--probe-web` diagnostics.
 - `file_view.rs` — extracts text from PDF/DOCX/XLSX/etc via `anydoc`.
 
 ## Conventions
