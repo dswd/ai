@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use super::shared::{ToolError, find_git_dir};
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
+use crate::exec_sandbox::{self, SandboxSpec};
 use crate::policy::{Action, Policy};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct GitLogArgs {
@@ -24,11 +26,12 @@ pub struct GitLogArgs {
 #[derive(Debug, Clone)]
 pub struct GitLogTool {
     policy: Policy,
+    sandbox: Option<Arc<SandboxSpec>>,
 }
 
 impl GitLogTool {
-    pub fn new(policy: Policy) -> Self {
-        Self { policy }
+    pub fn new(policy: Policy, sandbox: Option<Arc<SandboxSpec>>) -> Self {
+        Self { policy, sandbox }
     }
 }
 
@@ -63,7 +66,13 @@ impl Tool for GitLogTool {
             ));
         }
 
-        let mut cmd = std::process::Command::new("git");
+        let mut cmd = exec_sandbox::command("git", self.sandbox.as_deref());
+        if self.sandbox.is_some() {
+            // The sandbox denies the user's dotfiles; don't let git trip over an
+            // unreadable global config.
+            cmd.env("GIT_CONFIG_NOSYSTEM", "1");
+            cmd.env("GIT_CONFIG_GLOBAL", "/dev/null");
+        }
         cmd.arg("log");
         cmd.arg("--oneline");
         cmd.arg(format!("-n{}", args.n.unwrap_or(20)));

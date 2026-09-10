@@ -53,6 +53,10 @@ ansi_color_constants = "4.0.0"
 obscura = { git = "https://github.com/h4ckf0r0day/obscura", optional = true }
 bashkit = { version = "0.14", features = ["realfs"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+rlimit = "0.11"
+
 [patch.crates-io]
 # Released pdf-inspector 0.1.7 pins the vulnerable lopdf 0.41 (RUSTSEC-2026-0187).
 # Git main uses the fixed lopdf 0.42; override so anydoc inherits it.

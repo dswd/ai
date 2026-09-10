@@ -159,6 +159,7 @@ pub fn run(target_path: Option<String>) -> anyhow::Result<()> {
         context_window,
         proxy: None,
         search: SearchConfig { searxng_url },
+        sandbox: Default::default(),
     };
 
     let path = if let Some(ref p) = target_path {

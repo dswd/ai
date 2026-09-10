@@ -52,3 +52,18 @@ system_prompt: "You are a concise, helpful CLI assistant."
 #   # SearXNG instance for the first search ladder engine.
 #   # A bare URL works; a "{query}" placeholder is appended with ?q= automatically.
 #   searxng_url: "http://localhost:8080/search?q={query}"
+
+# Execution sandbox for external commands (Linux Landlock).
+sandbox:
+  # auto (default): enforce when the platform supports it, else warn and run
+  # unsandboxed. on: require it (fails if unavailable). off: never sandbox.
+  mode: auto
+  # Optional resource caps applied to sandboxed commands.
+  # memory_mb: 4096
+  # cpu_secs: 300
+  # nproc: 256
+  # file_size_mb: 1024
+  # Override the base readonly path grants (loader, libraries, /etc, devices).
+  # system_read: ["/usr", "/bin", "/lib", "/lib64", "/etc/ld.so.cache", "/dev/null"]
+  # Extra writable paths granted to every sandboxed command.
+  # system_write: []

@@ -142,6 +142,55 @@ pub(crate) fn resolve_thinking(
     requested
 }
 
+/// Resolve the exec-sandbox spec from the policy, honoring `--sandbox`/config and
+/// platform support. Returns `None` when the sandbox is disabled.
+pub(crate) fn resolve_sandbox(
+    cli: &Cli,
+    config: &Config,
+    policy: &Policy,
+) -> anyhow::Result<Option<std::sync::Arc<crate::exec_sandbox::SandboxSpec>>> {
+    if cli.yolo {
+        // `--yolo` is documented as full access; keep it unsandboxed.
+        return Ok(None);
+    }
+    let mode = cli
+        .sandbox
+        .clone()
+        .unwrap_or_else(|| config.sandbox.mode.clone());
+    let enabled = match mode.to_lowercase().as_str() {
+        "off" | "never" => false,
+        "on" | "always" => {
+            if crate::exec_sandbox::available() {
+                true
+            } else {
+                anyhow::bail!(
+                    "--sandbox=on was requested but Landlock is not available on this system"
+                );
+            }
+        }
+        "auto" | "" => {
+            if crate::exec_sandbox::available() {
+                true
+            } else {
+                crate::output::stderr_line(
+                    "warning: exec sandbox is not available on this platform; external commands run unsandboxed",
+                );
+                false
+            }
+        }
+        other => anyhow::bail!("unknown sandbox mode '{other}' (expected auto, on, or off)"),
+    };
+
+    if !enabled {
+        return Ok(None);
+    }
+    let (spec, warnings) = crate::exec_sandbox::spec_from_policy(policy, &config.sandbox);
+    for warning in warnings {
+        crate::output::stderr_line(&format!("warning: {warning}"));
+    }
+    Ok(Some(std::sync::Arc::new(spec)))
+}
+
 pub(crate) fn load_config(cli: &Cli, vanilla: bool) -> anyhow::Result<Config> {
     if let Some(path) = &cli.config {
         Config::from_file(path)
@@ -174,6 +223,9 @@ pub(crate) fn apply_cli_overrides(cli: &Cli, config: &mut Config) {
     }
     if let Some(ref proxy) = cli.proxy {
         config.proxy = Some(proxy.clone());
+    }
+    if let Some(ref mode) = cli.sandbox {
+        config.sandbox.mode = mode.clone();
     }
 }
 

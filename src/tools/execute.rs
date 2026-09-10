@@ -16,6 +16,7 @@ use tokio::process::Command as TokioCommand;
 use super::policy_fs::PolicyFsBackend;
 use super::shared::{ToolError, commands_in_string, is_bashkit_builtin};
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
+use crate::exec_sandbox::{self, SandboxSpec};
 use crate::policy::{Action, Policy};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -35,17 +36,19 @@ pub struct ExecuteArgs {
 #[derive(Debug, Clone)]
 pub struct ExecuteTool {
     policy: Policy,
+    sandbox: Option<Arc<SandboxSpec>>,
 }
 
 impl ExecuteTool {
-    pub fn new(policy: Policy) -> Self {
-        Self { policy }
+    pub fn new(policy: Policy, sandbox: Option<Arc<SandboxSpec>>) -> Self {
+        Self { policy, sandbox }
     }
 }
 
 struct ExtBuiltin {
     name: String,
     policy: Policy,
+    sandbox: Option<Arc<SandboxSpec>>,
 }
 
 #[async_trait]
@@ -57,8 +60,33 @@ impl Builtin for ExtBuiltin {
                 1,
             ));
         }
-        match TokioCommand::new(&self.name)
-            .args(ctx.args)
+
+        let mut command = if let Some(spec) = &self.sandbox {
+            match exec_sandbox::launcher_exe() {
+                Some(exe) => {
+                    let mut c = TokioCommand::new(exe);
+                    c.arg(exec_sandbox::LAUNCHER_FLAG)
+                        .arg("--")
+                        .arg(&self.name)
+                        .args(ctx.args);
+                    for (key, value) in spec.env_vars() {
+                        c.env(key, value);
+                    }
+                    c
+                }
+                None => {
+                    let mut c = TokioCommand::new(&self.name);
+                    c.args(ctx.args);
+                    c
+                }
+            }
+        } else {
+            let mut c = TokioCommand::new(&self.name);
+            c.args(ctx.args);
+            c
+        };
+
+        match command
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true)
@@ -150,6 +178,7 @@ impl Tool for ExecuteTool {
                 Box::new(ExtBuiltin {
                     name: name.clone(),
                     policy: policy.clone(),
+                    sandbox: self.sandbox.as_ref().map(Arc::clone),
                 }),
             );
         }
@@ -274,6 +303,7 @@ mod tests {
                 Box::new(ExtBuiltin {
                     name: "echo".to_string(),
                     policy,
+                    sandbox: None,
                 }),
             )
             .build();
@@ -296,6 +326,7 @@ mod tests {
                 Box::new(ExtBuiltin {
                     name: "sleep".to_string(),
                     policy,
+                    sandbox: None,
                 }),
             )
             .build();
@@ -365,6 +396,7 @@ mod tests {
                 Box::new(ExtBuiltin {
                     name: "sh".to_string(),
                     policy,
+                    sandbox: None,
                 }),
             )
             .build();

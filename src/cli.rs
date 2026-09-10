@@ -168,6 +168,14 @@ pub struct Cli {
     pub yolo: bool,
 
     #[arg(
+        long = "sandbox",
+        help = "Execution sandbox for external commands: auto, on, or off",
+        value_name = "MODE",
+        require_equals = true
+    )]
+    pub sandbox: Option<String>,
+
+    #[arg(
         long = "max-tokens",
         help = "Set the maximum number of tokens",
         value_name = "N",
@@ -281,6 +289,7 @@ impl Cli {
             && !self.ask
             && self.tool.is_empty()
             && !self.yolo
+            && self.sandbox.is_none()
             && self.max_tokens.is_none()
             && self.max_turns == 100
             && self.thinking.is_none()

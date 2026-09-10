@@ -8,6 +8,37 @@ pub struct SearchConfig {
     pub searxng_url: Option<String>,
 }
 
+/// Execution sandbox settings. `mode` is `auto` (enforce when the platform
+/// supports it), `on` (require it), or `off`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SandboxConfig {
+    pub mode: String,
+    /// Optional resource caps for sandboxed commands.
+    pub memory_mb: Option<u64>,
+    pub cpu_secs: Option<u64>,
+    pub nproc: Option<u64>,
+    pub file_size_mb: Option<u64>,
+    /// Override the base readonly path grants (loader, libs, /dev, ...).
+    pub system_read: Option<Vec<String>>,
+    /// Additional writable paths granted to every sandboxed command.
+    pub system_write: Option<Vec<String>>,
+}
+
+impl Default for SandboxConfig {
+    fn default() -> Self {
+        Self {
+            mode: "auto".to_string(),
+            memory_mb: None,
+            cpu_secs: None,
+            nproc: None,
+            file_size_mb: None,
+            system_read: None,
+            system_write: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -30,6 +61,8 @@ pub struct Config {
     pub proxy: Option<String>,
     #[serde(default)]
     pub search: SearchConfig,
+    #[serde(default)]
+    pub sandbox: SandboxConfig,
 }
 
 impl Default for Config {
@@ -49,6 +82,7 @@ impl Default for Config {
             context_window: None,
             proxy: None,
             search: SearchConfig::default(),
+            sandbox: SandboxConfig::default(),
         }
     }
 }

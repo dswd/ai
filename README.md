@@ -10,7 +10,7 @@ A CLI agent for interacting with AI models, with tool use, filesystem and comman
 - **Interactive & one-shot modes** — Run with a direct prompt, pipe text via stdin, or start an interactive session with persistent history.
 - **Sessions** — Save, list (`-l`), continue (`-s NAME`), and delete (`--delete NAME`) sessions with message history and system prompt preservation.
 - **Tool system** — Filesystem tools, code search, git diff/log, web fetch/search, command execution, downloads, document extraction, and more.
-- **Sandboxed command execution** — The `execute` tool runs through a virtual bash interpreter (bashkit) with 160+ in-process builtins; external commands require explicit policy approval.
+- **Sandboxed command execution** — The `execute` tool runs through a virtual bash interpreter (bashkit) with 160+ in-process builtins; external commands require explicit policy approval and run under a Linux Landlock sandbox derived from that policy (`--sandbox`).
 - **Policy engine** — Granular allow/deny rules for read, write, execute, web fetch, and web search. Supports policy files, CLI overrides, interactive approval (`--ask`), and `--yolo` mode.
 - **Persistent memory** — Optional agent memory stored to disk and injected into the system prompt.
 - **Skills** — Load reusable skill definitions from `SKILL.md` files (via `--skill=PATH` or the skills folder), listed in the system prompt and loadable on demand with the `load_skill` tool.
@@ -116,7 +116,8 @@ With `--ask` (interactive approval), the agent can request access and you approv
 The policy engine is a **boundary for narrow grants**, not a sandbox for broad ones. Stated plainly:
 
 - **Read/write/execute decisions are enforced by one checked filesystem layer.** Paths are resolved (symlinks included) before the policy is consulted, and traversal checks every entry, so `deny` rules inside an allowed tree are honored.
-- **`-x` means full user access.** External commands run as you, with no sandbox; their children inherit that. Only bashkit's in-process builtins are sandboxed. `-x` is gated separately for this reason.
+- **External commands are sandboxed (Linux).** `-x` runs external commands under a Linux Landlock sandbox derived from the policy: they get read access to the granted read roots and write access to the granted write roots, plus a small base set of system paths (loader, libraries, `/etc` config, devices) so ordinary binaries run. Children inherit the sandbox. Where Landlock is unavailable (macOS, Windows, old kernels) the sandbox is disabled with a warning unless `--sandbox=on` is set. The translation is coarser than the in-process policy: Landlock is allow-list only, so globs collapse to directory roots and deny rules inside an allowed tree cannot be represented (a warning is printed).
+- **`-x` still grants the command.** The sandbox constrains what the command can reach, not whether it runs. Granting `-x` is a real capability; grant it narrowly.
 - **Broad grants are equivalent to full user compromise.** Write access to `$HOME` or `/` lets the agent plant auto-run files (shell rc files, git hooks, configs), which is equivalent to execute. `--yolo` grants everything.
 - **Read + web = exfiltration.** Egress is not filtered: if the agent can read sensitive files *and* reach the network, an injected instruction can ship them out (query params, redirects, or browser JS). Never grant both for untrusted content.
 - **Memory is data, not instructions.** Durable memory is captured only from user-authored turns and injected as clearly non-instructional reference material.
@@ -247,6 +248,7 @@ Options:
   -i, --ask                  Ask for approval instead of denying
   -t, --tool=<URL>           Connect to an MCP tool server (repeatable)
   -y, --yolo                 Allow everything without asking (overrides all policy, dangerous)
+      --sandbox=<MODE>       Sandbox external commands: auto (default), on, or off
       --max-tokens=<N>       Maximum number of tokens
       --max-turns=<N>        Maximum agent turns (tool call rounds) [default: 100]
       --thinking=[<TOKENS>]  Enable extended thinking [default: 16000]

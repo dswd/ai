@@ -4,6 +4,7 @@ mod clients;
 mod commands;
 mod config;
 mod context;
+mod exec_sandbox;
 mod format;
 mod init;
 mod interactive;
@@ -36,8 +37,18 @@ use setup::{
 };
 use std::sync::Arc;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    if let Some((program, args)) = exec_sandbox::launcher_request() {
+        exec_sandbox::run_launcher(program, args);
+    }
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async_main())
+}
+
+async fn async_main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     setup_logging(cli.verbose, cli.quiet);
@@ -67,6 +78,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     }
 
     let policy = load_policy(&cli, &config)?;
+    let sandbox_spec = setup::resolve_sandbox(&cli, &config, &policy)?;
     let skills = Arc::new(skills::discover(&cli.skill, &config.skills_dir_resolved()));
     let (system_prompt, memory) = assemble_system_prompt(&cli, &config, &policy, &skills)?;
     log::debug!("system prompt:\n{system_prompt}");
@@ -131,6 +143,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         _browser_state: browser_state,
         is_interactive: cli.is_interactive(),
         supports_tools: provider_spec.supports_tools(),
+        sandbox: sandbox_spec,
         session: &mut session,
         session_dir: &session_dir,
         prompt_text,

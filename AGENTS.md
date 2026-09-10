@@ -29,6 +29,7 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `providers.rs` | Provider registry: two flavors (OpenAi, Anthropic) + OpenAI-compatible endpoints |
 | `policy.rs` | Allow/deny rules, first-match-wins, glob matching, CLI overrides, ask mode, session approvals |
 | `sandbox.rs` | The single checked filesystem layer: resolve-then-authorize-then-operate for every tool path |
+| `exec_sandbox.rs` | OS sandbox for external commands (Linux Landlock + rlimits) via a self-launcher (`--sandbox-exec`) |
 | `context.rs` | Deterministic context editing: prune stale tool outputs from the history sent to the model |
 | `skills.rs` | Skill discovery/loading (markdown front-matter files) |
 | `session.rs` | Session persistence (JSON, schema v2: full chat log + provider/model binding) |

@@ -200,6 +200,30 @@ impl Policy {
             .any(|rule| matches!(rule, PolicyRule::Allow(a, _) if a == action))
     }
 
+    /// All `allow` patterns for an action, CLI rules first.
+    pub fn allow_patterns(&self, action: &Action) -> Vec<String> {
+        self.cli_rules
+            .iter()
+            .chain(self.rules.iter())
+            .filter_map(|rule| match rule {
+                PolicyRule::Allow(a, pattern) if a == action => Some(pattern.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// All `deny` patterns for an action, CLI rules first.
+    pub fn deny_patterns(&self, action: &Action) -> Vec<String> {
+        self.cli_rules
+            .iter()
+            .chain(self.rules.iter())
+            .filter_map(|rule| match rule {
+                PolicyRule::Deny(a, pattern) if a == action => Some(pattern.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn summary(&self) -> String {
         let mut lines = vec!["## Policy".to_string()];
 
