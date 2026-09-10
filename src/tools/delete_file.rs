@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use super::shared::ToolError;
 use crate::policy::{Action, Policy};
+use crate::sandbox::Sandbox;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteFileArgs {
@@ -45,22 +46,12 @@ impl Tool for DeleteFileTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!("{DIM}✂️ delete file {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
-        let canonical = path
-            .canonicalize()
-            .map_err(|e| ToolError::Message(format!("cannot resolve path: {e}")))?;
-        let canonical_str = canonical.to_string_lossy();
+        let sandbox = Sandbox::new(self.policy.clone());
+        let resolved = sandbox.authorize(Action::Write, &path)?;
 
-        if !self.policy.is_allowed(&Action::Write, &canonical_str) {
-            return Err(ToolError::Message(format!(
-                "write access denied for: {}",
-                args.path
-            )));
-        }
-
-        let result = if canonical.is_dir() {
+        let result = if resolved.is_dir() {
             if args.recursive.unwrap_or(false) {
-                std::fs::remove_dir_all(&canonical)
-                    .map_err(|e| ToolError::Message(format!("cannot delete directory: {e}")))?;
+                sandbox.remove_dir_all(&path)?;
                 format!("Deleted directory: {}", args.path)
             } else {
                 return Err(ToolError::Message(format!(
@@ -69,8 +60,7 @@ impl Tool for DeleteFileTool {
                 )));
             }
         } else {
-            std::fs::remove_file(&canonical)
-                .map_err(|e| ToolError::Message(format!("cannot delete file: {e}")))?;
+            sandbox.remove_file(&path)?;
             format!("Deleted file: {}", args.path)
         };
         debug!("{DIM}  \u{2192} {}{RESET}", result);

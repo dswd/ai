@@ -1,4 +1,5 @@
 use crate::config::SearchConfig;
+use crate::context::ContextPruneHook;
 use crate::interactive::run_interactive;
 use crate::logging::is_quiet;
 use crate::memory;
@@ -37,6 +38,7 @@ pub(crate) struct AgentContext<'a> {
     #[cfg(not(feature = "browser"))]
     pub(crate) _browser_state: Option<Arc<()>>,
     pub(crate) is_interactive: bool,
+    pub(crate) supports_tools: bool,
     pub(crate) session: &'a mut Session,
     pub(crate) session_dir: &'a std::path::Path,
     pub(crate) prompt_text: Option<String>,
@@ -83,107 +85,109 @@ fn build_agent<M: CompletionModel + 'static>(
 
     let mut server = ToolServer::new();
 
-    if can_read {
-        server = server
-            .tool(tools::ReadFileTool::new(ctx.policy.clone()))
-            .tool(tools::ListDirTool::new(ctx.policy.clone()))
-            .tool(tools::SearchContentTool::new(ctx.policy.clone()))
-            .tool(tools::FindFilesTool::new(ctx.policy.clone()))
-            .tool(tools::FileInfoTool::new(ctx.policy.clone()))
-            .tool(tools::FileViewTool::new(ctx.policy.clone()))
-            .tool(tools::GitDiffTool::new(ctx.policy.clone()))
-            .tool(tools::GitLogTool::new(ctx.policy.clone()));
-    }
-
-    if can_write {
-        server = server
-            .tool(tools::WriteFileTool::new(ctx.policy.clone()))
-            .tool(tools::ReplaceInFileTool::new(ctx.policy.clone()))
-            .tool(tools::DeleteFileTool::new(ctx.policy.clone()))
-            .tool(tools::CreateDirectoryTool::new(ctx.policy.clone()))
-            .tool(tools::MoveFileTool::new(ctx.policy.clone()))
-            .tool(tools::CopyFileTool::new(ctx.policy.clone()));
-    }
-
-    server = server
-        .tool(tools::ExecuteTool::new(ctx.policy.clone()))
-        .tool(tools::GetCurrentTimeTool::new());
-
-    if can_web_fetch {
-        #[cfg(feature = "browser")]
-        let web_fetch_tool = tools::WebFetchTool::with_browser(
-            ctx.policy.clone(),
-            ctx.proxy.map(str::to_string),
-            ctx.browser_state.as_ref().map(Arc::clone),
-        );
-        #[cfg(not(feature = "browser"))]
-        let web_fetch_tool =
-            tools::WebFetchTool::new(ctx.policy.clone(), ctx.proxy.map(str::to_string));
-        server = server.tool(web_fetch_tool);
-        #[cfg(feature = "browser")]
-        if let Some(ref bs) = ctx.browser_state {
+    if ctx.supports_tools {
+        if can_read {
             server = server
-                .tool(tools::BrowserNavigateTool::new(
-                    ctx.policy.clone(),
-                    Arc::clone(bs),
-                ))
-                .tool(tools::BrowserClickTool::new(
-                    ctx.policy.clone(),
-                    Arc::clone(bs),
-                ))
-                .tool(tools::BrowserEvaluateTool::new(
-                    ctx.policy.clone(),
-                    Arc::clone(bs),
-                ))
-                .tool(tools::BrowserGetContentTool::new(
-                    ctx.policy.clone(),
-                    Arc::clone(bs),
-                ))
-                .tool(tools::BrowserGetElementTool::new(
-                    ctx.policy.clone(),
-                    Arc::clone(bs),
-                ));
+                .tool(tools::ReadFileTool::new(ctx.policy.clone()))
+                .tool(tools::ListDirTool::new(ctx.policy.clone()))
+                .tool(tools::SearchContentTool::new(ctx.policy.clone()))
+                .tool(tools::FindFilesTool::new(ctx.policy.clone()))
+                .tool(tools::FileInfoTool::new(ctx.policy.clone()))
+                .tool(tools::FileViewTool::new(ctx.policy.clone()))
+                .tool(tools::GitDiffTool::new(ctx.policy.clone()))
+                .tool(tools::GitLogTool::new(ctx.policy.clone()));
         }
-    }
 
-    if can_web_fetch && can_write {
-        server = server.tool(tools::DownloadFileTool::new(
-            ctx.policy.clone(),
-            ctx.proxy.map(str::to_string),
-        ));
-    }
+        if can_write {
+            server = server
+                .tool(tools::WriteFileTool::new(ctx.policy.clone()))
+                .tool(tools::ReplaceInFileTool::new(ctx.policy.clone()))
+                .tool(tools::DeleteFileTool::new(ctx.policy.clone()))
+                .tool(tools::CreateDirectoryTool::new(ctx.policy.clone()))
+                .tool(tools::MoveFileTool::new(ctx.policy.clone()))
+                .tool(tools::CopyFileTool::new(ctx.policy.clone()));
+        }
 
-    if can_web_search {
-        #[cfg(feature = "browser")]
-        let web_search_tool = tools::WebSearchTool::with_browser(
-            ctx.policy.clone(),
-            ctx.search.clone(),
-            ctx.proxy.map(str::to_string),
-            ctx.browser_state.as_ref().map(Arc::clone),
-        );
-        #[cfg(not(feature = "browser"))]
-        let web_search_tool = tools::WebSearchTool::new(
-            ctx.policy.clone(),
-            ctx.search.clone(),
-            ctx.proxy.map(str::to_string),
-        );
-        server = server.tool(web_search_tool);
-    }
-
-    if let Some(ref mem) = ctx.memory {
         server = server
-            .tool(tools::MemoryAddTool::new(Arc::clone(mem)))
-            .tool(tools::MemorySearchTool::new(Arc::clone(mem)))
-            .tool(tools::MemoryDeleteTool::new(Arc::clone(mem)));
-    }
+            .tool(tools::ExecuteTool::new(ctx.policy.clone()))
+            .tool(tools::GetCurrentTimeTool::new());
 
-    if !ctx.skills.is_empty() {
-        server = server.tool(tools::LoadSkillTool::new(Arc::clone(&ctx.skills)));
-    }
+        if can_web_fetch {
+            #[cfg(feature = "browser")]
+            let web_fetch_tool = tools::WebFetchTool::with_browser(
+                ctx.policy.clone(),
+                ctx.proxy.map(str::to_string),
+                ctx.browser_state.as_ref().map(Arc::clone),
+            );
+            #[cfg(not(feature = "browser"))]
+            let web_fetch_tool =
+                tools::WebFetchTool::new(ctx.policy.clone(), ctx.proxy.map(str::to_string));
+            server = server.tool(web_fetch_tool);
+            #[cfg(feature = "browser")]
+            if let Some(ref bs) = ctx.browser_state {
+                server = server
+                    .tool(tools::BrowserNavigateTool::new(
+                        ctx.policy.clone(),
+                        Arc::clone(bs),
+                    ))
+                    .tool(tools::BrowserClickTool::new(
+                        ctx.policy.clone(),
+                        Arc::clone(bs),
+                    ))
+                    .tool(tools::BrowserEvaluateTool::new(
+                        ctx.policy.clone(),
+                        Arc::clone(bs),
+                    ))
+                    .tool(tools::BrowserGetContentTool::new(
+                        ctx.policy.clone(),
+                        Arc::clone(bs),
+                    ))
+                    .tool(tools::BrowserGetElementTool::new(
+                        ctx.policy.clone(),
+                        Arc::clone(bs),
+                    ));
+            }
+        }
 
-    for set in &ctx.tool_sets {
-        for tool in &set.tools {
-            server = server.rmcp_tool(tool.clone(), set.sink.clone());
+        if can_web_fetch && can_write {
+            server = server.tool(tools::DownloadFileTool::new(
+                ctx.policy.clone(),
+                ctx.proxy.map(str::to_string),
+            ));
+        }
+
+        if can_web_search {
+            #[cfg(feature = "browser")]
+            let web_search_tool = tools::WebSearchTool::with_browser(
+                ctx.policy.clone(),
+                ctx.search.clone(),
+                ctx.proxy.map(str::to_string),
+                ctx.browser_state.as_ref().map(Arc::clone),
+            );
+            #[cfg(not(feature = "browser"))]
+            let web_search_tool = tools::WebSearchTool::new(
+                ctx.policy.clone(),
+                ctx.search.clone(),
+                ctx.proxy.map(str::to_string),
+            );
+            server = server.tool(web_search_tool);
+        }
+
+        if let Some(ref mem) = ctx.memory {
+            server = server
+                .tool(tools::MemoryAddTool::new(Arc::clone(mem)))
+                .tool(tools::MemorySearchTool::new(Arc::clone(mem)))
+                .tool(tools::MemoryDeleteTool::new(Arc::clone(mem)));
+        }
+
+        if !ctx.skills.is_empty() {
+            server = server.tool(tools::LoadSkillTool::new(Arc::clone(&ctx.skills)));
+        }
+
+        for set in &ctx.tool_sets {
+            for tool in &set.tools {
+                server = server.rmcp_tool(tool.clone(), set.sink.clone());
+            }
         }
     }
 
@@ -252,6 +256,7 @@ async fn run_oneshot<M: CompletionModel + 'static>(
     let augmented = crate::interactive::augment_prompt(prompt, memory.as_deref());
     let mut stream = agent
         .stream_prompt(augmented.as_deref().unwrap_or(prompt))
+        .add_hook(ContextPruneHook::default())
         .await;
     let response = stream_response(&mut stream).await?;
     crate::interactive::print_usage(&response.usage, start.elapsed());

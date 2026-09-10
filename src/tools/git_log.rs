@@ -54,15 +54,13 @@ impl Tool for GitLogTool {
             fmt_offset_limit(args.offset, args.limit)
         );
 
-        let git_dir = find_git_dir()?;
-        if !self
-            .policy
-            .is_allowed(&Action::Read, &git_dir.to_string_lossy())
-        {
-            return Err(ToolError::Message(format!(
-                "read access denied for git repository: {}",
-                git_dir.display()
-            )));
+        let _git_dir = find_git_dir()?;
+        // `git` is an external process: gate it on Execute rather than a read of
+        // `.git`, since a repo can run code via hooks / external diff drivers.
+        if !self.policy.is_allowed(&Action::Execute, "git") {
+            return Err(ToolError::Message(
+                "execute access denied for: git (re-run with -x=git)".to_string(),
+            ));
         }
 
         let mut cmd = std::process::Command::new("git");

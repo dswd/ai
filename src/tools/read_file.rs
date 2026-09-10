@@ -8,7 +8,8 @@ use std::path::PathBuf;
 
 use super::shared::ToolError;
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
-use crate::policy::{Action, Policy};
+use crate::policy::Policy;
+use crate::sandbox::Sandbox;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ReadFileArgs {
@@ -53,20 +54,8 @@ impl Tool for ReadFileTool {
             fmt_offset_limit(args.offset, args.limit)
         );
         let path = PathBuf::from(&args.path);
-        let canonical = path
-            .canonicalize()
-            .map_err(|e| ToolError::Message(format!("cannot resolve path: {e}")))?;
-        let canonical_str = canonical.to_string_lossy();
-
-        if !self.policy.is_allowed(&Action::Read, &canonical_str) {
-            return Err(ToolError::Message(format!(
-                "read access denied for: {}",
-                args.path
-            )));
-        }
-
-        let content = std::fs::read_to_string(&canonical)
-            .map_err(|e| ToolError::Message(format!("cannot read file: {e}")))?;
+        let sandbox = Sandbox::new(self.policy.clone());
+        let content = sandbox.read_to_string(&path)?;
         let truncated = truncate(&content, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
         debug!(
             "{DIM} {} \n{truncated}\n {} {RESET}",

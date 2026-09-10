@@ -3,25 +3,33 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::policy::{Action, Policy};
+use crate::sandbox::Sandbox;
 
 pub(super) struct PolicyFsBackend<B: FsBackend> {
     inner: B,
-    policy: Policy,
+    sandbox: Sandbox,
 }
 
 impl<B: FsBackend> PolicyFsBackend<B> {
     pub fn new(inner: B, policy: Policy) -> Self {
-        Self { inner, policy }
+        Self {
+            inner,
+            sandbox: Sandbox::new(policy),
+        }
     }
 
     fn check(&self, action: Action, path: &Path) -> bashkit::Result<()> {
-        let path_str = self.canonical_for_check(path).to_string_lossy().to_string();
-        if self.policy.is_allowed(&action, &path_str) {
+        if self.sandbox.is_allowed(&action, path) {
             Ok(())
         } else {
+            let resolved = self.sandbox.resolve(path);
             Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                format!("{} access denied by policy: {}", action, path_str),
+                format!(
+                    "{} access denied by policy: {}",
+                    action,
+                    resolved.to_string_lossy()
+                ),
             )
             .into())
         }
@@ -36,40 +44,6 @@ impl<B: FsBackend> PolicyFsBackend<B> {
     ) -> bashkit::Result<()> {
         self.check(ra, rpath)?;
         self.check(wa, wpath)
-    }
-
-    /// Resolve `path` to its real location before consulting policy.
-    ///
-    /// The underlying `RealFs` resolves symlinks *after* this check and its
-    /// only containment boundary is its mount root (`/` in this program), so a
-    /// symlink inside an allowed directory could otherwise redirect a read or
-    /// write to a target outside the granted areas (e.g. `cat ./link` where
-    /// `link -> /etc/passwd`).
-    ///
-    /// For paths that do not exist yet (writes, creates), canonicalize the
-    /// deepest existing ancestor and re-append the missing components, so a
-    /// symlinked parent directory cannot redirect file creation either.
-    fn canonical_for_check(&self, path: &Path) -> PathBuf {
-        if let Ok(canon) = std::fs::canonicalize(path) {
-            return canon;
-        }
-        let mut ancestor = path;
-        let mut missing: Vec<std::ffi::OsString> = Vec::new();
-        while !ancestor.exists() {
-            match (ancestor.parent(), ancestor.file_name()) {
-                (Some(parent), Some(name)) => {
-                    missing.push(name.to_os_string());
-                    ancestor = parent;
-                }
-                _ => break,
-            }
-        }
-        let mut resolved =
-            std::fs::canonicalize(ancestor).unwrap_or_else(|_| ancestor.to_path_buf());
-        for name in missing.iter().rev() {
-            resolved.push(name);
-        }
-        resolved
     }
 }
 

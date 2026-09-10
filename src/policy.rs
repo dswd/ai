@@ -1,7 +1,7 @@
 use ansi_color_constants::*;
 use log::{debug, warn};
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use std::fmt;
 
@@ -32,11 +32,67 @@ pub enum PolicyRule {
     Deny(Action, String),
 }
 
+/// Session-scoped approval memory. Shared by every clone of a [`Policy`] (all
+/// tools hold clones), so a decision the user makes while one tool runs is
+/// visible to the next. Rules live only for the process/session and are never
+/// written to disk.
+#[derive(Debug, Default)]
+pub struct ApprovalState {
+    rules: Mutex<Vec<PolicyRule>>,
+}
+
+impl ApprovalState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn rules(&self) -> Vec<PolicyRule> {
+        self.rules.lock().unwrap().clone()
+    }
+
+    fn add(&self, rule: PolicyRule) {
+        self.rules.lock().unwrap().push(rule);
+    }
+
+    /// Ask the user to approve an unmatched action. Returns whether it is now
+    /// allowed. `y` allows once, `a` remembers the exact target for the
+    /// session, `r` remembers its directory, anything else denies.
+    fn request(&self, action: &Action, target: &str) -> bool {
+        let prompt =
+            format!("Allow {action} for {target}? [y=once, a=always, r=this dir, N=deny] ");
+        let answer = crate::io::read_user_input(&prompt)
+            .unwrap_or_default()
+            .to_lowercase();
+        match answer.as_str() {
+            "y" | "yes" => true,
+            "a" | "always" => {
+                self.add(PolicyRule::Allow(action.clone(), target.to_string()));
+                true
+            }
+            "r" | "root" | "dir" => {
+                self.add(PolicyRule::Allow(action.clone(), root_of(target)));
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+fn root_of(target: &str) -> String {
+    let normalized = normalize_path_separators(target);
+    match normalized.rfind('/') {
+        Some(0) => "/".to_string(),
+        Some(idx) => normalized[..idx].to_string(),
+        None => target.to_string(),
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Policy {
     rules: Vec<PolicyRule>,
     cli_rules: Vec<PolicyRule>,
     pub ask: bool,
+    pub approval: Option<Arc<ApprovalState>>,
 }
 
 impl Policy {
@@ -57,6 +113,7 @@ impl Policy {
             rules,
             cli_rules: Vec::new(),
             ask: false,
+            approval: None,
         }
     }
 
@@ -92,27 +149,48 @@ impl Policy {
             }
         }
 
-        if self.ask {
-            let mut stderr = io::stderr().lock();
-            let _ = stderr.write_all(
-                format!("\u{2753} Allow {:?} for {}? [y/N] ", action, target_norm).as_bytes(),
-            );
-            let _ = stderr.flush();
-            let mut answer = String::new();
-            if io::stdin().read_line(&mut answer).is_ok() {
-                let trimmed = answer.trim().to_lowercase();
-                if trimmed == "y" || trimmed == "yes" {
-                    return true;
+        // Session-scoped decisions made earlier in this run.
+        if let Some(approval) = &self.approval {
+            for rule in &approval.rules() {
+                match rule {
+                    PolicyRule::Allow(a, pattern)
+                        if a == action && matches_pattern(&target_norm, pattern) =>
+                    {
+                        return true;
+                    }
+                    PolicyRule::Deny(a, pattern)
+                        if a == action && matches_pattern(&target_norm, pattern) =>
+                    {
+                        return false;
+                    }
+                    _ => {}
                 }
             }
-            false
-        } else {
-            warn!(
-                "{RED}\u{274C} {:?} for {:?} (no matching rule){RESET}",
-                action, target_norm
-            );
-            false
         }
+
+        if self.ask
+            && let Some(approval) = &self.approval
+        {
+            let allowed = approval.request(action, &target_norm);
+            if allowed {
+                debug!(
+                    "{DIM}\u{2705} approved {:?} for {:?}{RESET}",
+                    action, target_norm
+                );
+            } else {
+                warn!(
+                    "{RED}\u{274C} {:?} for {:?} (denied by user){RESET}",
+                    action, target_norm
+                );
+            }
+            return allowed;
+        }
+
+        warn!(
+            "{RED}\u{274C} {:?} for {:?} (no matching rule){RESET}",
+            action, target_norm
+        );
+        false
     }
 
     pub fn has_any_allow(&self, action: &Action) -> bool {
@@ -156,6 +234,60 @@ impl Policy {
         }
 
         lines.join("\n")
+    }
+
+    /// Warnings for grants whose width makes the boundary meaningless
+    /// (grant-width doctrine).
+    pub fn broad_grant_warnings(&self, yolo: bool) -> Vec<String> {
+        let mut out = Vec::new();
+        let home = normalize_path_separators(&home_dir().to_string_lossy());
+        let mut read = false;
+        let mut web = false;
+        let mut execute = false;
+        let mut write_broad = false;
+
+        for rule in self.cli_rules.iter().chain(self.rules.iter()) {
+            if let PolicyRule::Allow(action, pattern) = rule {
+                match action {
+                    Action::Read => read = true,
+                    Action::WebFetch | Action::WebSearch => web = true,
+                    Action::Execute => execute = true,
+                    Action::Write => {
+                        let p = normalize_path_separators(pattern);
+                        if matches!(p.as_str(), "*" | "**" | "/")
+                            || p == home
+                            || p == format!("{home}/**")
+                            || p == format!("{home}/*")
+                        {
+                            write_broad = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if yolo {
+            out.push("--yolo allows everything; equivalent to full user compromise.".to_string());
+        }
+        if execute && !yolo {
+            out.push(
+                "-x grants external commands, which run as you with no sandbox (full user access)."
+                    .to_string(),
+            );
+        }
+        if write_broad && !yolo {
+            out.push(
+                "broad write access (home or /) is equivalent to full user compromise: auto-run files, git hooks, and configs make write equal to execute."
+                    .to_string(),
+            );
+        }
+        if read && web {
+            out.push(
+                "read access combined with web access allows data exfiltration; do not grant both for untrusted content."
+                    .to_string(),
+            );
+        }
+        out
     }
 }
 

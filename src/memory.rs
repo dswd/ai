@@ -42,6 +42,15 @@ pub struct MemoryEntry {
     pub updated: String,
     #[serde(default)]
     pub source_session: Option<String>,
+    /// Who the fact originated from. Reconciled durable facts are captured from
+    /// user-authored turns only and tagged `user`; entries the agent stores
+    /// directly are tagged `agent`.
+    #[serde(default = "default_origin")]
+    pub origin: String,
+}
+
+fn default_origin() -> String {
+    "agent".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +63,7 @@ struct MemoryFile {
 pub struct Memory {
     path: PathBuf,
     session_name: Mutex<Option<String>>,
+    origin: Mutex<String>,
     entries: Mutex<Vec<MemoryEntry>>,
 }
 
@@ -74,12 +84,17 @@ impl Memory {
         Ok(Self {
             path: path.to_path_buf(),
             session_name: Mutex::new(None),
+            origin: Mutex::new("agent".to_string()),
             entries: Mutex::new(entries),
         })
     }
 
     pub fn set_session_name(&self, name: &str) {
         *self.session_name.lock().unwrap() = Some(name.to_string());
+    }
+
+    pub fn set_origin(&self, origin: &str) {
+        *self.origin.lock().unwrap() = origin.to_string();
     }
 
     fn save(&self) -> anyhow::Result<()> {
@@ -111,6 +126,7 @@ impl Memory {
         source: Option<&str>,
     ) -> Result<(String, bool), String> {
         let mut entries = self.entries.lock().unwrap();
+        let origin = self.origin.lock().unwrap().clone();
         let keywords: Vec<String> = keywords
             .iter()
             .map(|k| k.trim().to_string())
@@ -136,6 +152,7 @@ impl Memory {
                     entry.text = text;
                     entry.keywords = keywords;
                     entry.updated = now_iso();
+                    entry.origin = origin.clone();
                     if let Some(s) = source {
                         entry.source_session = Some(s.to_string());
                     }
@@ -169,6 +186,7 @@ impl Memory {
             created: now.clone(),
             updated: now,
             source_session: source.map(str::to_string),
+            origin,
         });
         drop(entries);
         self.save()
@@ -301,6 +319,7 @@ fn parse_memory_file(content: &str) -> anyhow::Result<Vec<MemoryEntry>> {
             created: now.clone(),
             updated: now.clone(),
             source_session: None,
+            origin: default_origin(),
         })
         .collect())
 }

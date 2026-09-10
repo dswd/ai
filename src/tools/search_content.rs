@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use super::shared::{ToolError, search_file, walk_dir};
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::policy::{Action, Policy};
+use crate::sandbox::Sandbox;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SearchContentArgs {
@@ -59,19 +60,8 @@ impl Tool for SearchContentTool {
             fmt_offset_limit(args.offset, args.limit)
         );
         let root = PathBuf::from(&args.path);
-        let canonical_root = root
-            .canonicalize()
-            .map_err(|e| ToolError::Message(format!("cannot resolve path: {e}")))?;
-
-        if !self
-            .policy
-            .is_allowed(&Action::Read, &canonical_root.to_string_lossy())
-        {
-            return Err(ToolError::Message(format!(
-                "read access denied for: {}",
-                args.path
-            )));
-        }
+        let sandbox = Sandbox::new(self.policy.clone());
+        let canonical_root = sandbox.authorize(Action::Read, &root)?;
 
         let pattern = regex::Regex::new(&args.pattern)
             .map_err(|e| ToolError::Message(format!("invalid regex pattern: {e}")))?;
@@ -93,6 +83,7 @@ impl Tool for SearchContentTool {
 
         if canonical_root.is_file() {
             search_file(
+                &sandbox,
                 &canonical_root,
                 &pattern,
                 &exts,
@@ -103,6 +94,7 @@ impl Tool for SearchContentTool {
             )?;
         } else if canonical_root.is_dir() {
             walk_dir(
+                &sandbox,
                 &canonical_root,
                 &canonical_root,
                 &pattern,

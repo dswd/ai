@@ -12,6 +12,7 @@ pub(crate) fn resolve_session(
     session_dir: &std::path::Path,
     system_prompt: &str,
     model_name: &str,
+    provider_name: &str,
 ) -> anyhow::Result<Session> {
     let session_name = match &cli.session {
         Some(name) => {
@@ -27,14 +28,48 @@ pub(crate) fn resolve_session(
     let session = if let Some(ref name) = session_name {
         match Session::load(name, session_dir) {
             Ok(s) => {
-                info!("Continuing session: {name}");
-                s
+                if s.provider != provider_name || s.model != model_name {
+                    // A conversation is only meaningful under the model that
+                    // produced it; alias the old log aside and start fresh.
+                    let forked = session::generate_session_name();
+                    let prev_provider = if s.provider.is_empty() {
+                        "unknown"
+                    } else {
+                        &s.provider
+                    };
+                    output::stderr_line(&format!(
+                        "Session '{name}' used {prev_provider}/{}; forking to '{forked}' for {provider_name}/{model_name}.",
+                        s.model
+                    ));
+                    let mut new = Session::new(
+                        forked,
+                        system_prompt.to_string(),
+                        model_name.to_string(),
+                        provider_name.to_string(),
+                    );
+                    new.forked_from = Some(s.name);
+                    new
+                } else {
+                    if s.partial {
+                        output::stderr_line(&format!(
+                            "Continuing legacy session '{name}': tool history is unavailable."
+                        ));
+                    }
+                    if s.system_prompt != system_prompt {
+                        output::stderr_line(
+                            "[note] the system prompt has changed since this session was saved",
+                        );
+                    }
+                    info!("Continuing session: {name}");
+                    s
+                }
             }
             Err(_) => {
                 let s = Session::new(
                     name.clone(),
                     system_prompt.to_string(),
                     model_name.to_string(),
+                    provider_name.to_string(),
                 );
                 info!("Started new session: {name}");
                 s
@@ -45,15 +80,16 @@ pub(crate) fn resolve_session(
             session::generate_session_name(),
             system_prompt.to_string(),
             model_name.to_string(),
+            provider_name.to_string(),
         )
     };
 
     if cli.is_interactive() {
         let user_lines: Vec<String> = session
-            .messages
-            .iter()
-            .filter(|m| m.role == Role::User)
-            .map(|m| m.content.clone())
+            .transcript()
+            .into_iter()
+            .filter(|(role, _)| *role == Role::User)
+            .map(|(_, content)| content)
             .collect();
         io::load_session_history(&user_lines);
     }
@@ -74,7 +110,6 @@ pub(crate) async fn resolve_prompt_text(cli: &Cli) -> Option<String> {
 
 pub(crate) fn resolve_provider(
     config: &Config,
-    thinking: Option<usize>,
 ) -> anyhow::Result<(&'static providers::Provider, String)> {
     let provider = config.provider.to_lowercase();
     let provider_spec = providers::resolve(&provider).ok_or_else(|| {
@@ -88,13 +123,23 @@ pub(crate) fn resolve_provider(
         .or_else(|| provider_spec.default_base_url.map(str::to_string))
         .ok_or_else(|| anyhow::anyhow!("provider '{provider}' requires an api_base in config"))?;
 
-    if thinking.is_some() && provider_spec.flavor != providers::Flavor::Anthropic {
-        log::warn!(
-            "--thinking is only supported by the anthropic flavor; it has no effect with provider '{provider}'"
-        );
-    }
-
     Ok((provider_spec, base_url))
+}
+
+/// Drop a requested thinking budget for providers that do not accept it, so we
+/// never inject an unsupported parameter into the request.
+pub(crate) fn resolve_thinking(
+    requested: Option<usize>,
+    provider: &providers::Provider,
+) -> Option<usize> {
+    if requested.is_some() && !provider.supports_thinking() {
+        log::warn!(
+            "--thinking is not supported by provider '{}'; ignoring",
+            provider.name
+        );
+        return None;
+    }
+    requested
 }
 
 pub(crate) fn load_config(cli: &Cli, vanilla: bool) -> anyhow::Result<Config> {
@@ -182,6 +227,14 @@ pub(crate) fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> 
     }
 
     policy.ask = cli.ask || cli.is_interactive();
+
+    if policy.ask {
+        policy.approval = Some(std::sync::Arc::new(policy::ApprovalState::new()));
+    }
+
+    for warning in policy.broad_grant_warnings(cli.yolo) {
+        crate::output::stderr_line(&format!("warning: {warning}"));
+    }
 
     Ok(policy)
 }

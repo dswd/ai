@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use super::shared::ToolError;
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
 use crate::policy::{Action, Policy};
+use crate::sandbox::Sandbox;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FindFilesArgs {
@@ -57,32 +58,21 @@ impl Tool for FindFilesTool {
             fmt_offset_limit(args.offset, args.limit)
         );
         let root = PathBuf::from(&args.path);
-        let canonical_root = root
-            .canonicalize()
-            .map_err(|e| ToolError::Message(format!("cannot resolve path: {e}")))?;
-
-        if !self
-            .policy
-            .is_allowed(&Action::Read, &canonical_root.to_string_lossy())
-        {
-            return Err(ToolError::Message(format!(
-                "read access denied for: {}",
-                args.path
-            )));
-        }
+        let sandbox = Sandbox::new(self.policy.clone());
+        let canonical_root = sandbox.authorize(Action::Read, &root)?;
 
         let pattern = canonical_root.join(&args.pattern);
         let pattern_str = pattern.to_string_lossy();
 
         let mut results: Vec<String> = glob::glob(&pattern_str)
             .map_err(|e| ToolError::Message(format!("invalid glob pattern: {e}")))?
-            .filter_map(|entry| {
-                entry.ok().map(|p| {
-                    p.strip_prefix(&canonical_root)
-                        .unwrap_or(&p)
-                        .to_string_lossy()
-                        .to_string()
-                })
+            .filter_map(|entry| entry.ok())
+            .filter(|p| sandbox.is_allowed(&Action::Read, p))
+            .map(|p| {
+                p.strip_prefix(&canonical_root)
+                    .unwrap_or(&p)
+                    .to_string_lossy()
+                    .to_string()
             })
             .collect();
 

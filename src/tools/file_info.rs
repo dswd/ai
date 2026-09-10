@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use super::shared::ToolError;
-use crate::policy::{Action, Policy};
+use crate::policy::Policy;
+use crate::sandbox::Sandbox;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FileInfoArgs {
@@ -45,19 +46,8 @@ impl Tool for FileInfoTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!("{DIM}ℹ️  file info {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
-        let canonical = path
-            .canonicalize()
-            .map_err(|e| ToolError::Message(format!("cannot resolve path: {e}")))?;
-        let canonical_str = canonical.to_string_lossy();
-
-        if !self.policy.is_allowed(&Action::Read, &canonical_str) {
-            return Err(ToolError::Message(format!(
-                "read access denied for: {canonical_str}"
-            )));
-        }
-
-        let meta = std::fs::symlink_metadata(&canonical)
-            .map_err(|e| ToolError::Message(format!("cannot read metadata: {e}")))?;
+        let sandbox = Sandbox::new(self.policy.clone());
+        let meta = sandbox.metadata(&path)?;
 
         let size = meta.len();
         let size_str = fmt_bytes(size);
@@ -78,11 +68,10 @@ impl Tool for FileInfoTool {
             "rw-"
         };
 
-        let entry_type = if canonical.is_dir() {
+        let resolved = sandbox.resolve(&path);
+        let entry_type = if resolved.is_dir() {
             "directory"
-        } else if canonical.is_symlink() {
-            "symlink"
-        } else if canonical.is_file() {
+        } else if resolved.is_file() {
             "file"
         } else {
             "unknown"

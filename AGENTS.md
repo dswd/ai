@@ -27,9 +27,11 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `cli.rs` | clap arg definitions (note: all value args use `require_equals`, e.g. `-r=.`) |
 | `config.rs` | YAML config, path resolution |
 | `providers.rs` | Provider registry: two flavors (OpenAi, Anthropic) + OpenAI-compatible endpoints |
-| `policy.rs` | Allow/deny rules, first-match-wins, glob matching, CLI overrides, ask mode |
+| `policy.rs` | Allow/deny rules, first-match-wins, glob matching, CLI overrides, ask mode, session approvals |
+| `sandbox.rs` | The single checked filesystem layer: resolve-then-authorize-then-operate for every tool path |
+| `context.rs` | Deterministic context editing: prune stale tool outputs from the history sent to the model |
 | `skills.rs` | Skill discovery/loading (markdown front-matter files) |
-| `session.rs` | Session persistence (JSON) |
+| `session.rs` | Session persistence (JSON, schema v2: full chat log + provider/model binding) |
 | `memory.rs` | Persistent agent memory |
 | `tools/` | One file per tool (see below) |
 | `format.rs` | Streaming markdown-to-ANSI console formatting for assistant output |
@@ -49,8 +51,10 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 
 Each tool in `src/tools/` is a rig-core `Tool` with: serde + schemars args struct,
 `new(policy)` constructor, and `call` implementing the action. Tools are registered in
-`build_agent` (`main.rs`) **only when policy allows**: read tools need a `Read` allow rule,
-write tools a `Write` rule, web tools `WebFetch`/`WebSearch`, and so on.
+`build_agent` (`agent.rs`) **only when policy allows**: read tools need a `Read` allow rule,
+write tools a `Write` rule, web tools `WebFetch`/`WebSearch`, and so on. Every user-supplied
+path an action touches must go through `src/sandbox.rs` (never `std::fs` directly), so the
+resolve-then-authorize-then-operate contract holds for every caller.
 
 Key tools:
 - `execute.rs` — runs shell commands through bashkit's virtual bash. In-process builtins

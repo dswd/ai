@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use super::shared::ToolError;
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, process_output, truncate};
 use crate::policy::{Action, Policy};
+use crate::sandbox::Sandbox;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FileViewArgs {
@@ -47,21 +48,11 @@ impl Tool for FileViewTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!("{DIM}👁️ file view {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
-        let canonical = path
-            .canonicalize()
-            .map_err(|e| ToolError::Message(format!("cannot resolve path: {e}")))?;
-        let canonical_str = canonical.to_string_lossy();
+        let sandbox = Sandbox::new(self.policy.clone());
+        let resolved = sandbox.authorize(Action::Read, &path)?;
+        let bytes = sandbox.read_bytes(&path)?;
 
-        if !self.policy.is_allowed(&Action::Read, &canonical_str) {
-            return Err(ToolError::Message(format!(
-                "read access denied for: {canonical_str}"
-            )));
-        }
-
-        let bytes = std::fs::read(&canonical)
-            .map_err(|e| ToolError::Message(format!("cannot read file: {e}")))?;
-
-        let ext = canonical
+        let ext = resolved
             .extension()
             .and_then(|e| e.to_str())
             .map(|e| e.to_lowercase());

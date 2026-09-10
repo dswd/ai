@@ -8,6 +8,9 @@ use regex::Regex;
 
 use rand::RngExt;
 
+use crate::policy::Action;
+use crate::sandbox::Sandbox;
+
 /// Realistic browser user-agent used for all web requests.
 pub(crate) const DEFAULT_UA: &str =
     "Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0";
@@ -284,7 +287,9 @@ pub(crate) fn is_bashkit_builtin(cmd: &str) -> bool {
     BASHKIT_BUILTINS.contains(&cmd)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn search_file(
+    sandbox: &Sandbox,
     path: &Path,
     pattern: &Regex,
     exts: &[&str],
@@ -304,6 +309,12 @@ pub fn search_file(
     }
 
     if is_binary_filename(&path.to_string_lossy()) {
+        return Ok(());
+    }
+
+    // Deny rules and symlink escapes are enforced per entry, not just on the
+    // traversal root.
+    if !sandbox.is_allowed(&Action::Read, path) {
         return Ok(());
     }
 
@@ -345,6 +356,7 @@ pub fn should_skip_walk_entry(name: &str) -> bool {
 
 #[allow(clippy::too_many_arguments, clippy::only_used_in_recursion)]
 pub fn walk_dir(
+    sandbox: &Sandbox,
     root: &Path,
     dir: &Path,
     pattern: &Regex,
@@ -367,8 +379,15 @@ pub fn walk_dir(
             continue;
         }
 
+        // Skip anything the policy denies (including symlinks that resolve
+        // outside the granted roots) instead of walking into it.
+        if !sandbox.is_allowed(&Action::Read, &path) {
+            continue;
+        }
+
         if path.is_dir() {
             walk_dir(
+                sandbox,
                 root,
                 &path,
                 pattern,
@@ -380,6 +399,7 @@ pub fn walk_dir(
             )?;
         } else if path.is_file() {
             search_file(
+                sandbox,
                 &path,
                 pattern,
                 exts,

@@ -8,7 +8,8 @@ use std::path::PathBuf;
 
 use super::shared::ToolError;
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
-use crate::policy::{Action, Policy};
+use crate::policy::Policy;
+use crate::sandbox::Sandbox;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ListDirArgs {
@@ -53,33 +54,23 @@ impl Tool for ListDirTool {
             fmt_offset_limit(args.offset, args.limit)
         );
         let path = PathBuf::from(&args.path);
-        let canonical = path
-            .canonicalize()
-            .map_err(|e| ToolError::Message(format!("cannot resolve path: {e}")))?;
-        let canonical_str = canonical.to_string_lossy();
+        let sandbox = Sandbox::new(self.policy.clone());
 
-        if !self.policy.is_allowed(&Action::Read, &canonical_str) {
-            return Err(ToolError::Message(format!(
-                "read access denied for: {}",
-                args.path
-            )));
-        }
-
-        let entries: Vec<String> = std::fs::read_dir(&canonical)
-            .map_err(|e| ToolError::Message(format!("cannot read dir: {e}")))?
-            .filter_map(|entry| {
-                entry.ok().map(|e| {
-                    let ftype = e.file_type().ok().map_or('?', |ft| {
-                        if ft.is_dir() {
-                            'd'
-                        } else if ft.is_symlink() {
-                            'l'
-                        } else {
-                            'f'
-                        }
-                    });
-                    format!("{ftype} {}", e.file_name().to_string_lossy())
-                })
+        let entries: Vec<String> = sandbox
+            .read_dir(&path)?
+            .into_iter()
+            .map(|(entry_path, ft)| {
+                let ftype = if ft.is_dir() {
+                    'd'
+                } else if ft.is_symlink() {
+                    'l'
+                } else {
+                    'f'
+                };
+                format!(
+                    "{ftype} {}",
+                    entry_path.file_name().unwrap_or_default().to_string_lossy()
+                )
             })
             .collect();
 

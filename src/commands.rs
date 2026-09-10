@@ -81,7 +81,7 @@ pub(crate) fn cmd_list_sessions(dir: &std::path::Path) -> anyhow::Result<()> {
             println!(
                 "{}  — {} messages, model {}, created {}",
                 name,
-                s.messages.len(),
+                s.log.len(),
                 s.model,
                 s.created
             );

@@ -3,6 +3,7 @@ mod cli;
 mod clients;
 mod commands;
 mod config;
+mod context;
 mod format;
 mod init;
 mod interactive;
@@ -13,6 +14,7 @@ mod output;
 mod policy;
 mod prompt;
 mod providers;
+mod sandbox;
 mod session;
 mod setup;
 mod skills;
@@ -30,7 +32,7 @@ use prompt::assemble_system_prompt;
 use rig_core::client::CompletionClient;
 use setup::{
     apply_cli_overrides, load_config, load_policy, resolve_prompt_text, resolve_provider,
-    resolve_session,
+    resolve_session, resolve_thinking,
 };
 use std::sync::Arc;
 
@@ -72,14 +74,20 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let model_name = config.model.clone();
     let max_tokens = cli.max_tokens.or(config.max_tokens);
     let max_turns = cli.max_turns;
-    let thinking = cli.thinking.or(config.thinking);
 
-    let mut session = resolve_session(&cli, &session_dir, &system_prompt, &model_name)?;
+    let (provider_spec, base_url) = resolve_provider(&config)?;
+    let mut session = resolve_session(
+        &cli,
+        &session_dir,
+        &system_prompt,
+        &model_name,
+        provider_spec.name,
+    )?;
     if let Some(ref mem) = memory {
         mem.set_session_name(&session.name);
     }
     let prompt_text = resolve_prompt_text(&cli).await;
-    let (provider_spec, base_url) = resolve_provider(&config, thinking)?;
+    let thinking = resolve_thinking(cli.thinking.or(config.thinking), provider_spec);
 
     let tool_sets = if !cli.tool.is_empty() {
         tool::connect_tool_servers(&cli.tool).await?
@@ -122,6 +130,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         #[cfg(not(feature = "browser"))]
         _browser_state: browser_state,
         is_interactive: cli.is_interactive(),
+        supports_tools: provider_spec.supports_tools(),
         session: &mut session,
         session_dir: &session_dir,
         prompt_text,

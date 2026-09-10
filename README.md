@@ -109,7 +109,20 @@ ai --web "find the latest docs for rig-core"
 ai --yolo "do whatever it takes"
 ```
 
-With `--ask` (interactive approval), the agent can request access and you approve each request as it happens.
+With `--ask` (interactive approval), the agent can request access and you approve each request as it happens. Approvals are remembered for the session only: choose allow-once, remember the exact target, remember its directory, or deny.
+
+## Security contract
+
+The policy engine is a **boundary for narrow grants**, not a sandbox for broad ones. Stated plainly:
+
+- **Read/write/execute decisions are enforced by one checked filesystem layer.** Paths are resolved (symlinks included) before the policy is consulted, and traversal checks every entry, so `deny` rules inside an allowed tree are honored.
+- **`-x` means full user access.** External commands run as you, with no sandbox; their children inherit that. Only bashkit's in-process builtins are sandboxed. `-x` is gated separately for this reason.
+- **Broad grants are equivalent to full user compromise.** Write access to `$HOME` or `/` lets the agent plant auto-run files (shell rc files, git hooks, configs), which is equivalent to execute. `--yolo` grants everything.
+- **Read + web = exfiltration.** Egress is not filtered: if the agent can read sensitive files *and* reach the network, an injected instruction can ship them out (query params, redirects, or browser JS). Never grant both for untrusted content.
+- **Memory is data, not instructions.** Durable memory is captured only from user-authored turns and injected as clearly non-instructional reference material.
+- **Sessions are bound to their provider/model.** Resuming under a different model forks a fresh session rather than replaying an incompatible history.
+
+Startup prints a warning when a grant is broad enough to make the boundary meaningless.
 
 ## Policy files
 

@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use super::shared::ToolError;
-use crate::policy::{Action, Policy};
+use crate::policy::Policy;
+use crate::sandbox::Sandbox;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ReplaceInFileArgs {
@@ -50,20 +51,8 @@ impl Tool for ReplaceInFileTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!("{DIM}📝 edit file {}{RESET}", args.path);
         let path = PathBuf::from(&args.path);
-        let canonical = path
-            .canonicalize()
-            .map_err(|e| ToolError::Message(format!("cannot resolve path: {e}")))?;
-        let canonical_str = canonical.to_string_lossy();
-
-        if !self.policy.is_allowed(&Action::Write, &canonical_str) {
-            return Err(ToolError::Message(format!(
-                "write access denied for: {}",
-                args.path
-            )));
-        }
-
-        let content = std::fs::read_to_string(&canonical)
-            .map_err(|e| ToolError::Message(format!("cannot read file: {e}")))?;
+        let sandbox = Sandbox::new(self.policy.clone());
+        let content = sandbox.read_to_string(&path)?;
 
         if args.old_str.is_empty() {
             return Err(ToolError::Message("old_str must not be empty".to_string()));
@@ -85,8 +74,7 @@ impl Tool for ReplaceInFileTool {
 
         let new_content = content.replacen(&args.old_str, &args.new_str, 1);
 
-        std::fs::write(&canonical, &new_content)
-            .map_err(|e| ToolError::Message(format!("cannot write file: {e}")))?;
+        sandbox.write(&path, new_content.as_bytes())?;
 
         let result = format!("Successfully replaced in {} (1 occurrence)", args.path);
         debug!("{DIM}  \u{2192} {}{RESET}", result);

@@ -2,8 +2,18 @@
 
 ## Unreleased
 
+### Security
+
+- **One checked filesystem layer (`src/sandbox.rs`)** — every tool that touches a user-supplied path now goes through a single `Sandbox` that canonicalizes the path *before* consulting policy and performs the operation on the resolved path. This closes the hole where `search_content`/`find_files` authorized only the traversal root and then read every entry beneath it unchecked, so `deny` rules inside an allowed tree and symlink escapes were silently ignored. Git tools (`git_diff`, `git_log`) now require `Action::Execute` for `git` instead of a read of `.git`, since a repository can run code via hooks and external diff drivers.
+- **First-class, session-scoped approvals** — interactive approval no longer reads raw stdin from inside the policy check. A shared `ApprovalState` (visible to every tool's cloned `Policy`) prompts through the line editor and offers allow-once / remember-target / remember-directory / deny. Remembered decisions live only for the session and are never written to disk.
+- **Grant-width warnings** — startup now warns when a grant makes the boundary meaningless: `--yolo`, any `-x` (external commands run as the user with no sandbox), broad write access to home or `/`, or read access combined with web access (data exfiltration).
+
 ### Added
 
+- **Full-context sessions (schema v2)** — session files now persist the complete provider-agnostic message log, including tool calls and tool results, and resume replays that exact context. A legacy v1 file is migrated to text-only history and flagged partial.
+- **Provider/model binding** — a session is bound to the provider and model that produced it; resuming under a different pair forks to a fresh session (recording `forked_from`) instead of silently replaying an incompatible history. System-prompt drift is surfaced.
+- **Deterministic context editing (`src/context.rs`)** — a rig hook replaces stale tool-result payloads with a short stub in the history sent to the model, while the persisted session keeps the full originals (archive-first). User/assistant text is never modified; `/compact` remains the manual summarization fallback.
+- **Provider capability flags** — `Provider::supports_thinking`/`supports_tools` gate provider-specific request features. Fixes a bug where `--thinking` injects an Anthropic-only parameter into every provider's request (OpenAI/Groq/DeepSeek would reject it).
 - **Retrieval-based memory system** — replaces the flat ≤100-entry JSON map dumped wholesale into the system prompt with a versioned single-file database of memory entries (id, text, keywords, timestamps, source session). Memories are scored locally with BM25 + keyword overlap and retrieved per user message; relevant entries are injected as a `## Relevant memory` context block ahead of the user prompt (no embeddings API, no extra latency). Existing `memory.json` files migrate automatically.
 - **Keyword-assisted memory adds** — `memory_add` now accepts optional `keywords` to improve retrieval; near-duplicate adds update the existing entry (upsert) instead of duplicating. Near-duplicate detection uses Jaccard token overlap on entry text (not keyword-boosted retrieval scores), so distinct facts sharing a keyword are never merged.
 - **`memory_search` tool** — lets the agent query the memory database directly, returning the best-matching entries with their unique keys (optional `limit`, capped at 50).
@@ -21,6 +31,7 @@
 
 ### Changed
 
+- **Memory trust** — durable memory is captured only from user-authored turns (never assistant text or tool output, which are attacker-influenceable), carries an `origin` tag, and is injected with an explicit "data, not instructions" envelope.
 - **Codebase cleanup** — split the oversized files to keep every `src/*.rs` under ~500 lines: `main.rs` (1287 → ~180) into `agent.rs`, `clients.rs`, `commands.rs`, `interactive.rs`, `logging.rs`, `prompt.rs`, and `setup.rs`; `tools/web_search.rs` (1141 → ~460) into `search_browser.rs` (browser-driven search), `search_html.rs` (HTML/markdown/quality + fetch helpers), and `search_probe.rs` (`--probe-web` diagnostics); `tools/browser.rs` (624) into one file per browser tool (`browser_state.rs`, `browser_navigate.rs`, `browser_click.rs`, `browser_get_content.rs`, `browser_get_element.rs`, `browser_evaluate.rs`). Purely organizational — no behavior changes; tests moved with their code.
 - **Fresh timestamps via `get_current_time`** — the system prompt no longer bakes in a `Current time:` line at startup (it went stale in long-running sessions). The agent now fetches the current UTC time on demand with the new `get_current_time` tool, which is always available.
 - **Document conversion switched to `anydoc`** — replaced `markdownify` + `pdf-extract` with [anydoc](https://github.com/firecrawl/anydoc). Adds legacy Word/PowerPoint/Excel (`.doc`/`.ppt`/`.xls`), RTF, and EPUB, with consistent GitHub-Flavored Markdown output and a smaller dependency tree (drops pdf-extract's ~95-crate stack). HTML preview now uses `html2text`; ZIP/image/audio/video preview is no longer offered. `pdf-inspector` is pinned to its git main to inherit the lopdf 0.42 security fix (RUSTSEC-2026-0187).
