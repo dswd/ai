@@ -142,53 +142,73 @@ pub(crate) fn resolve_thinking(
     requested
 }
 
-/// Resolve the exec-sandbox spec from the policy, honoring `--sandbox`/config and
-/// platform support. Returns `None` when the sandbox is disabled.
-pub(crate) fn resolve_sandbox(
+/// Resolve the container isolation for external commands: image from
+/// `--container` or `container.default_image`, runtime auto-detected, and bind
+/// mounts derived from the policy. Returns `None` for host execution.
+pub(crate) fn resolve_container(
     cli: &Cli,
     config: &Config,
     policy: &Policy,
-) -> anyhow::Result<Option<std::sync::Arc<crate::exec_sandbox::SandboxSpec>>> {
-    if cli.yolo {
-        // `--yolo` is documented as full access; keep it unsandboxed.
+) -> anyhow::Result<Option<std::sync::Arc<crate::container::ContainerRuntime>>> {
+    if cli.no_container {
         return Ok(None);
     }
-    let mode = cli
-        .sandbox
+    let image = cli
+        .container
         .clone()
-        .unwrap_or_else(|| config.sandbox.mode.clone());
-    let enabled = match mode.to_lowercase().as_str() {
-        "off" | "never" => false,
-        "on" | "always" => {
-            if crate::exec_sandbox::available() {
-                true
-            } else {
-                anyhow::bail!(
-                    "--sandbox=on was requested but Landlock is not available on this system"
-                );
-            }
-        }
-        "auto" | "" => {
-            if crate::exec_sandbox::available() {
-                true
-            } else {
-                crate::output::stderr_line(
-                    "warning: exec sandbox is not available on this platform; external commands run unsandboxed",
-                );
-                false
-            }
-        }
-        other => anyhow::bail!("unknown sandbox mode '{other}' (expected auto, on, or off)"),
+        .or_else(|| config.container.default_image.clone());
+    let Some(image) = image else {
+        return Ok(None);
     };
 
-    if !enabled {
-        return Ok(None);
-    }
-    let (spec, warnings) = crate::exec_sandbox::spec_from_policy(policy, &config.sandbox);
+    let preferred = cli
+        .container_runtime
+        .clone()
+        .or_else(|| config.container.runtime.clone());
+    let runtime = crate::container::detect_runtime(preferred.as_deref()).ok_or_else(|| {
+        let requested = preferred.unwrap_or_else(|| "auto".to_string());
+        anyhow::anyhow!(
+            "no container runtime found (requested: {requested}); install docker or podman, \
+             or pass --no-container to run on the host"
+        )
+    })?;
+
+    let (mounts, warnings) = crate::container::mounts_from_policy(policy);
     for warning in warnings {
         crate::output::stderr_line(&format!("warning: {warning}"));
     }
-    Ok(Some(std::sync::Arc::new(spec)))
+
+    let network = match config
+        .container
+        .network
+        .as_deref()
+        .map(str::to_lowercase)
+        .as_deref()
+    {
+        Some("none") => crate::container::Network::None,
+        Some("host") => crate::container::Network::Host,
+        Some("policy") | None | Some("") => {
+            let web =
+                policy.has_any_allow(&Action::WebFetch) || policy.has_any_allow(&Action::WebSearch);
+            if web {
+                crate::container::Network::Default
+            } else {
+                crate::container::Network::None
+            }
+        }
+        Some(other) => {
+            anyhow::bail!("unknown container.network '{other}' (expected policy, none, or host)")
+        }
+    };
+
+    Ok(Some(std::sync::Arc::new(
+        crate::container::ContainerRuntime {
+            image,
+            runtime,
+            network,
+            mounts,
+        },
+    )))
 }
 
 pub(crate) fn load_config(cli: &Cli, vanilla: bool) -> anyhow::Result<Config> {
@@ -224,8 +244,11 @@ pub(crate) fn apply_cli_overrides(cli: &Cli, config: &mut Config) {
     if let Some(ref proxy) = cli.proxy {
         config.proxy = Some(proxy.clone());
     }
-    if let Some(ref mode) = cli.sandbox {
-        config.sandbox.mode = mode.clone();
+    if let Some(ref image) = cli.container {
+        config.container.default_image = Some(image.clone());
+    }
+    if let Some(ref runtime) = cli.container_runtime {
+        config.container.runtime = Some(runtime.clone());
     }
 }
 
@@ -282,10 +305,6 @@ pub(crate) fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> 
 
     if policy.ask {
         policy.approval = Some(std::sync::Arc::new(policy::ApprovalState::new()));
-    }
-
-    for warning in policy.broad_grant_warnings(cli.yolo) {
-        crate::output::stderr_line(&format!("warning: {warning}"));
     }
 
     Ok(policy)

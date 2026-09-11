@@ -39,7 +39,7 @@ pub(crate) struct AgentContext<'a> {
     pub(crate) _browser_state: Option<Arc<()>>,
     pub(crate) is_interactive: bool,
     pub(crate) supports_tools: bool,
-    pub(crate) sandbox: Option<Arc<crate::exec_sandbox::SandboxSpec>>,
+    pub(crate) container_session: Option<Arc<crate::container::ContainerSession>>,
     pub(crate) session: &'a mut Session,
     pub(crate) session_dir: &'a std::path::Path,
     pub(crate) prompt_text: Option<String>,
@@ -94,15 +94,7 @@ fn build_agent<M: CompletionModel + 'static>(
                 .tool(tools::SearchContentTool::new(ctx.policy.clone()))
                 .tool(tools::FindFilesTool::new(ctx.policy.clone()))
                 .tool(tools::FileInfoTool::new(ctx.policy.clone()))
-                .tool(tools::FileViewTool::new(ctx.policy.clone()))
-                .tool(tools::GitDiffTool::new(
-                    ctx.policy.clone(),
-                    ctx.sandbox.as_ref().map(Arc::clone),
-                ))
-                .tool(tools::GitLogTool::new(
-                    ctx.policy.clone(),
-                    ctx.sandbox.as_ref().map(Arc::clone),
-                ));
+                .tool(tools::FileViewTool::new(ctx.policy.clone()));
         }
 
         if can_write {
@@ -118,7 +110,7 @@ fn build_agent<M: CompletionModel + 'static>(
         server = server
             .tool(tools::ExecuteTool::new(
                 ctx.policy.clone(),
-                ctx.sandbox.as_ref().map(Arc::clone),
+                ctx.container_session.as_ref().map(Arc::clone),
             ))
             .tool(tools::GetCurrentTimeTool::new());
 

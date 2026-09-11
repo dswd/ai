@@ -3,8 +3,8 @@ mod cli;
 mod clients;
 mod commands;
 mod config;
+mod container;
 mod context;
-mod exec_sandbox;
 mod format;
 mod init;
 mod interactive;
@@ -28,29 +28,20 @@ use clap::Parser;
 use cli::Cli;
 use clients::{anthropic_client, openai_client};
 use commands::{cmd_delete_session, cmd_list_sessions, cmd_probe_web};
+use config::Config;
 use logging::setup_logging;
+use policy::Policy;
 use prompt::assemble_system_prompt;
 use rig_core::client::CompletionClient;
 use setup::{
     apply_cli_overrides, load_config, load_policy, resolve_prompt_text, resolve_provider,
     resolve_session, resolve_thinking,
 };
+use std::path::PathBuf;
 use std::sync::Arc;
 
 fn main() -> anyhow::Result<()> {
-    if let Some((program, args)) = exec_sandbox::launcher_request() {
-        exec_sandbox::run_launcher(program, args);
-    }
-
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?
-        .block_on(async_main())
-}
-
-async fn async_main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-
     setup_logging(cli.verbose, cli.quiet);
 
     if let Some(ref init_path) = cli.init {
@@ -58,15 +49,11 @@ async fn async_main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    run(cli).await
-}
-
-async fn run(cli: Cli) -> anyhow::Result<()> {
     let vanilla = cli.is_vanilla();
     let mut config = load_config(&cli, vanilla)?;
     apply_cli_overrides(&cli, &mut config);
-
     let session_dir = config.session_dir_resolved();
+
     if cli.list {
         return cmd_list_sessions(&session_dir);
     }
@@ -74,13 +61,36 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         return cmd_delete_session(name, &session_dir);
     }
     if let Some(ref query) = cli.probe_web {
-        return cmd_probe_web(query, &config).await;
+        return tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?
+            .block_on(cmd_probe_web(query, &config));
     }
 
     let policy = load_policy(&cli, &config)?;
-    let sandbox_spec = setup::resolve_sandbox(&cli, &config, &policy)?;
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run(cli, config, session_dir, policy))
+}
+
+async fn run(cli: Cli, config: Config, session_dir: PathBuf, policy: Policy) -> anyhow::Result<()> {
+    let container = setup::resolve_container(&cli, &config, &policy)?;
+    let container_session = match &container {
+        Some(rt) => {
+            let session = Arc::new(
+                container::ContainerSession::start((**rt).clone())
+                    .map_err(|e| anyhow::anyhow!("{e}"))?,
+            );
+            spawn_signal_cleanup(Arc::clone(&session));
+            Some(session)
+        }
+        None => None,
+    };
     let skills = Arc::new(skills::discover(&cli.skill, &config.skills_dir_resolved()));
-    let (system_prompt, memory) = assemble_system_prompt(&cli, &config, &policy, &skills)?;
+    let (system_prompt, memory) =
+        assemble_system_prompt(&cli, &config, &policy, &skills, container_session.is_some())?;
     log::debug!("system prompt:\n{system_prompt}");
 
     let model_name = config.model.clone();
@@ -143,7 +153,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         _browser_state: browser_state,
         is_interactive: cli.is_interactive(),
         supports_tools: provider_spec.supports_tools(),
-        sandbox: sandbox_spec,
+        container_session,
         session: &mut session,
         session_dir: &session_dir,
         prompt_text,
@@ -168,4 +178,31 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Remove the container if the process is interrupted (the normal path removes
+/// it via `Drop`).
+fn spawn_signal_cleanup(session: Arc<container::ContainerSession>) {
+    tokio::spawn(async move {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let mut term = signal(SignalKind::terminate()).ok();
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = async {
+                    match term.as_mut() {
+                        Some(sig) => { sig.recv().await; }
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {}
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+        }
+        session.shutdown();
+        std::process::exit(130);
+    });
 }

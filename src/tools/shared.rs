@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -424,22 +424,6 @@ fn is_binary_filename(name: &str) -> bool {
     ];
     let lower = name.to_lowercase();
     BINARY_EXTS.iter().any(|ext| lower.ends_with(ext))
-}
-
-pub fn find_git_dir() -> Result<PathBuf, ToolError> {
-    let cwd = std::env::current_dir()
-        .map_err(|e| ToolError::Message(format!("cannot get current directory: {e}")))?;
-    for ancestor in cwd.ancestors() {
-        let dot_git = ancestor.join(".git");
-        if dot_git.exists() {
-            return dot_git
-                .canonicalize()
-                .map_err(|e| ToolError::Message(format!("cannot resolve .git path: {e}")));
-        }
-    }
-    Err(ToolError::Message(
-        "not in a git repository (no .git directory found)".to_string(),
-    ))
 }
 
 #[cfg(test)]

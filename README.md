@@ -9,8 +9,8 @@ A CLI agent for interacting with AI models, with tool use, filesystem and comman
 - **Multi-provider support** — OpenAI, Anthropic, Ollama, Groq, DeepSeek, Google (Gemini), Mistral, OpenRouter, and xAI (Grok), configurable via `ai --init`. All map to an OpenAI- or Anthropic-compatible endpoint; `openai-compatible` and `anthropic-compatible` are also available for custom endpoints (requires `api_base`).
 - **Interactive & one-shot modes** — Run with a direct prompt, pipe text via stdin, or start an interactive session with persistent history.
 - **Sessions** — Save, list (`-l`), continue (`-s NAME`), and delete (`--delete NAME`) sessions with message history and system prompt preservation.
-- **Tool system** — Filesystem tools, code search, git diff/log, web fetch/search, command execution, downloads, document extraction, and more.
-- **Sandboxed command execution** — The `execute` tool runs through a virtual bash interpreter (bashkit) with 160+ in-process builtins; external commands require explicit policy approval and run under a Linux Landlock sandbox derived from that policy (`--sandbox`).
+- **Tool system** — Filesystem tools, code search, web fetch/search, command execution, downloads, document extraction, and more.
+- **Sandboxed command execution** — The `execute` tool runs through a virtual bash interpreter (bashkit) with 160+ in-process builtins; external commands require explicit policy approval and, when a container image is configured (`-X`/`--container`), the whole command runs in a session container with only the policy-granted paths bind-mounted.
 - **Policy engine** — Granular allow/deny rules for read, write, execute, web fetch, and web search. Supports policy files, CLI overrides, interactive approval (`--ask`), and `--yolo` mode.
 - **Persistent memory** — Optional agent memory stored to disk and injected into the system prompt.
 - **Skills** — Load reusable skill definitions from `SKILL.md` files (via `--skill=PATH` or the skills folder), listed in the system prompt and loadable on demand with the `load_skill` tool.
@@ -115,15 +115,22 @@ With `--ask` (interactive approval), the agent can request access and you approv
 
 The policy engine is a **boundary for narrow grants**, not a sandbox for broad ones. Stated plainly:
 
-- **Read/write/execute decisions are enforced by one checked filesystem layer.** Paths are resolved (symlinks included) before the policy is consulted, and traversal checks every entry, so `deny` rules inside an allowed tree are honored.
-- **External commands are sandboxed (Linux).** `-x` runs external commands under a Linux Landlock sandbox derived from the policy: they get read access to the granted read roots and write access to the granted write roots, plus a small base set of system paths (loader, libraries, `/etc` config, devices) so ordinary binaries run. Children inherit the sandbox. Where Landlock is unavailable (macOS, Windows, old kernels) the sandbox is disabled with a warning unless `--sandbox=on` is set. The translation is coarser than the in-process policy: Landlock is allow-list only, so globs collapse to directory roots and deny rules inside an allowed tree cannot be represented (a warning is printed).
-- **`-x` still grants the command.** The sandbox constrains what the command can reach, not whether it runs. Granting `-x` is a real capability; grant it narrowly.
+- **Read/write/execute decisions for the agent's own tools are enforced by one checked filesystem layer.** Paths are resolved (symlinks included) before the policy is consulted, and traversal checks every entry, so `deny` rules inside an allowed tree are honored. This is cross-platform and works on any filesystem.
+- **External commands run in a session container (`-X`/`--container[=IMAGE]`).** When an image is configured (per-run via `-X`/`--container` — which defaults to `debian:stable-slim` when no image is given — or `container.default_image` in config), a single container is started at agent startup and **every** `execute` command (builtins included) runs inside it via `exec`. The whole command string is sent to the container's shell, so bashkit and the in-process policy layer are bypassed for that command. Only the policy's read roots are bind-mounted (read-only) and write roots (read-write); the host filesystem is otherwise invisible, and the container gets no network unless the policy grants web access. Works on stacked filesystems (ecryptfs, overlay) and wherever Docker/Podman run. The container is removed on exit.
+- **Without a container, external commands are trusted.** `-x`/`--execute` gates command names; if no container is configured the command runs on the host with your privileges. When a container is active, `-x` gating is skipped (the container is the boundary). Grant `-x` narrowly, and prefer a container image for untrusted workloads.
+- **`--no-container` forces host execution** even when a container is configured. `--yolo` does **not** disable the container: it grants the agent's tools full policy access, and external commands still run in the container (with only explicitly granted `-r`/`-w` paths mounted; whole-filesystem `**` grants are not mountable and are warned about).
+- **`-x` still grants the command.** A container constrains what the command can reach, not whether it runs.
 - **Broad grants are equivalent to full user compromise.** Write access to `$HOME` or `/` lets the agent plant auto-run files (shell rc files, git hooks, configs), which is equivalent to execute. `--yolo` grants everything.
-- **Read + web = exfiltration.** Egress is not filtered: if the agent can read sensitive files *and* reach the network, an injected instruction can ship them out (query params, redirects, or browser JS). Never grant both for untrusted content.
+- **Read + web = exfiltration.** Network egress is only filtered for containerized execs (no network unless web is granted). Otherwise, if the agent can read sensitive files *and* reach the network, an injected instruction can ship them out. Never grant both for untrusted content.
 - **Memory is data, not instructions.** Durable memory is captured only from user-authored turns and injected as clearly non-instructional reference material.
 - **Sessions are bound to their provider/model.** Resuming under a different model forks a fresh session rather than replaying an incompatible history.
 
-Startup prints a warning when a grant is broad enough to make the boundary meaningless.
+Treat a grant as **narrow** or don't grant it. A grant whose width makes the boundary meaningless is not a boundary:
+
+- **`--yolo`, or any whole-filesystem write grant** (`*`, `**`, `/`) — equivalent to full user compromise.
+- **`-x` without a container** — external commands run as you, unsandboxed.
+- **Write access to `$HOME` or `/`** — planting auto-run files (shell rc files, git hooks, configs) is equivalent to execute.
+- **Read access combined with web access** — data exfiltration.
 
 ## Policy files
 
@@ -153,7 +160,6 @@ Available tools (enabled based on policy):
 | File mutation | `replace_in_file`, `delete_file`, `create_directory`, `move_file`, `copy_file` |
 | Documents | `file_view` (extracts text from PDF, DOCX, XLSX, PPTX, ODT, RTF, EPUB, CSV, HTML, …) |
 | Command execution | `execute` (bashkit builtins sandboxed; external commands need `-x`) |
-| Git | `git_diff`, `git_log` |
 | Web | `web_fetch`, `web_search`, `download_file`, `browser_navigate`, `browser_click`, `browser_get_content`, `browser_get_element`, `browser_evaluate` |
 | Memory | `memory_add`, `memory_delete` |
 | Skills | `load_skill` (loads a skill's full instructions by name) |
@@ -248,7 +254,9 @@ Options:
   -i, --ask                  Ask for approval instead of denying
   -t, --tool=<URL>           Connect to an MCP tool server (repeatable)
   -y, --yolo                 Allow everything without asking (overrides all policy, dangerous)
-      --sandbox=<MODE>       Sandbox external commands: auto (default), on, or off
+  -X, --container[=<IMAGE>]  Run all external commands in this container image (default debian:stable-slim)
+      --container-runtime=<RUNTIME>  Container runtime: auto (default), docker, or podman
+      --no-container        Run external commands on the host, ignoring any configured container
       --max-tokens=<N>       Maximum number of tokens
       --max-turns=<N>        Maximum agent turns (tool call rounds) [default: 100]
       --thinking=[<TOKENS>]  Enable extended thinking [default: 16000]

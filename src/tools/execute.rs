@@ -16,8 +16,33 @@ use tokio::process::Command as TokioCommand;
 use super::policy_fs::PolicyFsBackend;
 use super::shared::{ToolError, commands_in_string, is_bashkit_builtin};
 use super::{MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES, fmt_offset_limit, process_output, truncate};
-use crate::exec_sandbox::{self, SandboxSpec};
+use crate::container::ContainerSession;
 use crate::policy::{Action, Policy};
+
+/// A minimal environment for the virtual shell, seeded from the real process so
+/// builtins and external commands agree on `HOME`, `USER`, `PATH`, and `PWD`.
+/// Deliberately an allowlist: the shell's `env`/`printenv` output is visible to
+/// the model, and the process environment holds provider API keys.
+fn shell_env(cwd: &std::path::Path) -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    let home = dirs::home_dir().or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from));
+    if let Some(home) = home {
+        env.push(("HOME".to_string(), home.to_string_lossy().into_owned()));
+    }
+    if let Some(user) = std::env::var_os("USER") {
+        env.push(("USER".to_string(), user.to_string_lossy().into_owned()));
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        env.push(("PATH".to_string(), path.to_string_lossy().into_owned()));
+    }
+    env.push(("PWD".to_string(), cwd.to_string_lossy().into_owned()));
+    for key in ["LANG", "LC_ALL", "LC_CTYPE", "TERM", "SHELL"] {
+        if let Some(value) = std::env::var_os(key) {
+            env.push((key.to_string(), value.to_string_lossy().into_owned()));
+        }
+    }
+    env
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ExecuteArgs {
@@ -36,19 +61,19 @@ pub struct ExecuteArgs {
 #[derive(Debug, Clone)]
 pub struct ExecuteTool {
     policy: Policy,
-    sandbox: Option<Arc<SandboxSpec>>,
+    session: Option<Arc<ContainerSession>>,
 }
 
 impl ExecuteTool {
-    pub fn new(policy: Policy, sandbox: Option<Arc<SandboxSpec>>) -> Self {
-        Self { policy, sandbox }
+    pub fn new(policy: Policy, session: Option<Arc<ContainerSession>>) -> Self {
+        Self { policy, session }
     }
 }
 
 struct ExtBuiltin {
     name: String,
     policy: Policy,
-    sandbox: Option<Arc<SandboxSpec>>,
+    cwd: Option<std::path::PathBuf>,
 }
 
 #[async_trait]
@@ -61,28 +86,14 @@ impl Builtin for ExtBuiltin {
             ));
         }
 
-        let mut command = if let Some(spec) = &self.sandbox {
-            match exec_sandbox::launcher_exe() {
-                Some(exe) => {
-                    let mut c = TokioCommand::new(exe);
-                    c.arg(exec_sandbox::LAUNCHER_FLAG)
-                        .arg("--")
-                        .arg(&self.name)
-                        .args(ctx.args);
-                    for (key, value) in spec.env_vars() {
-                        c.env(key, value);
-                    }
-                    c
-                }
-                None => {
-                    let mut c = TokioCommand::new(&self.name);
-                    c.args(ctx.args);
-                    c
-                }
-            }
-        } else {
+        let mut command = {
             let mut c = TokioCommand::new(&self.name);
             c.args(ctx.args);
+            // Keep the child in the working directory the shell was told to use,
+            // so builtin and external path resolution agree.
+            if let Some(dir) = &self.cwd {
+                c.current_dir(dir);
+            }
             c
         };
 
@@ -135,14 +146,39 @@ impl Tool for ExecuteTool {
 
         let timeout_secs = args.timeout.unwrap_or(30).min(300);
 
-        let full_command = if let Some(ref cwd) = args.cwd {
-            // Single-quote the directory so spaces or shell metacharacters in
-            // `cwd` cannot inject additional commands into the string.
-            let quoted = format!("'{}'", cwd.replace('\'', "'\\''"));
-            format!("cd {quoted} && {}", args.command)
-        } else {
-            args.command.clone()
+        // Resolve the working directory once, against the real filesystem, and
+        // reject a nonexistent one instead of silently running elsewhere. When
+        // the caller does not pass one, use the agent's own cwd. bashkit
+        // otherwise defaults to a fabricated `/home/user`, which makes builtins
+        // and external commands resolve relative paths differently.
+        let effective_cwd = match &args.cwd {
+            Some(c) => {
+                let p = std::path::PathBuf::from(c);
+                if p.is_absolute() {
+                    p
+                } else {
+                    std::env::current_dir().unwrap_or_default().join(p)
+                }
+            }
+            None => std::env::current_dir().map_err(|e| {
+                ToolError::Message(format!("cannot determine working directory: {e}"))
+            })?,
         };
+        if !effective_cwd.is_dir() {
+            return Err(ToolError::Message(format!(
+                "working directory does not exist: {}",
+                effective_cwd.display()
+            )));
+        }
+
+        // When a container session is active, run the whole command inside it:
+        // bashkit and the in-process policy layer are bypassed; the container's
+        // mounts and network are the boundary.
+        if let Some(session) = &self.session {
+            return call_in_container(session, &args, &effective_cwd, timeout_secs).await;
+        }
+
+        let full_command = args.command.clone();
 
         let commands = commands_in_string(&full_command);
         if commands.is_empty() {
@@ -170,7 +206,13 @@ impl Tool for ExecuteTool {
             ..Default::default()
         };
 
-        let mut builder = Bash::builder().fs(fs).limits(limits);
+        let mut builder = Bash::builder()
+            .fs(fs)
+            .limits(limits)
+            .cwd(effective_cwd.clone());
+        for (key, value) in shell_env(&effective_cwd) {
+            builder = builder.env(key, value);
+        }
 
         for name in &external_names {
             builder = builder.builtin(
@@ -178,7 +220,7 @@ impl Tool for ExecuteTool {
                 Box::new(ExtBuiltin {
                     name: name.clone(),
                     policy: policy.clone(),
-                    sandbox: self.sandbox.as_ref().map(Arc::clone),
+                    cwd: Some(effective_cwd.clone()),
                 }),
             );
         }
@@ -222,6 +264,58 @@ impl Tool for ExecuteTool {
         );
         process_output(&result, args.offset, args.limit).map_err(ToolError::Message)
     }
+}
+
+/// Run the whole command inside the session container via `sh -c`.
+async fn call_in_container(
+    session: &ContainerSession,
+    args: &ExecuteArgs,
+    cwd: &std::path::Path,
+    timeout_secs: u64,
+) -> Result<String, ToolError> {
+    let cmd = session
+        .exec_shell(&args.command, Some(cwd), timeout_secs)
+        .map_err(ToolError::Message)?;
+    let mut command = tokio::process::Command::from(cmd);
+    let child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| ToolError::Message(format!("container exec failed: {e}")))?;
+    let output =
+        match tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
+            .await
+        {
+            Ok(Ok(o)) => o,
+            Ok(Err(e)) => return Err(ToolError::Message(format!("container exec failed: {e}"))),
+            Err(_) => {
+                return Err(ToolError::Message(format!(
+                    "execution timed out after {timeout_secs}s"
+                )));
+            }
+        };
+
+    let mut result = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.trim().is_empty() {
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        result.push_str("--- stderr ---\n");
+        result.push_str(&stderr);
+    }
+    if result.is_empty() {
+        result = format!("(exit code: {})", output.status.code().unwrap_or(-1));
+    }
+
+    let truncated = truncate(&result, MAX_OUTPUT_LINES, MAX_OUTPUT_CHARS);
+    debug!(
+        "{DIM} {} \n{truncated}\n {} {RESET}",
+        bar_title(&args.command),
+        bar_line()
+    );
+    process_output(&result, args.offset, args.limit).map_err(ToolError::Message)
 }
 
 #[cfg(test)]
@@ -303,7 +397,7 @@ mod tests {
                 Box::new(ExtBuiltin {
                     name: "echo".to_string(),
                     policy,
-                    sandbox: None,
+                    cwd: None,
                 }),
             )
             .build();
@@ -326,7 +420,7 @@ mod tests {
                 Box::new(ExtBuiltin {
                     name: "sleep".to_string(),
                     policy,
-                    sandbox: None,
+                    cwd: None,
                 }),
             )
             .build();
@@ -396,11 +490,84 @@ mod tests {
                 Box::new(ExtBuiltin {
                     name: "sh".to_string(),
                     policy,
-                    sandbox: None,
+                    cwd: None,
                 }),
             )
             .build();
         let result = bash.exec("sh -c 'exit 7'").await.unwrap();
         assert_eq!(result.exit_code, 7);
+    }
+
+    async fn run_tool(policy: Policy, command: &str, cwd: Option<String>) -> String {
+        let tool = ExecuteTool::new(policy, None);
+        tool.call(ExecuteArgs {
+            command: command.to_string(),
+            cwd,
+            offset: None,
+            limit: None,
+            timeout: Some(10),
+        })
+        .await
+        .expect("execute tool failed")
+    }
+
+    #[tokio::test]
+    async fn test_execute_uses_process_cwd() {
+        let cwd = std::env::current_dir().unwrap();
+        let out = run_tool(Policy::default(), "pwd", None).await;
+        assert_eq!(
+            out.lines().next().unwrap().trim(),
+            cwd.to_string_lossy(),
+            "bashkit must not fabricate /home/user"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_uses_requested_cwd() {
+        let dir = std::env::temp_dir().join(format!("ai-exec-cwd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = run_tool(
+            Policy::default(),
+            "pwd",
+            Some(dir.to_string_lossy().into_owned()),
+        )
+        .await;
+        assert_eq!(out.lines().next().unwrap().trim(), dir.to_string_lossy());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_execute_relative_read_uses_cwd() {
+        let dir = std::env::temp_dir().join(format!("ai-exec-rel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("rel.txt"), "RELATIVE-OK").unwrap();
+
+        let mut policy = Policy::default();
+        policy.add_cli_rule(PolicyRule::Allow(
+            Action::Read,
+            dir.to_string_lossy().into_owned(),
+        ));
+        let out = run_tool(
+            policy,
+            "cat rel.txt",
+            Some(dir.to_string_lossy().into_owned()),
+        )
+        .await;
+        assert!(out.contains("RELATIVE-OK"), "unexpected output: {out}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_shell_env_seeds_home_and_pwd() {
+        let cwd = std::path::Path::new("/tmp");
+        let env = shell_env(cwd);
+        assert!(env.iter().any(|(k, _)| k == "PWD"));
+        assert!(env.iter().any(|(k, _)| k == "HOME"));
+        assert_eq!(
+            env.iter().find(|(k, _)| k == "PWD").unwrap().1,
+            "/tmp".to_string()
+        );
     }
 }

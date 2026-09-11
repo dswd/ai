@@ -53,17 +53,18 @@ system_prompt: "You are a concise, helpful CLI assistant."
 #   # A bare URL works; a "{query}" placeholder is appended with ?q= automatically.
 #   searxng_url: "http://localhost:8080/search?q={query}"
 
-# Execution sandbox for external commands (Linux Landlock).
-sandbox:
-  # auto (default): enforce when the platform supports it, else warn and run
-  # unsandboxed. on: require it (fails if unavailable). off: never sandbox.
-  mode: auto
-  # Optional resource caps applied to sandboxed commands.
-  # memory_mb: 4096
-  # cpu_secs: 300
-  # nproc: 256
-  # file_size_mb: 1024
-  # Override the base readonly path grants (loader, libraries, /etc, devices).
-  # system_read: ["/usr", "/bin", "/lib", "/lib64", "/etc/ld.so.cache", "/dev/null"]
-  # Extra writable paths granted to every sandboxed command.
-  # system_write: []
+# Container isolation for external commands. When `default_image` is set, a
+# single container is started at agent startup and every `execute` command runs
+# inside it via `exec`, bind-mounting only the policy-granted read/write paths.
+# The container is removed on exit.
+container:
+  # Image used for external commands. Unset runs them on the host (trusted).
+  # `ai -X` with no image uses "debian:stable-slim".
+  # default_image: "alpine:latest"
+  # Runtime: auto (default; prefers docker, then podman), docker, or podman.
+  runtime: auto
+  # Network policy: policy (default; none unless web is granted), none, or host.
+  network: policy
+
+# Extra filesystem access for external commands comes from the policy grants
+# (-r/--read and -w/--write), which become bind mounts inside the container.

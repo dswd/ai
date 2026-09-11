@@ -168,12 +168,29 @@ pub struct Cli {
     pub yolo: bool,
 
     #[arg(
-        long = "sandbox",
-        help = "Execution sandbox for external commands: auto, on, or off",
-        value_name = "MODE",
+        short = 'X',
+        long = "container",
+        help = "Run external commands in this container image (default debian:stable-slim); -X is the short form",
+        num_args = 0..=1,
+        value_name = "IMAGE",
+        default_missing_value = "debian:stable-slim",
         require_equals = true
     )]
-    pub sandbox: Option<String>,
+    pub container: Option<String>,
+
+    #[arg(
+        long = "container-runtime",
+        help = "Container runtime to use: auto, docker, or podman",
+        value_name = "RUNTIME",
+        require_equals = true
+    )]
+    pub container_runtime: Option<String>,
+
+    #[arg(
+        long = "no-container",
+        help = "Run external commands on the host, ignoring any configured container"
+    )]
+    pub no_container: bool,
 
     #[arg(
         long = "max-tokens",
@@ -289,7 +306,9 @@ impl Cli {
             && !self.ask
             && self.tool.is_empty()
             && !self.yolo
-            && self.sandbox.is_none()
+            && self.container.is_none()
+            && self.container_runtime.is_none()
+            && !self.no_container
             && self.max_tokens.is_none()
             && self.max_turns == 100
             && self.thinking.is_none()
@@ -346,5 +365,23 @@ mod tests {
     #[test]
     fn test_prompt_makes_non_vanilla() {
         assert!(!parse(&["hi"]).is_vanilla());
+    }
+
+    #[test]
+    fn test_container_default_image() {
+        assert_eq!(
+            parse(&["-X"]).container.as_deref(),
+            Some("debian:stable-slim")
+        );
+        assert_eq!(
+            parse(&["--container"]).container.as_deref(),
+            Some("debian:stable-slim")
+        );
+        assert_eq!(parse(&["-X=alpine"]).container.as_deref(), Some("alpine"));
+        assert_eq!(
+            parse(&["--container=alpine"]).container.as_deref(),
+            Some("alpine")
+        );
+        assert_eq!(parse(&[]).container, None);
     }
 }

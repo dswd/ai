@@ -259,60 +259,6 @@ impl Policy {
 
         lines.join("\n")
     }
-
-    /// Warnings for grants whose width makes the boundary meaningless
-    /// (grant-width doctrine).
-    pub fn broad_grant_warnings(&self, yolo: bool) -> Vec<String> {
-        let mut out = Vec::new();
-        let home = normalize_path_separators(&home_dir().to_string_lossy());
-        let mut read = false;
-        let mut web = false;
-        let mut execute = false;
-        let mut write_broad = false;
-
-        for rule in self.cli_rules.iter().chain(self.rules.iter()) {
-            if let PolicyRule::Allow(action, pattern) = rule {
-                match action {
-                    Action::Read => read = true,
-                    Action::WebFetch | Action::WebSearch => web = true,
-                    Action::Execute => execute = true,
-                    Action::Write => {
-                        let p = normalize_path_separators(pattern);
-                        if matches!(p.as_str(), "*" | "**" | "/")
-                            || p == home
-                            || p == format!("{home}/**")
-                            || p == format!("{home}/*")
-                        {
-                            write_broad = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        if yolo {
-            out.push("--yolo allows everything; equivalent to full user compromise.".to_string());
-        }
-        if execute && !yolo {
-            out.push(
-                "-x grants external commands, which run as you with no sandbox (full user access)."
-                    .to_string(),
-            );
-        }
-        if write_broad && !yolo {
-            out.push(
-                "broad write access (home or /) is equivalent to full user compromise: auto-run files, git hooks, and configs make write equal to execute."
-                    .to_string(),
-            );
-        }
-        if read && web {
-            out.push(
-                "read access combined with web access allows data exfiltration; do not grant both for untrusted content."
-                    .to_string(),
-            );
-        }
-        out
-    }
 }
 
 fn home_dir() -> PathBuf {
@@ -469,7 +415,7 @@ fn parse_line(line: &str) -> Option<PolicyRule> {
     })
 }
 
-fn matches_pattern(target: &str, pattern: &str) -> bool {
+pub(crate) fn matches_pattern(target: &str, pattern: &str) -> bool {
     if pattern == "*" || pattern == "**" {
         return true;
     }

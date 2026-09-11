@@ -46,6 +46,7 @@ tokio = { version = "1.53.1", features = [
     "io-util",
     "io-std",
     "process",
+    "signal",
 ] }
 anydoc = "0.1.7"
 html2md = "0.2"
@@ -53,9 +54,8 @@ ansi_color_constants = "4.0.0"
 obscura = { git = "https://github.com/h4ckf0r0day/obscura", optional = true }
 bashkit = { version = "0.14", features = ["realfs"] }
 
-[target.'cfg(target_os = "linux")'.dependencies]
-landlock = "0.4"
-rlimit = "0.11"
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [patch.crates-io]
 # Released pdf-inspector 0.1.7 pins the vulnerable lopdf 0.41 (RUSTSEC-2026-0187).

@@ -27,7 +27,7 @@ pub(crate) fn permissions_available(policy: &Policy) -> Permissions {
     }
 }
 
-pub(crate) fn missing_permissions_note(policy: &Policy) -> Option<String> {
+pub(crate) fn missing_permissions_note(policy: &Policy, containerized: bool) -> Option<String> {
     let p = permissions_available(policy);
     let mut lines: Vec<&str> = Vec::new();
     if !(p.web_fetch && p.web_search) {
@@ -43,7 +43,7 @@ pub(crate) fn missing_permissions_note(policy: &Policy) -> Option<String> {
             "Write access not allowed. If required, ask the user to add `-w <PATH>` (e.g. `-w=./src`) to the call.",
         );
     }
-    if !p.execute {
+    if !p.execute && !containerized {
         lines.push(
             "External command execution not allowed. If required, ask the user to add `-x <PATTERN>` (e.g. `-x=cargo,git`) to the call.",
         );
@@ -68,6 +68,7 @@ pub(crate) fn assemble_system_prompt(
     config: &Config,
     policy: &Policy,
     skills: &[skills::Skill],
+    containerized: bool,
 ) -> anyhow::Result<(String, Option<Arc<memory::Memory>>)> {
     let mut system_prompt = cli
         .system
@@ -90,7 +91,7 @@ pub(crate) fn assemble_system_prompt(
     };
 
     system_prompt = format!("{system_prompt}\n\n{}", policy.summary());
-    if let Some(note) = missing_permissions_note(policy) {
+    if let Some(note) = missing_permissions_note(policy, containerized) {
         system_prompt.push_str(&note);
     }
 
@@ -137,7 +138,7 @@ mod tests {
     #[test]
     fn test_missing_permissions_note_default() {
         let policy = Policy::default();
-        let note = missing_permissions_note(&policy).expect("note should be present");
+        let note = missing_permissions_note(&policy, false).expect("note should be present");
         assert!(note.contains("--web"));
         assert!(note.contains("-r <PATH>"));
         assert!(note.contains("-w <PATH>"));
@@ -147,7 +148,7 @@ mod tests {
     #[test]
     fn test_missing_permissions_note_web_only() {
         let policy = policy_with(&[Action::Read, Action::Write, Action::Execute]);
-        let note = missing_permissions_note(&policy).expect("note should be present");
+        let note = missing_permissions_note(&policy, false).expect("note should be present");
         assert!(note.contains("--web"));
         assert!(!note.contains("-r <PATH>"));
         assert!(!note.contains("-w <PATH>"));
@@ -158,7 +159,7 @@ mod tests {
     fn test_missing_permissions_note_ask_mode() {
         let mut policy = Policy::default();
         policy.ask = true;
-        assert!(missing_permissions_note(&policy).is_none());
+        assert!(missing_permissions_note(&policy, false).is_none());
     }
 
     #[test]
@@ -170,6 +171,6 @@ mod tests {
             Action::WebSearch,
             Action::Execute,
         ]);
-        assert!(missing_permissions_note(&policy).is_none());
+        assert!(missing_permissions_note(&policy, false).is_none());
     }
 }
