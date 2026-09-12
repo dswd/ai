@@ -3,7 +3,7 @@
 use crate::util::{bar_line, bar_title};
 use ansi_color_constants::*;
 use log::{debug, info};
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -52,7 +52,7 @@ impl std::fmt::Debug for BrowserGetElementTool {
     }
 }
 
-impl Tool for BrowserGetElementTool {
+impl PortableTool for BrowserGetElementTool {
     const NAME: &'static str = "browser_get_element";
 
     type Args = BrowserGetElementArgs;

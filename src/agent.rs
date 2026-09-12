@@ -12,7 +12,7 @@ use crate::tool;
 use crate::tools;
 use ansi_color_constants::*;
 use futures::StreamExt;
-use rig_core::{
+use rig::{
     agent::AgentBuilder,
     agent::{MultiTurnStreamItem, PromptResponse, StreamingResult},
     completion::CompletionModel,
@@ -58,10 +58,7 @@ pub(crate) async fn run_agent<M: CompletionModel + 'static>(
     dispatch_agent(agent, ctx).await
 }
 
-async fn dispatch_agent<M: CompletionModel + 'static>(
-    agent: rig_core::agent::Agent<M>,
-    ctx: AgentContext<'_>,
-) -> anyhow::Result<()> {
+async fn dispatch_agent(agent: rig::agent::Agent, ctx: AgentContext<'_>) -> anyhow::Result<()> {
     if ctx.is_interactive {
         run_interactive(
             agent,
@@ -84,7 +81,7 @@ async fn dispatch_agent<M: CompletionModel + 'static>(
 fn build_agent<M: CompletionModel + 'static>(
     model: M,
     ctx: &AgentContext<'_>,
-) -> rig_core::agent::Agent<M> {
+) -> rig::agent::Agent {
     let p = permissions_available(ctx.policy);
     let (can_read, can_write, can_web_fetch, can_web_search) =
         (p.read, p.write, p.web_fetch, p.web_search);
@@ -227,17 +224,18 @@ fn build_agent<M: CompletionModel + 'static>(
     }
 }
 
-pub(crate) async fn stream_response<R>(
-    stream: &mut StreamingResult<R>,
+pub(crate) async fn stream_response(
+    stream: &mut StreamingResult,
 ) -> anyhow::Result<PromptResponse> {
     while let Some(item) = stream.next().await {
         match item {
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text))) => {
                 output::stdout_push(&text.text);
             }
-            Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(
+            Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning {
                 reasoning,
-            ))) if !is_quiet() => {
+                ..
+            })) if !is_quiet() => {
                 output::stderr_line(&format!(
                     "{ITALICS}{BLUE}{}{RESET}",
                     reasoning.display_text()
@@ -261,8 +259,8 @@ pub(crate) async fn stream_response<R>(
     Err(anyhow::anyhow!("no final response"))
 }
 
-async fn run_oneshot<M: CompletionModel + 'static>(
-    agent: rig_core::agent::Agent<M>,
+async fn run_oneshot(
+    agent: rig::agent::Agent,
     prompt: &str,
     memory: Option<Arc<memory::Memory>>,
 ) -> anyhow::Result<()> {

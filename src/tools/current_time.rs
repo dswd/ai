@@ -1,5 +1,5 @@
 use log::info;
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +17,7 @@ impl GetCurrentTimeTool {
     }
 }
 
-impl Tool for GetCurrentTimeTool {
+impl PortableTool for GetCurrentTimeTool {
     const NAME: &'static str = "get_current_time";
 
     type Args = GetCurrentTimeArgs;

@@ -6,7 +6,7 @@ Guidance for AI agents working in this repository.
 
 `ai` is a single-binary Rust CLI agent: it talks to LLM providers and lets the model
 use tools (filesystem, shell, web, memory) gated by a policy engine. Rust edition
-2024, async via Tokio, LLM layer via `rig-core`. Default build enables the `browser`
+2024, async via Tokio, LLM layer via the `rig` facade (`rig-core` + `rig-agent`). Default build enables the `browser`
 feature (Obscura headless browser for web tools); `--no-default-features` drops it.
 
 ## Commands
@@ -52,7 +52,7 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 
 ## Tool architecture
 
-Each tool in `src/tools/` is a rig-core `Tool` with: serde + schemars args struct,
+Each tool in `src/tools/` is a `rig::tool::PortableTool` with: serde + schemars args struct,
 `new(policy)` constructor, and `call` implementing the action. Tools are registered in
 `build_agent` (`agent.rs`) **only when policy allows**: read tools need a `Read` allow rule,
 write tools a `Write` rule, web tools `WebFetch`/`WebSearch`, and so on. Every user-supplied

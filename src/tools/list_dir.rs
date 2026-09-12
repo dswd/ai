@@ -1,7 +1,7 @@
 use crate::util::{bar_line, bar_title};
 use ansi_color_constants::*;
 use log::{debug, info};
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -32,7 +32,7 @@ impl ListDirTool {
     }
 }
 
-impl Tool for ListDirTool {
+impl PortableTool for ListDirTool {
     const NAME: &'static str = "list_dir";
 
     type Args = ListDirArgs;

@@ -5,7 +5,7 @@ use bashkit::{
     RealFsMode, async_trait,
 };
 use log::{debug, info};
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::process::Stdio;
@@ -113,7 +113,7 @@ impl Builtin for ExtBuiltin {
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                 let mut result = ExecResult::ok(stdout);
-                result.stderr = stderr;
+                result.stderr = stderr.into();
                 result.exit_code = output.status.code().unwrap_or(-1);
                 Ok(result)
             }
@@ -122,7 +122,7 @@ impl Builtin for ExtBuiltin {
     }
 }
 
-impl Tool for ExecuteTool {
+impl PortableTool for ExecuteTool {
     const NAME: &'static str = "execute";
 
     type Args = ExecuteArgs;

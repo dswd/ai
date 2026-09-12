@@ -18,6 +18,8 @@
 ### Changed
 
 - **Breaking: `--init` renamed to `--setup`** — no alias. `ai --setup` creates or reconfigures the config; an existing file is backed up to `config.yaml.bak` first.
+- **Breaking: `rig` 0.40 → 0.42** — the agent runtime moved out of `rig-core` into the `rig` facade (`rig-core` + `rig-agent`). Tools now implement `rig::tool::PortableTool`; the `Agent` type is no longer model-generic; and context pruning uses the hook-v2 `AgentHook::on_completion_call` event instead of `on_event`/`Flow`. MCP stays on `rmcp` 2.x because that is what `rig-agent` 0.42 targets (3.x is not yet compatible).
+- **Breaking: session files from the previous rig version** — assistant content is now tagged in the serialized log, so sessions written by rig 0.40 may fail to load. They are skipped with a warning and a new session starts; delete old session files to silence the warning.
 
 ### Fixed
 
@@ -35,6 +37,7 @@
 ### Added (infra)
 
 - MIT `LICENSE`, a `rust-toolchain.toml` pinning stable (rustfmt + clippy), and binary-level integration tests under `tests/`.
+- **Dependency refresh** — moved to `rig` 0.42, `rmcp` 2.x, `dirs` 7, `anydoc` 0.2, and `bashkit` 0.18, plus `cargo update` for the rest (`log` 0.4.34, `reqwest` 0.13.5, refreshed `obscura` git revision). The `pdf-inspector` git override is gone: released `pdf-inspector` 1.19.0 already carries the fixed `lopdf` 0.44.
 
 ## v0.4.0 – Container Isolation, Memory & Sessions
 

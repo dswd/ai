@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ansi_color_constants::*;
 use log::info;
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -31,7 +31,7 @@ impl MemoryAddTool {
     }
 }
 
-impl Tool for MemoryAddTool {
+impl PortableTool for MemoryAddTool {
     const NAME: &'static str = "memory_add";
 
     type Args = MemoryAddArgs;

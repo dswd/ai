@@ -1,6 +1,6 @@
 use ansi_color_constants::*;
 use log::{debug, info};
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -28,7 +28,7 @@ impl WriteFileTool {
     }
 }
 
-impl Tool for WriteFileTool {
+impl PortableTool for WriteFileTool {
     const NAME: &'static str = "write_file";
 
     type Args = WriteFileArgs;

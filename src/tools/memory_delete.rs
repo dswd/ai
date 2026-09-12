@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ansi_color_constants::*;
 use log::info;
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +26,7 @@ impl MemoryDeleteTool {
     }
 }
 
-impl Tool for MemoryDeleteTool {
+impl PortableTool for MemoryDeleteTool {
     const NAME: &'static str = "memory_delete";
 
     type Args = MemoryDeleteArgs;

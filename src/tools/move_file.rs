@@ -1,6 +1,6 @@
 use ansi_color_constants::*;
 use log::info;
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -28,7 +28,7 @@ impl MoveFileTool {
     }
 }
 
-impl Tool for MoveFileTool {
+impl PortableTool for MoveFileTool {
     const NAME: &'static str = "move_file";
 
     type Args = MoveFileArgs;

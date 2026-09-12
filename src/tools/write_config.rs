@@ -1,6 +1,6 @@
 use ansi_color_constants::*;
 use log::info;
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -44,7 +44,7 @@ impl WriteConfigTool {
     }
 }
 
-impl Tool for WriteConfigTool {
+impl PortableTool for WriteConfigTool {
     const NAME: &'static str = "write_config";
 
     type Args = WriteConfigArgs;

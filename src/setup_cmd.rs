@@ -9,8 +9,8 @@ use crate::session::Session;
 use crate::setup::resolve_provider;
 use crate::tools::SetupTarget;
 use dialoguer::{Confirm, FuzzySelect, Input, Password, Select, theme::ColorfulTheme};
-use rig_core::client::CompletionClient;
-use rig_core::completion::{CompletionModel, Message};
+use rig::client::CompletionClient;
+use rig::completion::{CompletionModel, Message};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -583,7 +583,7 @@ async fn run_ai_setup(path: &Path, config: &Config) -> Result<(), Phase2Error> {
 
 /// Phase 2 begins by proving the phase-1 connection actually works. A failure
 /// is reported to the user and sends them back to the connection wizard.
-async fn probe_model<M: CompletionModel>(model: &M) -> Result<(), Phase2Error> {
+async fn probe_model<M: CompletionModel + Clone>(model: &M) -> Result<(), Phase2Error> {
     let request = model
         .completion_request(Message::user("Reply with the single word OK."))
         .build();

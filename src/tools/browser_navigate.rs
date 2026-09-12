@@ -2,7 +2,7 @@
 
 use ansi_color_constants::*;
 use log::info;
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -37,7 +37,7 @@ impl BrowserNavigateTool {
     }
 }
 
-impl Tool for BrowserNavigateTool {
+impl PortableTool for BrowserNavigateTool {
     const NAME: &'static str = "browser_navigate";
 
     type Args = BrowserNavigateArgs;

@@ -1,5 +1,5 @@
 use log::info;
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -24,7 +24,7 @@ impl LoadSkillTool {
     }
 }
 
-impl Tool for LoadSkillTool {
+impl PortableTool for LoadSkillTool {
     const NAME: &'static str = "load_skill";
 
     type Args = LoadSkillArgs;

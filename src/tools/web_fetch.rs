@@ -1,7 +1,7 @@
 use crate::util::{bar_line, bar_title};
 use ansi_color_constants::*;
 use log::{debug, info};
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -57,7 +57,7 @@ impl WebFetchTool {
     }
 }
 
-impl Tool for WebFetchTool {
+impl PortableTool for WebFetchTool {
     const NAME: &'static str = "web_fetch";
 
     type Args = WebFetchArgs;

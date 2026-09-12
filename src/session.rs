@@ -1,6 +1,6 @@
 use anyhow::Context;
-use rig_core::completion::message::UserContent;
-use rig_core::completion::{AssistantContent, Message as ChatMessage};
+use rig::completion::message::UserContent;
+use rig::completion::{AssistantContent, Message as ChatMessage};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -316,8 +316,11 @@ mod tests {
             "openai".to_string(),
         );
         s.add_user("hello");
-        s.push_message(ChatMessage::assistant_with_id("id1".to_string(), "calling"));
-        s.push_message(ChatMessage::tool_result("id1", "tool output"));
+        s.push_message(ChatMessage::Assistant {
+            id: Some("id1".to_string()),
+            content: vec![AssistantContent::text("calling")],
+        });
+        s.push_message(ChatMessage::tool_result("id1", "tool", "tool output"));
         s.add_assistant("done");
         s.save(&dir).unwrap();
 
@@ -361,8 +364,11 @@ mod tests {
             "openai".to_string(),
         );
         s.add_user("hello");
-        s.push_message(ChatMessage::assistant_with_id("id1".to_string(), "call"));
-        s.push_message(ChatMessage::tool_result("id1", "secret"));
+        s.push_message(ChatMessage::Assistant {
+            id: Some("id1".to_string()),
+            content: vec![AssistantContent::text("call")],
+        });
+        s.push_message(ChatMessage::tool_result("id1", "tool", "secret"));
         s.add_assistant("answer");
         let t = s.transcript();
         assert_eq!(t.len(), 3);

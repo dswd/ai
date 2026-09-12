@@ -1,7 +1,7 @@
 use ansi_color_constants::*;
 use log::{debug, info};
 use rand::RngExt;
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -139,7 +139,7 @@ impl WebSearchTool {
     }
 }
 
-impl Tool for WebSearchTool {
+impl PortableTool for WebSearchTool {
     const NAME: &'static str = "web_search";
 
     type Args = WebSearchArgs;

@@ -7,16 +7,16 @@ use crate::output;
 use crate::session::{self, Role, Session};
 use ansi_color_constants::*;
 use log::{error, info};
-use rig_core::{
+use rig::{
     agent::{Agent, PromptResponse},
-    completion::{Chat, CompletionModel, Message, Usage},
+    completion::{Chat, Message, Usage},
     streaming::StreamingChat,
 };
 use std::sync::Arc;
 use std::time::Instant;
 
-pub(crate) async fn run_interactive<M: CompletionModel + 'static>(
-    agent: Agent<M>,
+pub(crate) async fn run_interactive(
+    agent: Agent,
     session: &mut Session,
     session_dir: &std::path::Path,
     initial_prompt: Option<String>,
@@ -220,11 +220,7 @@ fn record_turn(session: &mut Session, chat_history: &mut Vec<Message>, response:
 
 /// Ask the model to review the unreconciled part of the conversation and store
 /// durable facts in memory using the memory tools. Non-fatal: failures log and continue.
-async fn reconcile_memory<M: CompletionModel + 'static>(
-    agent: &Agent<M>,
-    session: &mut Session,
-    memory: &memory::Memory,
-) {
+async fn reconcile_memory(agent: &Agent, session: &mut Session, memory: &memory::Memory) {
     let start = session.reconciled_until.min(session.log.len());
     if start >= session.log.len() {
         return;

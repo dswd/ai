@@ -1,6 +1,6 @@
 use ansi_color_constants::*;
 use log::{debug, info};
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -30,7 +30,7 @@ impl ReplaceInFileTool {
     }
 }
 
-impl Tool for ReplaceInFileTool {
+impl PortableTool for ReplaceInFileTool {
     const NAME: &'static str = "replace_in_file";
 
     type Args = ReplaceInFileArgs;

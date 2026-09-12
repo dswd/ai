@@ -2,7 +2,7 @@
 
 use ansi_color_constants::*;
 use log::info;
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -45,7 +45,7 @@ impl std::fmt::Debug for BrowserEvaluateTool {
     }
 }
 
-impl Tool for BrowserEvaluateTool {
+impl PortableTool for BrowserEvaluateTool {
     const NAME: &'static str = "browser_evaluate";
 
     type Args = BrowserEvaluateArgs;

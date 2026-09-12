@@ -6,11 +6,11 @@
 //! User and assistant text is never touched, and summarization is left as the
 //! manual `/compact` fallback.
 
-use rig_core::OneOrMany;
-use rig_core::agent::{AgentHook, Flow, HookContext, RequestPatch, StepEvent, StepEventKind};
-use rig_core::completion::CompletionModel;
-use rig_core::completion::Message;
-use rig_core::completion::message::{ToolResult, ToolResultContent, UserContent};
+use rig::agent::{
+    AgentHook, CompletionCallAction, CompletionCallEvent, HookContext, RequestPatch, StepEventKind,
+};
+use rig::completion::Message;
+use rig::completion::message::{ToolResult, ToolResultContent, UserContent};
 
 /// Only prune once the history is at least this long.
 pub(crate) const PRUNE_THRESHOLD: usize = 24;
@@ -48,14 +48,15 @@ fn stub_tool_results(msg: &Message) -> Message {
     };
     let mut items: Vec<UserContent> = Vec::new();
     let mut changed = false;
-    for item in content.iter() {
+    for item in content {
         match item {
             UserContent::ToolResult(tr) => {
                 changed = true;
                 items.push(UserContent::ToolResult(ToolResult {
-                    id: tr.id.clone(),
-                    call_id: tr.call_id.clone(),
-                    content: OneOrMany::one(ToolResultContent::text(STUB)),
+                    call: tr.call.clone(),
+                    provider: tr.provider.clone(),
+                    name: tr.name.clone(),
+                    content: vec![ToolResultContent::text(STUB)],
                 }));
             }
             other => items.push(other.clone()),
@@ -64,10 +65,7 @@ fn stub_tool_results(msg: &Message) -> Message {
     if !changed {
         return msg.clone();
     }
-    match OneOrMany::many(items) {
-        Ok(content) => Message::User { content },
-        Err(_) => msg.clone(),
-    }
+    Message::User { content: items }
 }
 
 /// A rig hook that prunes stale tool outputs from the history sent each turn.
@@ -87,18 +85,20 @@ impl Default for ContextPruneHook {
     }
 }
 
-impl<M: CompletionModel> AgentHook<M> for ContextPruneHook {
+impl AgentHook for ContextPruneHook {
     fn observes(&self, kind: StepEventKind) -> bool {
         kind == StepEventKind::CompletionCall
     }
 
-    async fn on_event(&self, _ctx: &HookContext, event: StepEvent<'_, M>) -> Flow {
-        if let StepEvent::CompletionCall { history, .. } = event
-            && let Some(pruned) = prune_history(history, self.keep_recent)
-        {
-            return Flow::patch_request(RequestPatch::new().history(pruned));
+    async fn on_completion_call(
+        &self,
+        _ctx: &HookContext,
+        event: CompletionCallEvent<'_>,
+    ) -> CompletionCallAction {
+        if let Some(pruned) = prune_history(event.history, self.keep_recent) {
+            return CompletionCallAction::patch(RequestPatch::new().history(pruned));
         }
-        Flow::cont()
+        CompletionCallAction::continue_run()
     }
 }
 
@@ -107,7 +107,7 @@ mod tests {
     use super::*;
 
     fn tool_result(id: &str, text: &str) -> Message {
-        Message::tool_result(id, text)
+        Message::tool_result(id, "tool", text)
     }
 
     #[test]

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ansi_color_constants::*;
 use log::info;
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -29,7 +29,7 @@ impl MemorySearchTool {
     }
 }
 
-impl Tool for MemorySearchTool {
+impl PortableTool for MemorySearchTool {
     const NAME: &'static str = "memory_search";
 
     type Args = MemorySearchArgs;

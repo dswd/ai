@@ -1,7 +1,7 @@
 use crate::util::{bar_line, bar_title};
 use ansi_color_constants::*;
 use log::{debug, info};
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -34,7 +34,7 @@ impl FindFilesTool {
     }
 }
 
-impl Tool for FindFilesTool {
+impl PortableTool for FindFilesTool {
     const NAME: &'static str = "find_files";
 
     type Args = FindFilesArgs;

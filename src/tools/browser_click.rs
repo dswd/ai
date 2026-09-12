@@ -3,7 +3,7 @@
 use ansi_color_constants::*;
 use log::info;
 use regex::Regex;
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -45,7 +45,7 @@ impl std::fmt::Debug for BrowserClickTool {
     }
 }
 
-impl Tool for BrowserClickTool {
+impl PortableTool for BrowserClickTool {
     const NAME: &'static str = "browser_click";
 
     type Args = BrowserClickArgs;

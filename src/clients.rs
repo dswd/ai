@@ -1,5 +1,5 @@
 use crate::config::Config;
-use rig_core::providers as rig_providers;
+use rig::providers as rig_providers;
 
 pub(crate) fn openai_client(
     config: &Config,

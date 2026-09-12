@@ -33,7 +33,7 @@ use config::Config;
 use logging::setup_logging;
 use policy::Policy;
 use prompt::assemble_system_prompt;
-use rig_core::client::CompletionClient;
+use rig::client::CompletionClient;
 use setup::{
     apply_cli_overrides, load_config, load_policy, resolve_prompt_text, resolve_provider,
     resolve_session, resolve_thinking,

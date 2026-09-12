@@ -1,7 +1,7 @@
 use crate::util::fmt_bytes;
 use ansi_color_constants::*;
 use log::info;
-use rig_core::tool::Tool;
+use rig::tool::PortableTool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -29,7 +29,7 @@ impl DownloadFileTool {
     }
 }
 
-impl Tool for DownloadFileTool {
+impl PortableTool for DownloadFileTool {
     const NAME: &'static str = "download_file";
 
     type Args = DownloadFileArgs;
