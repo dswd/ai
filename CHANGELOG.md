@@ -4,10 +4,20 @@
 
 ### Added
 
+- **Two-phase `--setup`** — replaces the old `--init` wizard. Phase 1 is deterministic: it offers to reuse an existing config or detected credentials, otherwise lets you pick from common providers, search the full [models.dev](https://models.dev) catalog, or enter a custom URL, then choose a model with context size and input/output prices shown when known. Phase 2 is an AI conversation that edits the rest of the config; the existing config (API key omitted) is provided in the prompt and the setup-only `write_config` tool saves changes with approval.
+- **Connection test with fallback** — phase 2 begins with a tiny model call to prove the phase-1 provider/model/credentials work. If it fails, the error is reported and setup returns to the provider wizard (up to 5 attempts) instead of dropping into a conversation that cannot respond.
+- **models.dev provider catalog (`src/catalog.rs`)** — fetches and caches `models.dev/api.json` (24h TTL, stale-cache and built-in fallbacks), maps each provider to an OpenAI or Anthropic flavor, hides native-protocol providers (Bedrock, Vertex, Azure, Watson X, SAP), and surfaces model context windows and prices.
+- **Config `flavor` field** — records whether a provider speaks the OpenAI or Anthropic request shape, so any models.dev provider (not just the built-in table) can be used at runtime. Omitted values are derived from the built-in provider table.
+- **`write_config` setup tool (`src/tools/write_config.rs`)** — the setup AI's only way to persist config: it strictly parses the YAML, restores the existing provider/credentials/model/flavor, and saves through the sandbox with user approval. It neither takes nor reveals the config path, and the API key is never sent to the model.
+- **Strict config parsing** — `Config::parse_strict`/`from_file_strict` reject unknown keys; `write_config` returns parse errors to the model so it can correct them in-session.
 - **`--completions=<SHELL>`** — generate a shell completion script for bash, zsh, fish, and the other supported shells, then exit.
 - **`--no-color`** — disable colored output (in addition to the `NO_COLOR` environment variable). ANSI styling is stripped from tool logs and reasoning output, not just assistant markdown.
 - **First-token spinner** — while waiting for the model on an interactive terminal, a spinner is shown on stderr and cleared before any output.
 - **Unknown config-key warnings** — `config.yaml` keys that don't match a known field now print a `warning: unknown config key '…'` instead of being silently ignored.
+
+### Changed
+
+- **Breaking: `--init` renamed to `--setup`** — no alias. `ai --setup` creates or reconfigures the config; an existing file is backed up to `config.yaml.bak` first.
 
 ### Fixed
 
@@ -16,7 +26,7 @@
 - **Tool-bar underflow** — `bar_title` underflowed (debug panic; huge allocation in release) for titles longer than 68 bytes; now saturated.
 - **Session-name path traversal** — `-s=../../x` and `--delete=../foo` could read/delete files outside the session directory; names are now validated to a single path component.
 - **Provider API-key env vars** — `DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, and the other provider-specific variables are now used as a fallback when `api_key` is unset (previously only `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` were).
-- **`~` expansion** — `~`/`~/…` is now expanded for `--config`, `--policy`, `--memory`, `--skill`, `--init`, and config paths (`session_dir`, `skills_dir`, `policy`, `memory`), matching the documented examples.
+- **`~` expansion** — `~`/`~/…` is now expanded for `--config`, `--policy`, `--memory`, `--skill`, `--setup`, and config paths (`session_dir`, `skills_dir`, `policy`, `memory`), matching the documented examples.
 - **Silent session loss** — a corrupt or unreadable session file now warns with the actual error before starting a new session, instead of silently discarding the history.
 - **Provider context window** — the provider's known context window is used when `context_window` is not set in the config, so context pruning works out of the box.
 - **`--list` output** — now shows each session's provider and reports sessions that cannot be parsed instead of printing only the name.

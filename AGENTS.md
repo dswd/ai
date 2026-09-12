@@ -37,7 +37,8 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `tools/` | One file per tool (see below) |
 | `format.rs` | Streaming markdown-to-ANSI console formatting for assistant output |
 | `output.rs` | stdout/stderr stream routing (TTY-aware, `NO_COLOR`-aware) |
-| `init.rs` | Interactive config wizard |
+| `setup_cmd.rs` | Two-phase `--setup` flow: deterministic provider/model wizard, then an AI conversation that edits the config |
+| `catalog.rs` | models.dev provider/model catalog: fetch + cache, flavor mapping, compatibility filter |
 | `io.rs` | Line editor / stdin handling |
 | `util.rs` | Small helpers (formatting bars, byte sizes) |
 | `agent.rs` | `AgentContext`, tool registration (`build_agent`), streaming and oneshot dispatch |
@@ -71,6 +72,9 @@ file (feature-gated). `search_browser.rs` holds the browser-driven search-engine
 - `search_html.rs` / `search_probe.rs` — search-result HTML/markdown/quality helpers and the
 `--probe-web` diagnostics.
 - `file_view.rs` — extracts text from PDF/DOCX/XLSX/etc via `anydoc`.
+- `write_config.rs` — setup-only `write_config` tool: strictly parses the AI's YAML, restores
+the real provider/credentials, and saves through the sandbox (write approval). It never takes
+or reports the config path, so the setup AI cannot read the secret file.
 
 ## Conventions
 

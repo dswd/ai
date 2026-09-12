@@ -44,6 +44,10 @@ pub(crate) struct AgentContext<'a> {
     pub(crate) session_dir: &'a std::path::Path,
     pub(crate) prompt_text: Option<String>,
     pub(crate) context_window: Option<usize>,
+    /// Run the interactive loop without persisting a session (used by setup).
+    pub(crate) transient: bool,
+    /// Setup-only config target; when set, the `write_config` tool is exposed.
+    pub(crate) setup_target: Option<Arc<tools::SetupTarget>>,
 }
 
 pub(crate) async fn run_agent<M: CompletionModel + 'static>(
@@ -66,6 +70,7 @@ async fn dispatch_agent<M: CompletionModel + 'static>(
             ctx.prompt_text,
             ctx.context_window,
             ctx.memory.as_ref().map(Arc::clone),
+            ctx.transient,
         )
         .await?;
     } else if let Some(text) = ctx.prompt_text {
@@ -105,6 +110,13 @@ fn build_agent<M: CompletionModel + 'static>(
                 .tool(tools::CreateDirectoryTool::new(ctx.policy.clone()))
                 .tool(tools::MoveFileTool::new(ctx.policy.clone()))
                 .tool(tools::CopyFileTool::new(ctx.policy.clone()));
+        }
+
+        if let Some(target) = &ctx.setup_target {
+            server = server.tool(tools::WriteConfigTool::new(
+                ctx.policy.clone(),
+                Arc::clone(target),
+            ));
         }
 
         server = server

@@ -22,6 +22,7 @@ pub(crate) async fn run_interactive<M: CompletionModel + 'static>(
     initial_prompt: Option<String>,
     context_window: Option<usize>,
     memory: Option<Arc<memory::Memory>>,
+    transient: bool,
 ) -> anyhow::Result<()> {
     let mut chat_history: Vec<Message> = session.chat_history();
 
@@ -67,7 +68,9 @@ pub(crate) async fn run_interactive<M: CompletionModel + 'static>(
                 last_input_tokens = response.usage.input_tokens;
                 total_usage = accumulate(&total_usage, &response.usage);
                 record_turn(session, &mut chat_history, response);
-                session.save(session_dir)?;
+                if !transient {
+                    session.save(session_dir)?;
+                }
             }
             Err(e) => {
                 error!("Error: {e}");
@@ -168,7 +171,9 @@ pub(crate) async fn run_interactive<M: CompletionModel + 'static>(
                         last_input_tokens = response.usage.input_tokens;
                         total_usage = accumulate(&total_usage, &response.usage);
                         record_turn(session, &mut chat_history, response);
-                        session.save(session_dir)?;
+                        if !transient {
+                            session.save(session_dir)?;
+                        }
                     }
                     Err(e) => {
                         error!("Error: {e}");
@@ -182,15 +187,17 @@ pub(crate) async fn run_interactive<M: CompletionModel + 'static>(
         }
     }
 
-    if let Some(ref mem) = memory {
+    if !transient && let Some(ref mem) = memory {
         reconcile_memory(&agent, session, mem).await;
     }
 
     if !session.log.is_empty() {
-        session.save(session_dir)?;
+        if !transient {
+            session.save(session_dir)?;
+            info!("Session saved: {}", session.name);
+            output::stderr_line(&format!("  resume: ai -s {}", session.name));
+        }
         print_usage(&total_usage, start.elapsed());
-        info!("Session saved: {}", session.name);
-        output::stderr_line(&format!("  resume: ai -s {}", session.name));
     }
 
     Ok(())

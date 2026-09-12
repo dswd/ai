@@ -120,13 +120,6 @@ pub const PROVIDERS: &[Provider] = &[
 ];
 
 impl Provider {
-    /// Whether the provider accepts the Anthropic-style extended-thinking
-    /// request shape. Only the Anthropic flavor understands it; sending it to
-    /// an OpenAI-compatible endpoint is an unknown-parameter error.
-    pub fn supports_thinking(&self) -> bool {
-        self.flavor == Flavor::Anthropic
-    }
-
     /// Whether the provider accepts tool/function definitions. All current
     /// providers do; this is the extension point for tool-less models.
     pub fn supports_tools(&self) -> bool {
@@ -136,10 +129,6 @@ impl Provider {
 
 pub fn resolve(name: &str) -> Option<&'static Provider> {
     PROVIDERS.iter().find(|p| p.name == name)
-}
-
-pub fn all_names() -> impl Iterator<Item = &'static str> {
-    PROVIDERS.iter().map(|p| p.name)
 }
 
 #[cfg(test)]
@@ -181,10 +170,9 @@ mod tests {
     }
 
     #[test]
-    fn test_all_names_contains_all() {
-        let names: Vec<&str> = all_names().collect();
-        assert_eq!(names.len(), PROVIDERS.len());
-        assert!(names.contains(&"openai"));
-        assert!(names.contains(&"anthropic-compatible"));
+    fn test_all_providers_resolve() {
+        for p in PROVIDERS {
+            assert!(resolve(p.name).is_some(), "{} should resolve", p.name);
+        }
     }
 }

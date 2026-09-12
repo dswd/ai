@@ -1,4 +1,5 @@
 mod agent;
+mod catalog;
 mod cli;
 mod clients;
 mod commands;
@@ -6,7 +7,6 @@ mod config;
 mod container;
 mod context;
 mod format;
-mod init;
 mod interactive;
 mod io;
 mod logging;
@@ -18,6 +18,7 @@ mod providers;
 mod sandbox;
 mod session;
 mod setup;
+mod setup_cmd;
 mod skills;
 mod tool;
 mod tools;
@@ -50,9 +51,12 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    if let Some(ref init_path) = cli.init {
-        init::run(Some(init_path.clone()))?;
-        return Ok(());
+    if let Some(ref setup_path) = cli.setup {
+        let path = setup_path.clone();
+        return tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?
+            .block_on(setup_cmd::run(path));
     }
 
     let vanilla = cli.is_vanilla();
@@ -103,19 +107,19 @@ async fn run(cli: Cli, config: Config, session_dir: PathBuf, policy: Policy) -> 
     let max_tokens = cli.max_tokens.or(config.max_tokens);
     let max_turns = cli.max_turns;
 
-    let (provider_spec, base_url) = resolve_provider(&config)?;
+    let resolved = resolve_provider(&config)?;
     let mut session = resolve_session(
         &cli,
         &session_dir,
         &system_prompt,
         &model_name,
-        provider_spec.name,
+        &resolved.name,
     )?;
     if let Some(ref mem) = memory {
         mem.set_session_name(&session.name);
     }
     let prompt_text = resolve_prompt_text(&cli).await;
-    let thinking = resolve_thinking(cli.thinking.or(config.thinking), provider_spec);
+    let thinking = resolve_thinking(cli.thinking.or(config.thinking), &resolved);
 
     let tool_sets = if !cli.tool.is_empty() {
         tool::connect_tool_servers(&cli.tool).await?
@@ -158,18 +162,20 @@ async fn run(cli: Cli, config: Config, session_dir: PathBuf, policy: Policy) -> 
         #[cfg(not(feature = "browser"))]
         _browser_state: browser_state,
         is_interactive: cli.is_interactive(),
-        supports_tools: provider_spec.supports_tools(),
+        supports_tools: resolved.supports_tools,
         container_session,
         session: &mut session,
         session_dir: &session_dir,
         prompt_text,
-        context_window: config.context_window.or(Some(provider_spec.context_window)),
+        context_window: resolved.context_window,
+        transient: false,
+        setup_target: None,
     };
 
-    match provider_spec.flavor {
+    match resolved.flavor {
         providers::Flavor::OpenAi => {
             run_agent(
-                openai_client(&config, &base_url, &session_id, provider_spec.env_var)?
+                openai_client(&config, &resolved.base_url, &session_id, resolved.env_var)?
                     .completion_model(&model_name),
                 ctx,
             )
@@ -177,7 +183,7 @@ async fn run(cli: Cli, config: Config, session_dir: PathBuf, policy: Policy) -> 
         }
         providers::Flavor::Anthropic => {
             run_agent(
-                anthropic_client(&config, &base_url, &session_id, provider_spec.env_var)?
+                anthropic_client(&config, &resolved.base_url, &session_id, resolved.env_var)?
                     .completion_model(&model_name),
                 ctx,
             )

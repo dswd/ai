@@ -117,31 +117,76 @@ pub(crate) async fn resolve_prompt_text(cli: &Cli) -> Option<String> {
     }
 }
 
-pub(crate) fn resolve_provider(
-    config: &Config,
-) -> anyhow::Result<(&'static providers::Provider, String)> {
+/// Provider resolved for a run: a static built-in when the name is known, or a
+/// config-described endpoint (flavor + api_base) for any models.dev provider.
+pub(crate) struct ResolvedProvider {
+    pub name: String,
+    pub flavor: providers::Flavor,
+    pub base_url: String,
+    /// Environment variable the API key may fall back to; only known for
+    /// built-in providers (custom configs store the key or `env:VAR` instead).
+    pub env_var: Option<&'static str>,
+    pub supports_thinking: bool,
+    pub supports_tools: bool,
+    pub context_window: Option<usize>,
+}
+
+pub(crate) fn resolve_provider(config: &Config) -> anyhow::Result<ResolvedProvider> {
     let provider = config.provider.to_lowercase();
-    let provider_spec = providers::resolve(&provider).ok_or_else(|| {
-        let supported = providers::all_names().collect::<Vec<_>>().join(", ");
-        anyhow::anyhow!("Unsupported provider: {provider}. Supported: {supported}")
+    if let Some(spec) = providers::resolve(&provider) {
+        let base_url = config
+            .api_base
+            .clone()
+            .or_else(|| spec.default_base_url.map(str::to_string))
+            .ok_or_else(|| {
+                anyhow::anyhow!("provider '{provider}' requires an api_base in config")
+            })?;
+        let flavor = config.flavor.map(flavor_from_config).unwrap_or(spec.flavor);
+        return Ok(ResolvedProvider {
+            name: spec.name.to_string(),
+            flavor,
+            base_url,
+            env_var: Some(spec.env_var),
+            supports_thinking: flavor == providers::Flavor::Anthropic,
+            supports_tools: spec.supports_tools(),
+            context_window: config.context_window.or(Some(spec.context_window)),
+        });
+    }
+
+    let flavor = config.flavor.map(flavor_from_config).ok_or_else(|| {
+        anyhow::anyhow!(
+            "provider '{provider}' is not built in and has no `flavor` in config \
+             (expected `openai` or `anthropic`)"
+        )
     })?;
+    let base_url = config.api_base.clone().ok_or_else(|| {
+        anyhow::anyhow!("provider '{provider}' is not built in and requires an api_base in config")
+    })?;
+    Ok(ResolvedProvider {
+        name: provider,
+        flavor,
+        base_url,
+        env_var: None,
+        supports_thinking: flavor == providers::Flavor::Anthropic,
+        supports_tools: true,
+        context_window: config.context_window,
+    })
+}
 
-    let base_url = config
-        .api_base
-        .clone()
-        .or_else(|| provider_spec.default_base_url.map(str::to_string))
-        .ok_or_else(|| anyhow::anyhow!("provider '{provider}' requires an api_base in config"))?;
-
-    Ok((provider_spec, base_url))
+fn flavor_from_config(flavor: crate::config::ProviderFlavor) -> providers::Flavor {
+    match flavor {
+        crate::config::ProviderFlavor::OpenAi => providers::Flavor::OpenAi,
+        crate::config::ProviderFlavor::Anthropic => providers::Flavor::Anthropic,
+    }
 }
 
 /// Drop a requested thinking budget for providers that do not accept it, so we
 /// never inject an unsupported parameter into the request.
 pub(crate) fn resolve_thinking(
     requested: Option<usize>,
-    provider: &providers::Provider,
+    provider: &ResolvedProvider,
 ) -> Option<usize> {
-    if requested.is_some() && !provider.supports_thinking() {
+    if requested.is_some() && !provider.supports_thinking {
         log::warn!(
             "--thinking is not supported by provider '{}'; ignoring",
             provider.name
@@ -229,7 +274,7 @@ pub(crate) fn load_config(cli: &Cli, vanilla: bool) -> anyhow::Result<Config> {
             Config::from_file(&default_path)
         } else {
             if vanilla {
-                output::stderr_line("No config found. Run `ai --init` to create one.");
+                output::stderr_line("No config found. Run `ai --setup` to create one.");
             }
             Ok(Config::default())
         }
@@ -320,4 +365,58 @@ pub(crate) fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> 
     }
 
     Ok(policy)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ProviderFlavor;
+
+    #[test]
+    fn test_resolve_known_provider_uses_static_defaults() {
+        let config = Config {
+            provider: "openai".to_string(),
+            ..Config::default()
+        };
+        let resolved = resolve_provider(&config).unwrap();
+        assert_eq!(resolved.flavor, providers::Flavor::OpenAi);
+        assert_eq!(resolved.base_url, "https://api.openai.com/v1");
+        assert_eq!(resolved.env_var, Some("OPENAI_API_KEY"));
+        assert_eq!(resolved.context_window, Some(128_000));
+    }
+
+    #[test]
+    fn test_resolve_known_provider_flavor_override() {
+        let config = Config {
+            provider: "openai-compatible".to_string(),
+            api_base: Some("https://example.com/v1".to_string()),
+            flavor: Some(ProviderFlavor::Anthropic),
+            ..Config::default()
+        };
+        let resolved = resolve_provider(&config).unwrap();
+        assert_eq!(resolved.flavor, providers::Flavor::Anthropic);
+        assert!(resolved.supports_thinking);
+    }
+
+    #[test]
+    fn test_resolve_dynamic_provider_requires_flavor_and_base() {
+        let missing = Config {
+            provider: "some-new-provider".to_string(),
+            ..Config::default()
+        };
+        assert!(resolve_provider(&missing).is_err());
+
+        let config = Config {
+            provider: "some-new-provider".to_string(),
+            api_base: Some("https://api.example.com/v1".to_string()),
+            flavor: Some(ProviderFlavor::OpenAi),
+            context_window: Some(64_000),
+            ..Config::default()
+        };
+        let resolved = resolve_provider(&config).unwrap();
+        assert_eq!(resolved.flavor, providers::Flavor::OpenAi);
+        assert_eq!(resolved.base_url, "https://api.example.com/v1");
+        assert_eq!(resolved.env_var, None);
+        assert_eq!(resolved.context_window, Some(64_000));
+    }
 }

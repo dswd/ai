@@ -19,6 +19,8 @@ fn help_lists_new_flags() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("--completions"));
     assert!(stdout.contains("--no-color"));
+    assert!(stdout.contains("--setup"));
+    assert!(!stdout.contains("--init"));
 }
 
 #[test]

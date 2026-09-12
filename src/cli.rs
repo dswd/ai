@@ -224,27 +224,27 @@ pub struct Cli {
         short = 'l',
         long = "list",
         help = "List all saved sessions",
-        conflicts_with_all = ["delete", "init", "session"]
+        conflicts_with_all = ["delete", "setup", "session"]
     )]
     pub list: bool,
 
     #[arg(
-        long = "init",
-        help = "Initialize config interactively",
+        long = "setup",
+        help = "Set up or reconfigure the AI interactively",
         value_name = "FILE",
         num_args = 0..=1,
         default_missing_value = "",
         require_equals = true,
         conflicts_with_all = ["config", "list", "delete", "session"],
     )]
-    pub init: Option<String>,
+    pub setup: Option<String>,
 
     #[arg(
         long = "delete",
         help = "Delete a session by NAME",
         value_name = "NAME",
         require_equals = true,
-        conflicts_with_all = ["list", "init", "session"]
+        conflicts_with_all = ["list", "setup", "session"]
     )]
     pub delete: Option<String>,
 
@@ -332,7 +332,7 @@ impl Cli {
             && !self.verbose
             && !self.quiet
             && !self.no_color
-            && self.init.is_none()
+            && self.setup.is_none()
             && !self.list
             && self.delete.is_none()
     }

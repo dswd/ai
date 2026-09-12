@@ -6,7 +6,7 @@ A CLI agent for interacting with AI models, with tool use, filesystem and comman
 
 ## Features
 
-- **Multi-provider support** — OpenAI, Anthropic, Ollama, Groq, DeepSeek, Google (Gemini), Mistral, OpenRouter, and xAI (Grok), configurable via `ai --init`. All map to an OpenAI- or Anthropic-compatible endpoint; `openai-compatible` and `anthropic-compatible` are also available for custom endpoints (requires `api_base`).
+- **Multi-provider support** — OpenAI, Anthropic, Ollama, Groq, DeepSeek, Google (Gemini), Mistral, OpenRouter, and xAI (Grok), plus every compatible provider in the [models.dev](https://models.dev) catalog, configurable via `ai --setup`. Providers map to an OpenAI- or Anthropic-compatible endpoint (`flavor`); `openai-compatible` and `anthropic-compatible` cover custom endpoints (requires `api_base`).
 - **Interactive & one-shot modes** — Run with a direct prompt, pipe text via stdin, or start an interactive session with persistent history.
 - **Sessions** — Save, list (`-l`), continue (`-s NAME`), and delete (`--delete=NAME`) sessions with message history and system prompt preservation.
 - **Tool system** — Filesystem tools, code search, web fetch/search, command execution, downloads, document extraction, and more.
@@ -41,13 +41,26 @@ The binary is `target/release/ai`.
 
 ## Getting started
 
-Run the interactive setup wizard to pick a provider, enter an API key, and choose a model:
+Run the interactive setup to pick a provider, enter an API key, and choose a model:
 
 ```sh
-ai --init
+ai --setup
 ```
 
-The config is written to `~/.config/ai/config.yaml` (or the path you pass to `--init`).
+Setup runs in two phases. First it connects to an LLM: it reuses an existing
+config (or detected credentials) if you want, otherwise you pick from the common
+providers or any provider in the [models.dev](https://models.dev) catalog, or
+enter a custom URL. Model choices show context size and prices when known. Then
+an AI conversation walks you through the rest of the configuration. The existing
+config (with the API key omitted) is given to the model in the prompt, and
+changes are saved through a `write_config` tool that validates the YAML, keeps
+the provider and credentials, and asks for approval before writing. Phase 2
+opens with a tiny test call; if the provider or model can't be reached, setup
+reports the error and returns you to the provider selection.
+
+The config is written to `~/.config/ai/config.yaml` (or the path you pass to
+`--setup=/path/to/config.yaml`). Running `ai --setup` again reconfigures an
+existing file, backing it up to `config.yaml.bak` first.
 A fully-commented template with every supported key lives at [`config.example.yaml`](config.example.yaml):
 
 ```yaml
@@ -199,7 +212,7 @@ Search engines rate-limit and block automated clients. In order of effectiveness
        ports: ["8080:8080"]
    ```
 
-   Then point the agent at it (also offered during `ai --init`):
+   Then point the agent at it (also configurable during `ai --setup`):
 
    ```yaml
    # ~/.config/ai/config.yaml
@@ -261,7 +274,7 @@ Options:
       --max-turns=<N>        Maximum agent turns (tool call rounds) [default: 100]
       --thinking=[<TOKENS>]  Enable extended thinking [default: 16000]
   -l, --list                 List all saved sessions
-      --init=[<FILE>]        Initialize config interactively
+      --setup=[<FILE>]       Set up or reconfigure the AI interactively
       --delete=<NAME>        Delete a session by NAME
       --completions=<SHELL>  Generate a shell completion script (bash, zsh, fish, …) and exit
   -v, --verbose              Enable verbose mode

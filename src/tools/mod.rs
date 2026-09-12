@@ -35,6 +35,7 @@ pub mod search_probe;
 pub mod shared;
 pub mod web_fetch;
 pub mod web_search;
+pub mod write_config;
 pub mod write_file;
 
 #[cfg(feature = "browser")]
@@ -69,6 +70,7 @@ pub use replace_in_file::ReplaceInFileTool;
 pub use search_content::SearchContentTool;
 pub use web_fetch::WebFetchTool;
 pub use web_search::WebSearchTool;
+pub use write_config::{SetupTarget, WriteConfigTool};
 pub use write_file::WriteFileTool;
 
 /// Maximum output limits enforced for all tools.
