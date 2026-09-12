@@ -82,6 +82,12 @@ pub fn user_text(msg: &ChatMessage) -> Option<String> {
     None
 }
 
+/// A session name must be a single path component so it cannot escape the
+/// session directory (`-s=../../x`, `--delete=../foo`).
+pub fn is_safe_name(name: &str) -> bool {
+    !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', '\0'])
+}
+
 impl Session {
     pub fn new(name: String, system_prompt: String, model: String, provider: String) -> Self {
         let now = crate::util::now_iso();
@@ -160,6 +166,9 @@ impl Session {
     }
 
     pub fn save(&self, dir: &Path) -> anyhow::Result<()> {
+        if !is_safe_name(&self.name) {
+            anyhow::bail!("invalid session name: {:?}", self.name);
+        }
         std::fs::create_dir_all(dir)?;
         let path = dir.join(format!("{}.json", self.name));
         let mut to_save = self.clone();
@@ -173,6 +182,9 @@ impl Session {
     }
 
     pub fn load(name: &str, dir: &Path) -> anyhow::Result<Self> {
+        if !is_safe_name(name) {
+            anyhow::bail!("invalid session name: {name:?}");
+        }
         let path = dir.join(format!("{}.json", name));
         let json = std::fs::read_to_string(&path)
             .with_context(|| format!("loading session: {}", path.display()))?;
@@ -236,8 +248,8 @@ pub fn generate_session_name() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos();
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
 
     let adjectives = [
         "swift", "calm", "bright", "keen", "bold", "wise", "warm", "cool", "fair", "fine", "glad",
@@ -259,6 +271,25 @@ pub fn generate_session_name() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_safe_name() {
+        assert!(is_safe_name("calm-hawk"));
+        assert!(is_safe_name("my.session"));
+        assert!(!is_safe_name(""));
+        assert!(!is_safe_name("."));
+        assert!(!is_safe_name(".."));
+        assert!(!is_safe_name("../foo"));
+        assert!(!is_safe_name("a/b"));
+        assert!(!is_safe_name("a\\b"));
+    }
+
+    #[test]
+    fn test_load_rejects_unsafe_name() {
+        let dir = std::env::temp_dir().join(format!("ai-session-safe-{}", std::process::id()));
+        let err = Session::load("../escape", &dir).unwrap_err();
+        assert!(err.to_string().contains("invalid session name"));
+    }
 
     #[test]
     fn test_role_serde_roundtrip() {

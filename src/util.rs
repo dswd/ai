@@ -1,4 +1,5 @@
 use std::cmp::max;
+use std::path::PathBuf;
 
 fn bar(len: usize) -> String {
     (0..max(len, 3)).map(|_| "=").collect::<String>()
@@ -9,7 +10,26 @@ pub fn bar_line() -> String {
 }
 
 pub fn bar_title(title: &str) -> String {
-    format!("{} {} {}", bar(10), title, bar(80 - 12 - title.len()))
+    format!(
+        "{} {} {}",
+        bar(10),
+        title,
+        bar(80usize.saturating_sub(title.len().saturating_add(12)))
+    )
+}
+
+/// Expand a leading `~` (or `~/…`) to the user's home directory. Any other
+/// path is returned unchanged. `~user` shorthand is not supported.
+pub fn expand_tilde(path: &str) -> PathBuf {
+    if path == "~" {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from(path));
+    }
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
+    }
+    PathBuf::from(path)
 }
 
 /// Current UTC time as an ISO-8601 string.
@@ -56,5 +76,22 @@ mod tests {
         assert!(bar_line().contains('='));
         assert!(bar_title("hello").contains("hello"));
         assert!(bar_title("x").len() >= 12);
+    }
+
+    #[test]
+    fn test_bar_title_long_does_not_panic() {
+        let title = "x".repeat(500);
+        assert!(bar_title(&title).contains(&title));
+    }
+
+    #[test]
+    fn test_expand_tilde() {
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(expand_tilde("~"), home);
+            assert_eq!(expand_tilde("~/x"), home.join("x"));
+        }
+        assert_eq!(expand_tilde("/abs/path"), PathBuf::from("/abs/path"));
+        assert_eq!(expand_tilde("rel/path"), PathBuf::from("rel/path"));
+        assert_eq!(expand_tilde("~user/x"), PathBuf::from("~user/x"));
     }
 }

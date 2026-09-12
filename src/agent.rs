@@ -256,10 +256,12 @@ async fn run_oneshot<M: CompletionModel + 'static>(
 ) -> anyhow::Result<()> {
     let start = Instant::now();
     let augmented = crate::interactive::augment_prompt(prompt, memory.as_deref());
+    let spinner = output::Spinner::start("waiting for model…");
     let mut stream = agent
         .stream_prompt(augmented.as_deref().unwrap_or(prompt))
         .add_hook(ContextPruneHook::default())
         .await;
+    drop(spinner);
     let response = stream_response(&mut stream).await?;
     crate::interactive::print_usage(&response.usage, start.elapsed());
     Ok(())

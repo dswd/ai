@@ -73,8 +73,14 @@ impl Config {
     pub fn from_file(path: &Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("reading config: {}", path.display()))?;
-        let config: Config = serde_yaml_ng::from_str(&content)
-            .with_context(|| format!("parsing config: {}", path.display()))?;
+        let mut unknown = Vec::new();
+        let deserializer = serde_yaml_ng::Deserializer::from_str(&content);
+        let config: Config =
+            serde_ignored::deserialize(deserializer, |key| unknown.push(key.to_string()))
+                .with_context(|| format!("parsing config: {}", path.display()))?;
+        for key in unknown {
+            log::warn!("unknown config key '{key}' in {}", path.display());
+        }
         Ok(config)
     }
 
@@ -93,30 +99,39 @@ impl Config {
     }
 
     pub fn session_dir_resolved(&self) -> PathBuf {
-        self.session_dir.clone().unwrap_or_else(|| {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("ai")
-                .join("sessions")
-        })
+        self.session_dir
+            .clone()
+            .map(|p| crate::util::expand_tilde(&p.to_string_lossy()))
+            .unwrap_or_else(|| {
+                dirs::data_local_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("ai")
+                    .join("sessions")
+            })
     }
 
     pub fn memory_path_resolved(&self) -> PathBuf {
-        self.memory.clone().unwrap_or_else(|| {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("ai")
-                .join("memory.json")
-        })
+        self.memory
+            .clone()
+            .map(|p| crate::util::expand_tilde(&p.to_string_lossy()))
+            .unwrap_or_else(|| {
+                dirs::data_local_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("ai")
+                    .join("memory.json")
+            })
     }
 
     pub fn skills_dir_resolved(&self) -> PathBuf {
-        self.skills_dir.clone().unwrap_or_else(|| {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("ai")
-                .join("skills")
-        })
+        self.skills_dir
+            .clone()
+            .map(|p| crate::util::expand_tilde(&p.to_string_lossy()))
+            .unwrap_or_else(|| {
+                dirs::data_local_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("ai")
+                    .join("skills")
+            })
     }
 
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {

@@ -8,9 +8,9 @@ A CLI agent for interacting with AI models, with tool use, filesystem and comman
 
 - **Multi-provider support** — OpenAI, Anthropic, Ollama, Groq, DeepSeek, Google (Gemini), Mistral, OpenRouter, and xAI (Grok), configurable via `ai --init`. All map to an OpenAI- or Anthropic-compatible endpoint; `openai-compatible` and `anthropic-compatible` are also available for custom endpoints (requires `api_base`).
 - **Interactive & one-shot modes** — Run with a direct prompt, pipe text via stdin, or start an interactive session with persistent history.
-- **Sessions** — Save, list (`-l`), continue (`-s NAME`), and delete (`--delete NAME`) sessions with message history and system prompt preservation.
+- **Sessions** — Save, list (`-l`), continue (`-s NAME`), and delete (`--delete=NAME`) sessions with message history and system prompt preservation.
 - **Tool system** — Filesystem tools, code search, web fetch/search, command execution, downloads, document extraction, and more.
-- **Sandboxed command execution** — The `execute` tool runs through a virtual bash interpreter (bashkit) with 160+ in-process builtins; external commands require explicit policy approval and, when a container image is configured (`-X`/`--container`), the whole command runs in a session container with only the policy-granted paths bind-mounted.
+- **Sandboxed command execution** — The `execute` tool runs through a virtual bash interpreter (bashkit) with ~150 in-process builtins; external commands require explicit policy approval and, when a container image is configured (`-X`/`--container`), the whole command runs in a session container with only the policy-granted paths bind-mounted.
 - **Policy engine** — Granular allow/deny rules for read, write, execute, web fetch, and web search. Supports policy files, CLI overrides, interactive approval (`--ask`), and `--yolo` mode.
 - **Persistent memory** — Optional agent memory stored to disk and injected into the system prompt.
 - **Skills** — Load reusable skill definitions from `SKILL.md` files (via `--skill=PATH` or the skills folder), listed in the system prompt and loadable on demand with the `load_skill` tool.
@@ -161,7 +161,7 @@ Available tools (enabled based on policy):
 | Documents | `file_view` (extracts text from PDF, DOCX, XLSX, PPTX, ODT, RTF, EPUB, CSV, HTML, …) |
 | Command execution | `execute` (bashkit builtins sandboxed; external commands need `-x`) |
 | Web | `web_fetch`, `web_search`, `download_file`, `browser_navigate`, `browser_click`, `browser_get_content`, `browser_get_element`, `browser_evaluate` |
-| Memory | `memory_add`, `memory_delete` |
+| Memory | `memory_add`, `memory_search`, `memory_delete` |
 | Skills | `load_skill` (loads a skill's full instructions by name) |
 | Utility | `get_current_time` (current UTC date/time) |
 
@@ -263,8 +263,10 @@ Options:
   -l, --list                 List all saved sessions
       --init=[<FILE>]        Initialize config interactively
       --delete=<NAME>        Delete a session by NAME
+      --completions=<SHELL>  Generate a shell completion script (bash, zsh, fish, …) and exit
   -v, --verbose              Enable verbose mode
   -q, --quiet                Enable quiet mode
+      --no-color             Disable colored output (also honors NO_COLOR)
   -h, --help                 Print help
   -V, --version              Print version
 ```

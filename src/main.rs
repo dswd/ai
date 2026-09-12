@@ -24,7 +24,7 @@ mod tools;
 mod util;
 
 use agent::{AgentContext, run_agent};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use cli::Cli;
 use clients::{anthropic_client, openai_client};
 use commands::{cmd_delete_session, cmd_list_sessions, cmd_probe_web};
@@ -43,6 +43,12 @@ use std::sync::Arc;
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     setup_logging(cli.verbose, cli.quiet);
+    output::set_no_color(cli.no_color);
+
+    if let Some(shell) = cli.completions {
+        print_completions(shell);
+        return Ok(());
+    }
 
     if let Some(ref init_path) = cli.init {
         init::run(Some(init_path.clone()))?;
@@ -157,20 +163,22 @@ async fn run(cli: Cli, config: Config, session_dir: PathBuf, policy: Policy) -> 
         session: &mut session,
         session_dir: &session_dir,
         prompt_text,
-        context_window: config.context_window,
+        context_window: config.context_window.or(Some(provider_spec.context_window)),
     };
 
     match provider_spec.flavor {
         providers::Flavor::OpenAi => {
             run_agent(
-                openai_client(&config, &base_url, &session_id)?.completion_model(&model_name),
+                openai_client(&config, &base_url, &session_id, provider_spec.env_var)?
+                    .completion_model(&model_name),
                 ctx,
             )
             .await?
         }
         providers::Flavor::Anthropic => {
             run_agent(
-                anthropic_client(&config, &base_url, &session_id)?.completion_model(&model_name),
+                anthropic_client(&config, &base_url, &session_id, provider_spec.env_var)?
+                    .completion_model(&model_name),
                 ctx,
             )
             .await?
@@ -178,6 +186,12 @@ async fn run(cli: Cli, config: Config, session_dir: PathBuf, policy: Policy) -> 
     }
 
     Ok(())
+}
+
+fn print_completions(shell: clap_complete::Shell) {
+    let mut cmd = Cli::command();
+    let name = cmd.get_name().to_string();
+    clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
 }
 
 /// Remove the container if the process is interrupted (the normal path removes

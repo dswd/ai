@@ -52,10 +52,12 @@ pub(crate) async fn run_interactive<M: CompletionModel + 'static>(
         let hist = chat_history.clone();
         let sent = augment_prompt(&text, memory.as_deref()).unwrap_or(text);
         let result = async {
+            let spinner = output::Spinner::start("waiting for model…");
             let mut stream = agent
                 .stream_chat(&sent, hist)
                 .add_hook(ContextPruneHook::default())
                 .await;
+            drop(spinner);
             let response = stream_response(&mut stream).await?;
             Ok::<_, anyhow::Error>(response)
         }
@@ -151,10 +153,12 @@ pub(crate) async fn run_interactive<M: CompletionModel + 'static>(
                 let sent = augment_prompt(trimmed, memory.as_deref())
                     .unwrap_or_else(|| trimmed.to_string());
                 let result = async {
+                    let spinner = output::Spinner::start("waiting for model…");
                     let mut stream = agent
                         .stream_chat(&sent, hist)
                         .add_hook(ContextPruneHook::default())
                         .await;
+                    drop(spinner);
                     let response = stream_response(&mut stream).await?;
                     Ok::<_, anyhow::Error>(response)
                 }

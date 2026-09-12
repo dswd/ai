@@ -80,7 +80,7 @@ pub(crate) fn assemble_system_prompt(
         let path = if memory_path.is_empty() {
             config.memory_path_resolved()
         } else {
-            std::path::PathBuf::from(memory_path)
+            crate::util::expand_tilde(memory_path)
         };
         let mem = Arc::new(memory::Memory::load(&path)?);
         let md = mem.summary();

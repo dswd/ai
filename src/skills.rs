@@ -21,7 +21,7 @@ pub fn discover(skill_args: &[String], skills_dir: &Path) -> Vec<Skill> {
     let mut skills: Vec<Skill> = Vec::new();
 
     for arg in skill_args {
-        let path = PathBuf::from(arg);
+        let path = crate::util::expand_tilde(arg);
         if path.is_file() {
             if let Some(skill) = parse_skill_file(&path) {
                 skills.push(skill);

@@ -5,13 +5,16 @@ pub(crate) fn openai_client(
     config: &Config,
     base_url: &str,
     session_id: &str,
+    env_var: &str,
 ) -> anyhow::Result<rig_providers::openai::CompletionsClient> {
     let api_key = config
         .resolve_api_key()
-        .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-        .ok_or_else(|| anyhow::anyhow!(
-            "OpenAI API key not found. Set OPENAI_API_KEY environment variable or api_key in config."
-        ))?;
+        .or_else(|| std::env::var(env_var).ok())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "OpenAI API key not found. Set {env_var} environment variable or api_key in config."
+            )
+        })?;
 
     let mut builder = rig_providers::openai::CompletionsClient::builder()
         .api_key(api_key.as_str())
@@ -26,12 +29,13 @@ pub(crate) fn anthropic_client(
     config: &Config,
     base_url: &str,
     session_id: &str,
+    env_var: &str,
 ) -> anyhow::Result<rig_providers::anthropic::Client> {
     let api_key = config
         .resolve_api_key()
-        .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
+        .or_else(|| std::env::var(env_var).ok())
         .ok_or_else(|| anyhow::anyhow!(
-            "Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable or api_key in config."
+            "Anthropic API key not found. Set {env_var} environment variable or api_key in config."
         ))?;
 
     let mut builder = rig_providers::anthropic::Client::builder()

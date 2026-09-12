@@ -19,6 +19,9 @@ pub(crate) fn resolve_session(
             if name.is_empty() {
                 Some(session::generate_session_name())
             } else {
+                if !session::is_safe_name(name) {
+                    anyhow::bail!("invalid session name: {name:?}");
+                }
                 Some(name.clone())
             }
         }
@@ -64,7 +67,13 @@ pub(crate) fn resolve_session(
                     s
                 }
             }
-            Err(_) => {
+            Err(e) => {
+                let path = session_dir.join(format!("{name}.json"));
+                if path.exists() {
+                    output::stderr_line(&format!(
+                        "warning: failed to load session '{name}': {e}; starting a new session"
+                    ));
+                }
                 let s = Session::new(
                     name.clone(),
                     system_prompt.to_string(),
@@ -213,7 +222,8 @@ pub(crate) fn resolve_container(
 
 pub(crate) fn load_config(cli: &Cli, vanilla: bool) -> anyhow::Result<Config> {
     if let Some(path) = &cli.config {
-        Config::from_file(path)
+        let path = crate::util::expand_tilde(&path.to_string_lossy());
+        Config::from_file(&path)
     } else if let Some(default_path) = Config::default_path() {
         if default_path.exists() {
             Config::from_file(&default_path)
@@ -254,10 +264,12 @@ pub(crate) fn apply_cli_overrides(cli: &Cli, config: &mut Config) {
 
 pub(crate) fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> {
     let mut policy = if let Some(path) = &cli.policy {
-        Policy::from_file(path)?
+        let path = crate::util::expand_tilde(&path.to_string_lossy());
+        Policy::from_file(&path)?
     } else if let Some(path) = &config.policy {
+        let path = crate::util::expand_tilde(&path.to_string_lossy());
         if path.exists() {
-            Policy::from_file(path)?
+            Policy::from_file(&path)?
         } else {
             Policy::default()
         }

@@ -61,6 +61,7 @@ dependencies = [
  "anyhow",
  "bashkit",
  "clap",
+ "clap_complete",
  "dialoguer",
  "dirs",
  "futures",
@@ -78,6 +79,7 @@ dependencies = [
  "rustyline",
  "schemars",
  "serde",
+ "serde_ignored",
  "serde_json",
  "serde_yaml_ng",
  "thiserror 2.0.20",
@@ -658,6 +660,15 @@ dependencies = [
  "anstyle",
  "clap_lex",
  "strsim",
+]
+
+[[package]]
+name = "clap_complete"
+version = "4.6.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3be2ad0423bdbbb0e25bc89add796f3559706d4a95e1bc98e4d9662a957b6a19"
+dependencies = [
+ "clap",
 ]
 
 [[package]]
@@ -3775,6 +3786,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.3",
+]
+
+[[package]]
+name = "serde_ignored"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115dffd5f3853e06e746965a20dcbae6ee747ae30b543d91b0e089668bb07798"
+dependencies = [
+ "serde",
+ "serde_core",
 ]
 
 [[package]]

@@ -5,7 +5,7 @@ Guidance for AI agents working in this repository.
 ## Project
 
 `ai` is a single-binary Rust CLI agent: it talks to LLM providers and lets the model
-use tools (filesystem, shell, web, git, memory) gated by a policy engine. Rust edition
+use tools (filesystem, shell, web, memory) gated by a policy engine. Rust edition
 2024, async via Tokio, LLM layer via `rig-core`. Default build enables the `browser`
 feature (Obscura headless browser for web tools); `--no-default-features` drops it.
 
@@ -45,6 +45,7 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `setup.rs` | Config/policy/session/provider resolution and CLI override application |
 | `clients.rs` | OpenAI/Anthropic client construction, `x-opencode-session` header |
 | `commands.rs` | Non-agent subcommands: `--probe-web`, `--list`, `--delete` sessions |
+| `tool.rs` | MCP tool-server connection (`--tool`) |
 | `logging.rs` | Console logger, log-level setup |
 | `interactive.rs` | Interactive session loop, `/` commands, memory reconciliation, usage reporting |
 
@@ -59,8 +60,9 @@ resolve-then-authorize-then-operate contract holds for every caller.
 
 Key tools:
 - `execute.rs` — runs shell commands through bashkit's virtual bash. In-process builtins
-everywhere (no `-x` needed); external commands fork-exec and require an `Action::Execute`
-allow rule. Filesystem ops are policy-checked via `policy_fs.rs` (`PolicyFsBackend`).
+run without `-x`; external commands fork-exec and require an `Action::Execute` allow rule.
+When a container is configured, the whole command string is instead sent to the container's
+shell (see `container.rs`). Filesystem ops are policy-checked via `policy_fs.rs` (`PolicyFsBackend`).
 - `policy_fs.rs` — `FsBackend` shim that checks Read/Write policy on every file op.
 - `shared.rs` — shared helpers: `BASHKIT_BUILTINS` list, `is_bashkit_builtin`, output
 limit/offset helpers, search/walk utilities.
@@ -76,7 +78,7 @@ file (feature-gated). `search_browser.rs` holds the browser-driven search-engine
 - Always run `cargo fmt` (rustfmt) after any code change and before committing.
 - Track all changes in `CHANGELOG.md` — add/update an entry for every feature, fix, or
   behavioral change, grouped under the current or next version.
-- Add `Action`-gated tools to `build_agent` in `main.rs`, following existing registration order.
+- Add `Action`-gated tools to `build_agent` in `agent.rs`, following existing registration order.
 - Tool output must respect the hard caps in `tools/mod.rs`: `MAX_OUTPUT_LINES` (200) and
 `MAX_OUTPUT_CHARS` (~100 KB); use `process_output`/`truncate` for offset/limit handling.
 - Use `ansi_color_constants` for terminal styling (logs/tool bars).
@@ -96,4 +98,4 @@ release time.
 
 - The repo tracks `src/providers.rs` and `src/skills.rs`; keep `mod providers;`/`mod skills;`
 in `main.rs` — they are required for compilation.
-- `.gitignore` excludes `/target`, `PLAN.md`, `web/`.
+- `.gitignore` excludes `/target`, `PLAN.md`, `web`.

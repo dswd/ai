@@ -75,6 +75,15 @@ pub use write_file::WriteFileTool;
 pub const MAX_OUTPUT_LINES: usize = 200;
 pub const MAX_OUTPUT_CHARS: usize = 100_000; // ~100 KB
 
+/// Largest index `<= i` that lies on a UTF-8 char boundary of `s`.
+fn floor_char_boundary(s: &str, i: usize) -> usize {
+    let mut i = i.min(s.len());
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
 /// Truncate a string for debug/log display.
 pub fn truncate(s: &str, max_lines: usize, max_chars: usize) -> String {
     let line_count = s.lines().count();
@@ -88,7 +97,8 @@ pub fn truncate(s: &str, max_lines: usize, max_chars: usize) -> String {
         out.push('\n');
     }
     if out.len() > max_chars {
-        out.truncate(max_chars);
+        let end = floor_char_boundary(&out, max_chars);
+        out.truncate(end);
     }
     let trimmed = out.trim_end_matches('\n');
     format!("{trimmed}\n...")
@@ -132,7 +142,7 @@ pub fn process_output(
         if n == 0 {
             return Err("limit must be greater than 0".to_string());
         }
-        (start + n).min(total_lines)
+        (start.saturating_add(n)).min(total_lines)
     } else {
         total_lines
     };
@@ -153,7 +163,8 @@ pub fn process_output(
             capped_out.push('\n');
         }
         if capped_out.len() > MAX_OUTPUT_CHARS {
-            capped_out.truncate(MAX_OUTPUT_CHARS);
+            let end = floor_char_boundary(&capped_out, MAX_OUTPUT_CHARS);
+            capped_out.truncate(end);
             if let Some(last_nl) = capped_out.rfind('\n') {
                 capped_out.truncate(last_nl + 1);
             }
@@ -250,5 +261,26 @@ mod tests {
         let out = process_output(&raw, None, None).unwrap();
         assert!(out.contains("output capped"));
         assert!(out.lines().count() <= MAX_OUTPUT_LINES + 2);
+    }
+
+    #[test]
+    fn test_truncate_multibyte_boundary() {
+        let s = "é".repeat(100);
+        let out = truncate(&s, 1, 5);
+        assert!(out.ends_with("..."));
+    }
+
+    #[test]
+    fn test_process_output_multibyte_cap() {
+        let raw = "😀".repeat(40_000);
+        let out = process_output(&raw, None, None).unwrap();
+        assert!(out.contains("output capped"));
+    }
+
+    #[test]
+    fn test_process_output_huge_limit_no_overflow() {
+        let raw = "a\nb\nc";
+        let out = process_output(raw, Some(0), Some(usize::MAX)).unwrap();
+        assert!(out.contains("a\nb\nc"));
     }
 }

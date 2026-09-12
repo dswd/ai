@@ -1,4 +1,5 @@
 use clap::Parser;
+use clap_complete::Shell;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -257,6 +258,14 @@ pub struct Cli {
     pub probe_web: Option<String>,
 
     #[arg(
+        long = "completions",
+        help = "Generate a shell completion script for SHELL (bash, zsh, fish, …) and exit",
+        value_name = "SHELL",
+        require_equals = true
+    )]
+    pub completions: Option<Shell>,
+
+    #[arg(
         short = 'v',
         long = "verbose",
         help = "Enable verbose mode",
@@ -271,6 +280,12 @@ pub struct Cli {
         conflicts_with = "verbose"
     )]
     pub quiet: bool,
+
+    #[arg(
+        long = "no-color",
+        help = "Disable colored output (also honors the NO_COLOR environment variable)"
+    )]
+    pub no_color: bool,
 }
 
 impl Cli {
@@ -313,8 +328,10 @@ impl Cli {
             && self.max_turns == 100
             && self.thinking.is_none()
             && self.probe_web.is_none()
+            && self.completions.is_none()
             && !self.verbose
             && !self.quiet
+            && !self.no_color
             && self.init.is_none()
             && !self.list
             && self.delete.is_none()
@@ -383,5 +400,15 @@ mod tests {
             Some("alpine")
         );
         assert_eq!(parse(&[]).container, None);
+    }
+
+    #[test]
+    fn test_completions_and_no_color() {
+        assert_eq!(
+            parse(&["--completions=bash"]).completions,
+            Some(Shell::Bash)
+        );
+        assert!(parse(&["--no-color"]).no_color);
+        assert!(!parse(&[]).no_color);
     }
 }

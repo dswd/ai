@@ -77,16 +77,23 @@ pub(crate) fn cmd_list_sessions(dir: &std::path::Path) -> anyhow::Result<()> {
         return Ok(());
     }
     for name in &names {
-        if let Ok(s) = Session::load(name, dir) {
-            println!(
-                "{}  — {} messages, model {}, created {}",
-                name,
-                s.log.len(),
-                s.model,
-                s.created
-            );
-        } else {
-            println!("{name}");
+        match Session::load(name, dir) {
+            Ok(s) => {
+                let provider = if s.provider.is_empty() {
+                    "unknown"
+                } else {
+                    &s.provider
+                };
+                println!(
+                    "{}  — {} messages, {} / {}, created {}",
+                    name,
+                    s.log.len(),
+                    provider,
+                    s.model,
+                    s.created
+                );
+            }
+            Err(e) => println!("{name}  — (unreadable: {e})"),
         }
     }
 
@@ -94,6 +101,9 @@ pub(crate) fn cmd_list_sessions(dir: &std::path::Path) -> anyhow::Result<()> {
 }
 
 pub(crate) fn cmd_delete_session(name: &str, dir: &std::path::Path) -> anyhow::Result<()> {
+    if !crate::session::is_safe_name(name) {
+        anyhow::bail!("invalid session name: {name:?}");
+    }
     let path = dir.join(format!("{name}.json"));
     if path.exists() {
         std::fs::remove_file(&path)?;

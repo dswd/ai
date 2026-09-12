@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`--completions=<SHELL>`** — generate a shell completion script for bash, zsh, fish, and the other supported shells, then exit.
+- **`--no-color`** — disable colored output (in addition to the `NO_COLOR` environment variable). ANSI styling is stripped from tool logs and reasoning output, not just assistant markdown.
+- **First-token spinner** — while waiting for the model on an interactive terminal, a spinner is shown on stderr and cleared before any output.
+- **Unknown config-key warnings** — `config.yaml` keys that don't match a known field now print a `warning: unknown config key '…'` instead of being silently ignored.
+
+### Fixed
+
+- **UTF-8 truncation panic** — `truncate`/`process_output` could panic when the line/byte cap fell inside a multi-byte character (emoji, CJK, accented text). Caps now snap to a char boundary.
+- **Offset/limit overflow** — a huge model-supplied `limit` could overflow `offset + limit` and panic on the resulting slice; it is now saturated.
+- **Tool-bar underflow** — `bar_title` underflowed (debug panic; huge allocation in release) for titles longer than 68 bytes; now saturated.
+- **Session-name path traversal** — `-s=../../x` and `--delete=../foo` could read/delete files outside the session directory; names are now validated to a single path component.
+- **Provider API-key env vars** — `DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, and the other provider-specific variables are now used as a fallback when `api_key` is unset (previously only `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` were).
+- **`~` expansion** — `~`/`~/…` is now expanded for `--config`, `--policy`, `--memory`, `--skill`, `--init`, and config paths (`session_dir`, `skills_dir`, `policy`, `memory`), matching the documented examples.
+- **Silent session loss** — a corrupt or unreadable session file now warns with the actual error before starting a new session, instead of silently discarding the history.
+- **Provider context window** — the provider's known context window is used when `context_window` is not set in the config, so context pruning works out of the box.
+- **`--list` output** — now shows each session's provider and reports sessions that cannot be parsed instead of printing only the name.
+- **Pre-epoch clock** — session-name generation no longer panics if the system clock is before the Unix epoch.
+
+### Added (infra)
+
+- MIT `LICENSE`, a `rust-toolchain.toml` pinning stable (rustfmt + clippy), and binary-level integration tests under `tests/`.
+
 ## v0.4.0 – Container Isolation, Memory & Sessions
 
 ### Security

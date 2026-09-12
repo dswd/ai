@@ -166,7 +166,7 @@ pub fn run(target_path: Option<String>) -> anyhow::Result<()> {
         if p.is_empty() {
             Config::default_path().unwrap_or_else(|| PathBuf::from("config.yaml"))
         } else {
-            PathBuf::from(p)
+            crate::util::expand_tilde(p)
         }
     } else {
         Config::default_path().unwrap_or_else(|| PathBuf::from("config.yaml"))
