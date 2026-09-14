@@ -287,6 +287,16 @@ pub(crate) fn is_bashkit_builtin(cmd: &str) -> bool {
     BASHKIT_BUILTINS.contains(&cmd)
 }
 
+/// Builtins advertised to the model as free. `command` is intentionally absent:
+/// it runs a target command, so presenting it as a free builtin is misleading.
+pub(crate) fn advertised_builtins() -> Vec<&'static str> {
+    BASHKIT_BUILTINS
+        .iter()
+        .copied()
+        .filter(|b| *b != "command")
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn search_file(
     sandbox: &Sandbox,

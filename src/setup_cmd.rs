@@ -85,20 +85,25 @@ pub(crate) async fn run(target: String) -> anyhow::Result<()> {
 }
 
 /// Phase 1: reuse the existing config when offered and confirmed, otherwise run
-/// the provider/model wizard.
+/// the provider/model wizard. The existing config is passed to the wizard so its
+/// values seed the defaults and its non-connection settings are preserved.
 async fn pick_config(
     theme: &ColorfulTheme,
     path: &Path,
     allow_reuse: bool,
 ) -> anyhow::Result<Config> {
+    let existing = Config::from_file(path).ok();
+    if let Some(existing) = &existing {
+        print_config_summary(path, existing);
+    }
     if allow_reuse
-        && let Some(existing) = Config::from_file(path).ok()
-        && confirm_reuse(theme, path, &existing)?
+        && let Some(existing) = &existing
+        && confirm_reuse(theme)?
     {
-        return Ok(existing);
+        return Ok(existing.clone());
     }
     let catalog = Catalog::load().await;
-    wizard(theme, &catalog).await
+    wizard(theme, &catalog, existing.as_ref()).await
 }
 
 fn resolve_path(target: &str) -> PathBuf {
@@ -109,16 +114,87 @@ fn resolve_path(target: &str) -> PathBuf {
     }
 }
 
-fn confirm_reuse(theme: &ColorfulTheme, path: &Path, config: &Config) -> anyhow::Result<bool> {
-    println!("  Found existing config: {}", path.display());
-    println!("    Provider: {}", config.provider);
-    println!("    Model:    {}", config.model);
-    println!("    API key:  {}", key_source(config));
-    println!();
+fn confirm_reuse(theme: &ColorfulTheme) -> anyhow::Result<bool> {
     Ok(Confirm::with_theme(theme)
         .with_prompt("Use this configuration?")
         .default(true)
         .interact()?)
+}
+
+/// Show every setting, with unset fields marked `(default)`, so a reconfigure
+/// starts from a clear picture of what is currently in effect.
+fn print_config_summary(path: &Path, config: &Config) {
+    let value = |s: Option<String>| s.unwrap_or_else(|| "(default)".to_string());
+    let path_value = |p: Option<&PathBuf>| p.map(|p| p.display().to_string());
+    println!("  Current configuration ({}):", path.display());
+    println!("    provider:            {}", config.provider);
+    println!("    model:               {}", config.model);
+    println!(
+        "    api_base:            {}",
+        value(config.api_base.clone())
+    );
+    println!("    api_key:             {}", key_source(config));
+    println!(
+        "    flavor:              {}",
+        value(flavor_label(config.flavor))
+    );
+    println!(
+        "    system_prompt:       {}",
+        value(config.system_prompt.clone())
+    );
+    println!(
+        "    max_tokens:          {}",
+        value(config.max_tokens.map(|n| n.to_string()))
+    );
+    println!(
+        "    thinking:            {}",
+        value(config.thinking.map(|n| n.to_string()))
+    );
+    println!(
+        "    context_window:      {}",
+        value(config.context_window.map(|n| n.to_string()))
+    );
+    println!(
+        "    session_dir:         {}",
+        value(path_value(config.session_dir.as_ref()))
+    );
+    println!(
+        "    skills_dir:          {}",
+        value(path_value(config.skills_dir.as_ref()))
+    );
+    println!(
+        "    policy:              {}",
+        value(path_value(config.policy.as_ref()))
+    );
+    println!(
+        "    memory:              {}",
+        value(path_value(config.memory.as_ref()))
+    );
+    println!("    proxy:               {}", value(config.proxy.clone()));
+    println!(
+        "    search.searxng_url:  {}",
+        value(config.search.searxng_url.clone())
+    );
+    println!(
+        "    container.image:     {}",
+        value(config.container.default_image.clone())
+    );
+    println!(
+        "    container.runtime:   {}",
+        value(config.container.runtime.clone())
+    );
+    println!(
+        "    container.network:   {}",
+        value(config.container.network.clone())
+    );
+    println!();
+}
+
+fn flavor_label(flavor: Option<ProviderFlavor>) -> Option<String> {
+    flavor.map(|f| match f {
+        ProviderFlavor::OpenAi => "openai".to_string(),
+        ProviderFlavor::Anthropic => "anthropic".to_string(),
+    })
 }
 
 fn key_source(config: &Config) -> String {
@@ -156,14 +232,22 @@ struct Selection<'a> {
     catalog: Option<&'a CatalogProvider>,
 }
 
-async fn wizard(theme: &ColorfulTheme, catalog: &Catalog) -> anyhow::Result<Config> {
+async fn wizard(
+    theme: &ColorfulTheme,
+    catalog: &Catalog,
+    existing: Option<&Config>,
+) -> anyhow::Result<Config> {
+    let base = existing.cloned().unwrap_or_default();
     let (mut items, mut ids) = curated_items(catalog);
     items.push(SEARCH_ALL.to_string());
     ids.push(None);
     items.push(CUSTOM_URL.to_string());
     ids.push(None);
 
-    let default_idx = detected_default(catalog, &ids);
+    let default_idx = ids
+        .iter()
+        .position(|id| id.as_deref() == Some(base.provider.as_str()))
+        .or_else(|| detected_default(catalog, &ids));
     let mut select = Select::with_theme(theme)
         .with_prompt("Provider")
         .items(&items);
@@ -186,22 +270,25 @@ async fn wizard(theme: &ColorfulTheme, catalog: &Catalog) -> anyhow::Result<Conf
         .first()
         .cloned()
         .unwrap_or_else(|| default_env(selection.flavor).to_string());
-    let api_key = prompt_api_key(theme, &env_var)?;
-    let api_base = prompt_api_base(theme, &selection)?;
-    let (model, context_window) =
-        prompt_model(theme, &selection, api_base.as_deref(), &api_key).await?;
+    let api_key = prompt_api_key(theme, &env_var, base.api_key.as_deref())?;
+    let api_base = prompt_api_base(theme, &selection, base.api_base.as_deref())?;
+    let (model, context_window) = prompt_model(
+        theme,
+        &selection,
+        api_base.as_deref(),
+        &api_key,
+        base.model.as_str(),
+        base.context_window,
+    )
+    .await?;
 
-    let provider_id = selection.provider_id.clone();
-    let flavor = selection.flavor;
-    let config = Config {
-        provider: provider_id,
-        api_key,
-        api_base,
-        model,
-        context_window,
-        flavor: Some(to_config_flavor(flavor)),
-        ..Config::default()
-    };
+    let mut config = base;
+    config.provider = selection.provider_id.clone();
+    config.api_key = api_key;
+    config.api_base = api_base;
+    config.model = model;
+    config.context_window = context_window;
+    config.flavor = Some(to_config_flavor(selection.flavor));
     Ok(config)
 }
 
@@ -318,7 +405,24 @@ fn default_env(flavor: Flavor) -> &'static str {
     }
 }
 
-fn prompt_api_key(theme: &ColorfulTheme, env_var: &str) -> anyhow::Result<Option<String>> {
+fn prompt_api_key(
+    theme: &ColorfulTheme,
+    env_var: &str,
+    current: Option<&str>,
+) -> anyhow::Result<Option<String>> {
+    if let Some(current) = current {
+        let prompt = match current.strip_prefix("env:") {
+            Some(var) => format!("Keep current API key from environment ({var})?"),
+            None => "Keep current stored API key?".to_string(),
+        };
+        if Confirm::with_theme(theme)
+            .with_prompt(prompt)
+            .default(true)
+            .interact()?
+        {
+            return Ok(Some(current.to_string()));
+        }
+    }
     if std::env::var(env_var).is_ok() {
         let use_env = Confirm::with_theme(theme)
             .with_prompt(format!("Use {env_var} from environment?"))
@@ -338,8 +442,12 @@ fn prompt_api_key(theme: &ColorfulTheme, env_var: &str) -> anyhow::Result<Option
 fn prompt_api_base(
     theme: &ColorfulTheme,
     selection: &Selection<'_>,
+    current: Option<&str>,
 ) -> anyhow::Result<Option<String>> {
-    let default = selection.base_default.clone().unwrap_or_default();
+    let default = current
+        .map(str::to_string)
+        .or_else(|| selection.base_default.clone())
+        .unwrap_or_default();
     loop {
         let prompt = if default.is_empty() {
             "API base URL (required)".to_string()
@@ -355,8 +463,8 @@ fn prompt_api_base(
         if !trimmed.is_empty() {
             return Ok(Some(trimmed));
         }
-        if selection.base_default.is_some() {
-            return Ok(selection.base_default.clone());
+        if !default.is_empty() {
+            return Ok(Some(default.clone()));
         }
         println!("  A base URL is required.");
     }
@@ -367,6 +475,8 @@ async fn prompt_model(
     selection: &Selection<'_>,
     api_base: Option<&str>,
     api_key: &Option<String>,
+    current_model: &str,
+    current_context: Option<usize>,
 ) -> anyhow::Result<(String, Option<usize>)> {
     if let Some(provider) = selection.catalog {
         let models = provider.models();
@@ -375,7 +485,8 @@ async fn prompt_model(
                 .iter()
                 .map(|m| format!("{}{}", m.id, m.summary()))
                 .collect();
-            return pick_model(theme, &items, |idx| {
+            let default = models.iter().position(|m| m.id == current_model);
+            return pick_model(theme, &items, default, current_context, |idx| {
                 let model = models[idx];
                 (model.id.clone(), model.context().map(|c| c as usize))
             });
@@ -384,43 +495,53 @@ async fn prompt_model(
 
     let live = fetch_models(api_base, api_key, selection.flavor).await;
     if !live.is_empty() {
-        return pick_model(theme, &live, |idx| (live[idx].clone(), None));
+        let default = live.iter().position(|m| m == current_model);
+        return pick_model(theme, &live, default, current_context, |idx| {
+            (live[idx].clone(), None)
+        });
     }
 
     let static_models: Vec<String> = providers::resolve(&selection.provider_id)
         .map(|p| p.models.iter().map(|m| m.to_string()).collect())
         .unwrap_or_default();
     if !static_models.is_empty() {
-        return pick_model(theme, &static_models, |idx| {
+        let default = static_models.iter().position(|m| m == current_model);
+        return pick_model(theme, &static_models, default, current_context, |idx| {
             (static_models[idx].clone(), None)
         });
     }
 
     let model: String = Input::with_theme(theme)
         .with_prompt("Model name")
+        .default(current_model.to_string())
         .interact_text()?;
-    Ok((model, None))
+    Ok((model, current_context))
 }
 
 fn pick_model(
     theme: &ColorfulTheme,
     items: &[String],
+    default: Option<usize>,
+    fallback_context: Option<usize>,
     resolve_item: impl Fn(usize) -> (String, Option<usize>),
 ) -> anyhow::Result<(String, Option<usize>)> {
     let mut choices: Vec<String> = items.to_vec();
     choices.push("Other (type manually)".to_string());
-    let idx = Select::with_theme(theme)
+    let mut select = Select::with_theme(theme)
         .with_prompt("Model")
-        .items(&choices)
-        .default(0)
-        .interact()?;
+        .items(&choices);
+    if let Some(idx) = default {
+        select = select.default(idx);
+    }
+    let idx = select.interact()?;
     if idx == choices.len() - 1 {
         let model: String = Input::with_theme(theme)
             .with_prompt("Model name")
             .interact_text()?;
-        Ok((model, None))
+        Ok((model, fallback_context))
     } else {
-        Ok(resolve_item(idx))
+        let (model, context) = resolve_item(idx);
+        Ok((model, context.or(fallback_context)))
     }
 }
 
@@ -502,9 +623,11 @@ fn setup_system_prompt(config: &Config, policy: &Policy) -> String {
          ## JSON schema\n```json\n{schema}\n```\n\n{guide}\n\n\
          {policy}\n\n\
          Start by briefly telling the user what can be configured, then ask what they would \
-         like to change, one topic at a time. Explain trade-offs, confirm values, and save \
-         with `write_config` when they are done. Do not invent options that are absent from \
-         the schema.",
+         like to change, one topic at a time. Explain trade-offs and confirm values. After \
+         every change, show the user the complete current configuration as a YAML code block \
+         so they always have an overview, and call `write_config` when they are done (not \
+         after every step, to avoid repeated approval prompts). Do not invent options that \
+         are absent from the schema.",
         current = config_for_prompt(config),
         schema = schema,
         guide = GUIDE,

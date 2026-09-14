@@ -65,6 +65,8 @@ run without `-x`; external commands fork-exec and require an `Action::Execute` a
 When a container is configured, the whole command string is instead sent to the container's
 shell (see `container.rs`). Filesystem ops are policy-checked via `policy_fs.rs` (`PolicyFsBackend`).
 - `policy_fs.rs` — `FsBackend` shim that checks Read/Write policy on every file op.
+  Metadata-only `stat`/`exists` are intentionally not gated so bashkit's `command`/`type`/
+  `which`/PATH resolution does not prompt for a Read grant per `PATH` entry.
 - `shared.rs` — shared helpers: `BASHKIT_BUILTINS` list, `is_bashkit_builtin`, output
 limit/offset helpers, search/walk utilities.
 - `browser_state.rs` + `browser_*.rs` — Obscura headless browser state and one tool per

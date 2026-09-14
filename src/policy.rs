@@ -246,7 +246,7 @@ impl Policy {
                 .to_string(),
         );
 
-        for chunk in crate::tools::shared::BASHKIT_BUILTINS.chunks(12) {
+        for chunk in crate::tools::shared::advertised_builtins().chunks(12) {
             lines.push(format!("  - {}", chunk.join(", ")));
         }
 

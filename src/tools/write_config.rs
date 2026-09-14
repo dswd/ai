@@ -77,7 +77,13 @@ impl PortableTool for WriteConfigTool {
                 "could not save the configuration (access denied or write failed)".to_string(),
             ));
         }
-        Ok("Configuration saved and validated.".to_string())
+
+        let mut display = config.clone();
+        display.api_key = display.api_key.map(|_| "(redacted)".to_string());
+        let shown = serde_yaml_ng::to_string(&display).unwrap_or_default();
+        Ok(format!(
+            "Configuration saved and validated. Current configuration:\n```yaml\n{shown}```"
+        ))
     }
 }
 
@@ -132,6 +138,9 @@ mod tests {
             .await
             .unwrap();
         assert!(out.contains("saved"));
+        assert!(out.contains("be terse"));
+        assert!(out.contains("(redacted)"));
+        assert!(!out.contains("ANTHROPIC_API_KEY"));
 
         let written = Config::from_file(&path).unwrap();
         assert_eq!(written.provider, "anthropic");

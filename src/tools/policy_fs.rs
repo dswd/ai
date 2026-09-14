@@ -74,8 +74,11 @@ impl<B: FsBackend + Send + Sync> FsBackend for PolicyFsBackend<B> {
         self.inner.remove(path, recursive).await
     }
 
+    /// Metadata is deliberately not policy-gated: bashkit resolves commands
+    /// (`command`/`type`/`which`/`hash`) and searches `PATH` with `stat`, so
+    /// gating it would prompt for a Read grant on every `PATH` entry. Contents
+    /// and directory listings stay behind the Read policy.
     async fn stat(&self, path: &Path) -> bashkit::Result<Metadata> {
-        self.check(Action::Read, path)?;
         self.inner.stat(path).await
     }
 
@@ -85,7 +88,6 @@ impl<B: FsBackend + Send + Sync> FsBackend for PolicyFsBackend<B> {
     }
 
     async fn exists(&self, path: &Path) -> bashkit::Result<bool> {
-        self.check(Action::Read, path)?;
         self.inner.exists(path).await
     }
 
@@ -125,5 +127,29 @@ impl<B: FsBackend + Send + Sync> FsBackend for PolicyFsBackend<B> {
 
     fn limits(&self) -> FsLimits {
         self.inner.limits()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bashkit::{RealFs, RealFsMode};
+
+    #[tokio::test]
+    async fn metadata_is_not_policy_gated_but_contents_are() {
+        let inner = RealFs::open("/", RealFsMode::ReadOnly).await.unwrap();
+        let backend = PolicyFsBackend::new(inner, Policy::default());
+        assert!(backend.stat(Path::new("/")).await.is_ok());
+        assert!(
+            !backend
+                .exists(Path::new("/definitely-not-here-xyz"))
+                .await
+                .unwrap()
+        );
+        let err = backend
+            .read(Path::new("/definitely-not-here-xyz"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("access denied"));
     }
 }

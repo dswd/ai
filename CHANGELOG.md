@@ -10,6 +10,8 @@
 - **Config `flavor` field** — records whether a provider speaks the OpenAI or Anthropic request shape, so any models.dev provider (not just the built-in table) can be used at runtime. Omitted values are derived from the built-in provider table.
 - **`write_config` setup tool (`src/tools/write_config.rs`)** — the setup AI's only way to persist config: it strictly parses the YAML, restores the existing provider/credentials/model/flavor, and saves through the sandbox with user approval. It neither takes nor reveals the config path, and the API key is never sent to the model.
 - **Strict config parsing** — `Config::parse_strict`/`from_file_strict` reject unknown keys; `write_config` returns parse errors to the model so it can correct them in-session.
+- **Setup shows current values and preserves settings** — reconfigure prints a full summary of the existing configuration (with unset fields marked `(default)`), seeds the wizard defaults from it, offers to keep the current API key, and no longer drops non-connection settings (`system_prompt`, `proxy`, `container`, `memory`, …) when you decline reuse.
+- **Setup AI recaps the config** — the setup prompt instructs the model to show the complete configuration after every change, and `write_config` returns the saved config with the API key `(redacted)` so the model stays anchored to the full state.
 - **`--completions=<SHELL>`** — generate a shell completion script for bash, zsh, fish, and the other supported shells, then exit.
 - **`--no-color`** — disable colored output (in addition to the `NO_COLOR` environment variable). ANSI styling is stripped from tool logs and reasoning output, not just assistant markdown.
 - **First-token spinner** — while waiting for the model on an interactive terminal, a spinner is shown on stderr and cleared before any output.
@@ -23,6 +25,7 @@
 
 ### Fixed
 
+- **`command`/`type`/`which` no longer spam Read approvals** — the shell's filesystem backend no longer gates metadata-only `stat`/`exists`, so bashkit's PATH lookups do not request a Read grant per `PATH` entry. File contents and directory listings remain policy-gated (metadata such as existence/type is now visible without a Read grant). `command` is also no longer advertised as a free builtin.
 - **UTF-8 truncation panic** — `truncate`/`process_output` could panic when the line/byte cap fell inside a multi-byte character (emoji, CJK, accented text). Caps now snap to a char boundary.
 - **Offset/limit overflow** — a huge model-supplied `limit` could overflow `offset + limit` and panic on the resulting slice; it is now saturated.
 - **Tool-bar underflow** — `bar_title` underflowed (debug panic; huge allocation in release) for titles longer than 68 bytes; now saturated.

@@ -336,6 +336,42 @@ mod tests {
         Bash::builder().fs(fs).limits(limits).build()
     }
 
+    async fn test_bash_with_policy(policy: Policy) -> Bash {
+        let fs_backend = RealFs::open("/", RealFsMode::ReadWrite).await.unwrap();
+        let fs: Arc<dyn FileSystem> =
+            Arc::new(PosixFs::new(PolicyFsBackend::new(fs_backend, policy)));
+        let limits = ExecutionLimits {
+            timeout: Duration::from_secs(10),
+            ..Default::default()
+        };
+        Bash::builder().fs(fs).limits(limits).build()
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn command_lookup_does_not_require_read_policy() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("ai-cmdlookup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("ai-test-cmd");
+        std::fs::write(&bin, b"#!/bin/sh\n").unwrap();
+        let mut perms = std::fs::metadata(&bin).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&bin, perms).unwrap();
+
+        // Deny-all policy: `command -v` resolves through PATH, which stats each
+        // entry. Metadata lookups must not be gated by Read.
+        let mut bash = test_bash_with_policy(Policy::default()).await;
+        let result = bash
+            .exec(&format!("PATH={} command -v ai-test-cmd", dir.display()))
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[tokio::test]
     async fn test_bashkit_echo() {
         let mut bash = test_bash().await;
