@@ -696,6 +696,7 @@ async fn run_ai_setup(path: &Path, config: &Config) -> Result<(), Phase2Error> {
         ),
         context_window: resolved.context_window,
         transient: true,
+        exit_flag: None,
         setup_target: Some(target),
     };
 

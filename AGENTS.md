@@ -79,6 +79,9 @@ request/parse pairs for Brave/Tavily/Exa/Serper/SearXNG, and status→`EngineErr
 - `write_config.rs` — setup-only `write_config` tool: strictly parses the AI's YAML, restores
 the real provider/credentials (including search keys), and saves through the sandbox (write
 approval). It never takes or reports the config path, so the setup AI cannot read the secret file.
+- `exit_program.rs` — interactive-only tool the model calls to end the program when the user
+asks; signals the loop via a shared `Arc<AtomicBool>` in `AgentContext`. Not `Action`-gated,
+and not registered for one-off runs or setup.
 
 ## Conventions
 

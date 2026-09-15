@@ -20,6 +20,7 @@ use rig::{
     tool::server::ToolServer,
 };
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 pub(crate) struct AgentContext<'a> {
@@ -46,6 +47,8 @@ pub(crate) struct AgentContext<'a> {
     pub(crate) context_window: Option<usize>,
     /// Do not persist a session: interactive setup, and `--no-session` one-offs.
     pub(crate) transient: bool,
+    /// When set, the interactive `exit_program` tool is exposed and drives the loop.
+    pub(crate) exit_flag: Option<Arc<AtomicBool>>,
     /// Setup-only config target; when set, the `write_config` tool is exposed.
     pub(crate) setup_target: Option<Arc<tools::SetupTarget>>,
 }
@@ -68,6 +71,7 @@ async fn dispatch_agent(agent: rig::agent::Agent, ctx: AgentContext<'_>) -> anyh
             ctx.context_window,
             ctx.memory.as_ref().map(Arc::clone),
             ctx.transient,
+            ctx.exit_flag,
         )
         .await?;
     } else if let Some(text) = ctx.prompt_text {
@@ -130,6 +134,10 @@ fn build_agent<M: CompletionModel + 'static>(
                 ctx.container_session.as_ref().map(Arc::clone),
             ))
             .tool(tools::GetCurrentTimeTool::new());
+
+        if let Some(flag) = &ctx.exit_flag {
+            server = server.tool(tools::ExitProgramTool::new(Arc::clone(flag)));
+        }
 
         if can_web_fetch {
             #[cfg(feature = "browser")]

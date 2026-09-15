@@ -40,6 +40,7 @@ use setup::{
 };
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -147,6 +148,9 @@ async fn run(cli: Cli, config: Config, session_dir: PathBuf, policy: Policy) -> 
     let browser_state: Option<Arc<()>> = None;
 
     let session_id = session.name.clone();
+    let exit_flag = cli
+        .is_interactive()
+        .then(|| Arc::new(AtomicBool::new(false)));
 
     let ctx = AgentContext {
         system_prompt: &system_prompt,
@@ -171,6 +175,7 @@ async fn run(cli: Cli, config: Config, session_dir: PathBuf, policy: Policy) -> 
         prompt_text,
         context_window: resolved.context_window,
         transient: cli.no_session,
+        exit_flag,
         setup_target: None,
     };
 

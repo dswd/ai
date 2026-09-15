@@ -95,6 +95,12 @@ pub(crate) fn assemble_system_prompt(
         system_prompt.push_str(&note);
     }
 
+    if cli.is_interactive() {
+        system_prompt.push_str(
+            "\n\nIf the user asks to quit or exit the program, call the `exit_program` tool.",
+        );
+    }
+
     if !skills.is_empty() {
         system_prompt = format!("{system_prompt}\n\n{}", skills::summary(skills));
     }
@@ -172,5 +178,27 @@ mod tests {
             Action::Execute,
         ]);
         assert!(missing_permissions_note(&policy, false).is_none());
+    }
+
+    #[test]
+    fn test_exit_guidance_only_interactive() {
+        use clap::Parser;
+
+        let interactive = Cli::parse_from(["ai", "-s"]);
+        let (prompt, _) = assemble_system_prompt(
+            &interactive,
+            &Config::default(),
+            &Policy::default(),
+            &[],
+            false,
+        )
+        .unwrap();
+        assert!(prompt.contains("exit_program"));
+
+        let oneshot = Cli::parse_from(["ai", "hi"]);
+        let (prompt, _) =
+            assemble_system_prompt(&oneshot, &Config::default(), &Policy::default(), &[], false)
+                .unwrap();
+        assert!(!prompt.contains("exit_program"));
     }
 }

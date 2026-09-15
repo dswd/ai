@@ -13,8 +13,10 @@ use rig::{
     streaming::StreamingChat,
 };
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_interactive(
     agent: Agent,
     session: &mut Session,
@@ -23,6 +25,7 @@ pub(crate) async fn run_interactive(
     context_window: Option<usize>,
     memory: Option<Arc<memory::Memory>>,
     transient: bool,
+    exit_flag: Option<Arc<AtomicBool>>,
 ) -> anyhow::Result<()> {
     let mut chat_history: Vec<Message> = session.chat_history();
 
@@ -79,7 +82,7 @@ pub(crate) async fn run_interactive(
         }
     }
 
-    loop {
+    while !exit_requested(&exit_flag) {
         let prompt = format_interactive_prompt(last_input_tokens, context_window);
         let input = io::read_user_input(&prompt);
         match input {
@@ -288,6 +291,11 @@ async fn reconcile_memory(agent: &Agent, session: &mut Session, memory: &memory:
             "  🧠 memory reconciled: {added} new, {updated} updated"
         ));
     }
+}
+
+/// True when the interactive `exit_program` tool has asked the loop to end.
+fn exit_requested(flag: &Option<Arc<AtomicBool>>) -> bool {
+    flag.as_ref().is_some_and(|f| f.load(Ordering::SeqCst))
 }
 
 pub(crate) fn augment_prompt(prompt: &str, memory: Option<&memory::Memory>) -> Option<String> {
