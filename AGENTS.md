@@ -32,7 +32,7 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `container.rs` | Session-scoped container for external commands (Docker/Podman): policy→bind mounts, network none unless web |
 | `context.rs` | Deterministic context editing: prune stale tool outputs from the history sent to the model |
 | `skills.rs` | Skill discovery/loading (markdown front-matter files) |
-| `session.rs` | Session persistence (JSON, schema v2: full chat log + provider/model binding) |
+| `session.rs` | Session persistence (JSON, schema v2: full chat log + provider/model binding); newest-session selection and the 60-minute resume window used to continue one-off runs |
 | `memory.rs` | Persistent agent memory |
 | `tools/` | One file per tool (see below) |
 | `format.rs` | Streaming markdown-to-ANSI console formatting for assistant output |

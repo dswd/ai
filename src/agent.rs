@@ -16,7 +16,7 @@ use rig::{
     agent::AgentBuilder,
     agent::{MultiTurnStreamItem, PromptResponse, StreamingResult},
     completion::CompletionModel,
-    streaming::{StreamedAssistantContent, StreamingPrompt},
+    streaming::{StreamedAssistantContent, StreamingChat, StreamingPrompt},
     tool::server::ToolServer,
 };
 use std::sync::Arc;
@@ -44,7 +44,7 @@ pub(crate) struct AgentContext<'a> {
     pub(crate) session_dir: &'a std::path::Path,
     pub(crate) prompt_text: Option<String>,
     pub(crate) context_window: Option<usize>,
-    /// Run the interactive loop without persisting a session (used by setup).
+    /// Do not persist a session: interactive setup, and `--no-session` one-offs.
     pub(crate) transient: bool,
     /// Setup-only config target; when set, the `write_config` tool is exposed.
     pub(crate) setup_target: Option<Arc<tools::SetupTarget>>,
@@ -71,7 +71,15 @@ async fn dispatch_agent(agent: rig::agent::Agent, ctx: AgentContext<'_>) -> anyh
         )
         .await?;
     } else if let Some(text) = ctx.prompt_text {
-        run_oneshot(agent, &text, ctx.memory.as_ref().map(Arc::clone)).await?;
+        run_oneshot(
+            agent,
+            &text,
+            ctx.memory.as_ref().map(Arc::clone),
+            ctx.session,
+            ctx.session_dir,
+            ctx.transient,
+        )
+        .await?;
     } else {
         anyhow::bail!("No prompt provided. Pass a prompt argument or pipe text to stdin.");
     }
@@ -263,16 +271,39 @@ async fn run_oneshot(
     agent: rig::agent::Agent,
     prompt: &str,
     memory: Option<Arc<memory::Memory>>,
+    session: &mut Session,
+    session_dir: &std::path::Path,
+    transient: bool,
 ) -> anyhow::Result<()> {
     let start = Instant::now();
     let augmented = crate::interactive::augment_prompt(prompt, memory.as_deref());
+    let sent = augmented.as_deref().unwrap_or(prompt);
+
+    if transient {
+        let spinner = output::Spinner::start("waiting for model…");
+        let mut stream = agent
+            .stream_prompt(sent)
+            .add_hook(ContextPruneHook::default())
+            .await;
+        drop(spinner);
+        let response = stream_response(&mut stream).await?;
+        crate::interactive::print_usage(&response.usage, start.elapsed());
+        return Ok(());
+    }
+
+    // Continue the session: replay its full history, then persist the turn.
+    let mut chat_history = session.chat_history();
+    session.add_user(prompt);
     let spinner = output::Spinner::start("waiting for model…");
     let mut stream = agent
-        .stream_prompt(augmented.as_deref().unwrap_or(prompt))
+        .stream_chat(sent, chat_history.clone())
         .add_hook(ContextPruneHook::default())
         .await;
     drop(spinner);
     let response = stream_response(&mut stream).await?;
-    crate::interactive::print_usage(&response.usage, start.elapsed());
+    let usage = response.usage;
+    crate::interactive::record_turn(session, &mut chat_history, response);
+    session.save(session_dir)?;
+    crate::interactive::print_usage(&usage, start.elapsed());
     Ok(())
 }

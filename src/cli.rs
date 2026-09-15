@@ -38,6 +38,13 @@ pub struct Cli {
     pub session: Option<String>,
 
     #[arg(
+        long = "no-session",
+        help = "Do not read or write a session; run stateless",
+        conflicts_with = "session"
+    )]
+    pub no_session: bool,
+
+    #[arg(
         short = 'm',
         long = "memory",
         help = "Enable persistent memory with optional FILE",
@@ -305,6 +312,7 @@ impl Cli {
         self.prompt.is_empty()
             && self.system.is_none()
             && self.session.is_none()
+            && !self.no_session
             && self.memory.is_none()
             && self.config.is_none()
             && self.model.is_none()
@@ -400,6 +408,13 @@ mod tests {
             Some("alpine")
         );
         assert_eq!(parse(&[]).container, None);
+    }
+
+    #[test]
+    fn test_no_session_flag() {
+        assert!(parse(&["--no-session"]).no_session);
+        assert!(!parse(&["--no-session"]).is_vanilla());
+        assert!(Cli::try_parse_from(["ai", "--no-session", "-s=foo"]).is_err());
     }
 
     #[test]

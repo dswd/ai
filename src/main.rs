@@ -108,17 +108,19 @@ async fn run(cli: Cli, config: Config, session_dir: PathBuf, policy: Policy) -> 
     let max_turns = cli.max_turns;
 
     let resolved = resolve_provider(&config)?;
+    let prompt_text = resolve_prompt_text(&cli).await;
+    let implicit = !cli.is_interactive() && !cli.no_session && prompt_text.is_some();
     let mut session = resolve_session(
         &cli,
         &session_dir,
         &system_prompt,
         &model_name,
         &resolved.name,
+        implicit,
     )?;
     if let Some(ref mem) = memory {
         mem.set_session_name(&session.name);
     }
-    let prompt_text = resolve_prompt_text(&cli).await;
     let thinking = resolve_thinking(cli.thinking.or(config.thinking), &resolved);
 
     let tool_sets = if !cli.tool.is_empty() {
@@ -168,7 +170,7 @@ async fn run(cli: Cli, config: Config, session_dir: PathBuf, policy: Policy) -> 
         session_dir: &session_dir,
         prompt_text,
         context_window: resolved.context_window,
-        transient: false,
+        transient: cli.no_session,
         setup_target: None,
     };
 

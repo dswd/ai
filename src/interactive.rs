@@ -208,7 +208,11 @@ pub(crate) async fn run_interactive(
 /// (excluding the input history). The raw user message was already recorded
 /// before the call, so only the turns after the prompt go into the session log;
 /// the full set (including the prompt) extends the live model history.
-fn record_turn(session: &mut Session, chat_history: &mut Vec<Message>, response: PromptResponse) {
+pub(crate) fn record_turn(
+    session: &mut Session,
+    chat_history: &mut Vec<Message>,
+    response: PromptResponse,
+) {
     if let Some(messages) = response.messages {
         session.extend_messages(messages.iter().skip(1).cloned());
         chat_history.extend(messages);

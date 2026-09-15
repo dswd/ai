@@ -3,6 +3,10 @@ use rig::completion::message::UserContent;
 use rig::completion::{AssistantContent, Message as ChatMessage};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::time::SystemTime;
+
+/// A fresh session is resumed when its file was modified within this window.
+pub const RESUME_WINDOW_SECS: u64 = 60 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -244,11 +248,22 @@ impl Session {
     }
 }
 
-pub fn generate_session_name() -> String {
+/// The `YYYY-MM-DD` UTC date prefix for generated session names.
+fn today_prefix() -> String {
+    use time::OffsetDateTime;
+    use time::macros::format_description;
+
+    OffsetDateTime::now_utc()
+        .format(format_description!("[year]-[month]-[day]"))
+        .unwrap_or_default()
+}
+
+/// Generate a unique session name `YYYY-MM-DD_<adj>-<noun>` in `dir`.
+pub fn generate_session_name(dir: &Path) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
+    let seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
+        .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
 
     let adjectives = [
@@ -263,9 +278,38 @@ pub fn generate_session_name() -> String {
         "kiwi", "newt", "pika", "tiger", "trout", "whale", "zebra", "falcon",
     ];
 
-    let adj = adjectives[(nanos as usize) % adjectives.len()];
-    let noun = nouns[(nanos.wrapping_mul(7) as usize) % nouns.len()];
-    format!("{adj}-{noun}")
+    let date = today_prefix();
+    for attempt in 0..1000u64 {
+        let n = seed.wrapping_add(attempt);
+        let adj = adjectives[(n as usize) % adjectives.len()];
+        let noun = nouns[(n.wrapping_mul(7) as usize) % nouns.len()];
+        let name = format!("{date}_{adj}-{noun}");
+        if !dir.join(format!("{name}.json")).exists() {
+            return name;
+        }
+    }
+    format!("{date}_{seed}")
+}
+
+/// The `*.json` session with the greatest modification time, with that time.
+pub fn newest(dir: &Path) -> Option<(String, SystemTime)> {
+    let mut best: Option<(String, SystemTime)> = None;
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|e| e != "json") {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        if best.as_ref().is_none_or(|(_, t)| modified > *t) {
+            best = Some((name.to_string(), modified));
+        }
+    }
+    best
 }
 
 #[cfg(test)]
@@ -374,5 +418,58 @@ mod tests {
         assert_eq!(t.len(), 3);
         assert!(t.iter().any(|(r, c)| *r == Role::User && c == "hello"));
         assert!(!t.iter().any(|(_, c)| c.contains("secret")));
+    }
+
+    fn set_mtime(path: &Path, when: SystemTime) {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_generate_session_name_is_date_prefixed_and_unique() {
+        let dir = std::env::temp_dir().join(format!("ai-name-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let prefix = format!("{}_", today_prefix());
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..20 {
+            let name = generate_session_name(&dir);
+            assert!(name.starts_with(&prefix), "name {name}");
+            assert_eq!(
+                name.trim_start_matches(&*prefix).matches('-').count(),
+                1,
+                "name {name}"
+            );
+            assert!(seen.insert(name.clone()), "duplicate name {name}");
+            std::fs::write(dir.join(format!("{name}.json")), "{}").unwrap();
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_newest_picks_max_mtime_and_ignores_non_json() {
+        let dir = std::env::temp_dir().join(format!("ai-newest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let old = dir.join("old.json");
+        let new = dir.join("new.json");
+        std::fs::write(&old, "{}").unwrap();
+        std::fs::write(&new, "{}").unwrap();
+        std::fs::write(dir.join("notes.txt"), "x").unwrap();
+
+        set_mtime(
+            &old,
+            SystemTime::now() - std::time::Duration::from_secs(3600),
+        );
+        set_mtime(&new, SystemTime::now());
+
+        assert_eq!(newest(&dir).unwrap().0, "new");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

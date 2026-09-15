@@ -76,7 +76,13 @@ pub(crate) fn cmd_list_sessions(dir: &std::path::Path) -> anyhow::Result<()> {
         println!("No saved sessions.");
         return Ok(());
     }
+    let current = crate::session::newest(dir).map(|(name, _)| name);
     for name in &names {
+        let marker = if current.as_deref() == Some(name.as_str()) {
+            "*"
+        } else {
+            " "
+        };
         match Session::load(name, dir) {
             Ok(s) => {
                 let provider = if s.provider.is_empty() {
@@ -85,7 +91,7 @@ pub(crate) fn cmd_list_sessions(dir: &std::path::Path) -> anyhow::Result<()> {
                     &s.provider
                 };
                 println!(
-                    "{}  — {} messages, {} / {}, created {}",
+                    "{marker} {}  — {} messages, {} / {}, created {}",
                     name,
                     s.log.len(),
                     provider,
@@ -93,7 +99,7 @@ pub(crate) fn cmd_list_sessions(dir: &std::path::Path) -> anyhow::Result<()> {
                     s.created
                 );
             }
-            Err(e) => println!("{name}  — (unreadable: {e})"),
+            Err(e) => println!("{marker} {name}  — (unreadable: {e})"),
         }
     }
 

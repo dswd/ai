@@ -1,11 +1,51 @@
 use crate::cli::Cli;
 use crate::config::Config;
 use crate::io;
+use crate::logging::is_quiet;
 use crate::output;
 use crate::policy::{self, Action, Policy, PolicyRule};
 use crate::providers;
 use crate::session::{self, Role, Session};
 use log::info;
+use std::time::SystemTime;
+
+/// A session file modified within the resume window is eligible for continuity.
+fn is_fresh(modified: SystemTime) -> bool {
+    SystemTime::now()
+        .duration_since(modified)
+        .map(|age| age.as_secs() < session::RESUME_WINDOW_SECS)
+        .unwrap_or(true)
+}
+
+/// The newest session if it is fresh, fully replayable, and bound to the same
+/// provider/model. Corruption and legacy (partial) files are reported and
+/// treated as "no current session".
+fn current_session(
+    session_dir: &std::path::Path,
+    model_name: &str,
+    provider_name: &str,
+) -> Option<Session> {
+    let (name, modified) = session::newest(session_dir)?;
+    if !is_fresh(modified) {
+        return None;
+    }
+    match Session::load(&name, session_dir) {
+        Ok(s) if s.partial => {
+            output::stderr_line(&format!(
+                "warning: session '{name}' has no tool history; starting a new session"
+            ));
+            None
+        }
+        Ok(s) if s.provider != provider_name || s.model != model_name => None,
+        Ok(s) => Some(s),
+        Err(e) => {
+            output::stderr_line(&format!(
+                "warning: failed to load session '{name}': {e}; starting a new session"
+            ));
+            None
+        }
+    }
+}
 
 pub(crate) fn resolve_session(
     cli: &Cli,
@@ -13,11 +53,12 @@ pub(crate) fn resolve_session(
     system_prompt: &str,
     model_name: &str,
     provider_name: &str,
+    implicit: bool,
 ) -> anyhow::Result<Session> {
     let session_name = match &cli.session {
         Some(name) => {
             if name.is_empty() {
-                Some(session::generate_session_name())
+                Some(session::generate_session_name(session_dir))
             } else {
                 if !session::is_safe_name(name) {
                     anyhow::bail!("invalid session name: {name:?}");
@@ -34,7 +75,7 @@ pub(crate) fn resolve_session(
                 if s.provider != provider_name || s.model != model_name {
                     // A conversation is only meaningful under the model that
                     // produced it; alias the old log aside and start fresh.
-                    let forked = session::generate_session_name();
+                    let forked = session::generate_session_name(session_dir);
                     let prev_provider = if s.provider.is_empty() {
                         "unknown"
                     } else {
@@ -84,9 +125,37 @@ pub(crate) fn resolve_session(
                 s
             }
         }
+    } else if implicit {
+        match current_session(session_dir, model_name, provider_name) {
+            Some(s) => {
+                if s.system_prompt != system_prompt {
+                    output::stderr_line(
+                        "[note] the system prompt has changed since this session was saved",
+                    );
+                }
+                if !is_quiet() {
+                    output::stderr_line(&format!("[session: {} (continued)]", s.name));
+                }
+                info!("Continuing session: {}", s.name);
+                s
+            }
+            None => {
+                let name = session::generate_session_name(session_dir);
+                if !is_quiet() {
+                    output::stderr_line(&format!("[session: {name} (new)]"));
+                }
+                info!("Started new session: {name}");
+                Session::new(
+                    name,
+                    system_prompt.to_string(),
+                    model_name.to_string(),
+                    provider_name.to_string(),
+                )
+            }
+        }
     } else {
         Session::new(
-            session::generate_session_name(),
+            session::generate_session_name(session_dir),
             system_prompt.to_string(),
             model_name.to_string(),
             provider_name.to_string(),
@@ -371,6 +440,99 @@ pub(crate) fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> 
 mod tests {
     use super::*;
     use crate::config::ProviderFlavor;
+    use clap::Parser;
+    use std::path::Path;
+    use std::time::Duration;
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ai-resolve-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn cli() -> Cli {
+        Cli::parse_from(["ai", "hi"])
+    }
+
+    fn save_session(dir: &Path, name: &str, provider: &str, model: &str, age: Duration) {
+        let mut s = Session::new(
+            name.to_string(),
+            "sys".to_string(),
+            model.to_string(),
+            provider.to_string(),
+        );
+        s.add_user("hello");
+        s.add_assistant("hi");
+        s.save(dir).unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(dir.join(format!("{name}.json")))
+            .unwrap()
+            .set_modified(SystemTime::now() - age)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_implicit_continues_fresh_compatible_session() {
+        let dir = temp_dir("fresh");
+        save_session(
+            &dir,
+            "2026-09-15_calm-hawk",
+            "openai",
+            "gpt-4o",
+            Duration::from_secs(60),
+        );
+        let s = resolve_session(&cli(), &dir, "sys", "gpt-4o", "openai", true).unwrap();
+        assert_eq!(s.name, "2026-09-15_calm-hawk");
+        assert_eq!(s.log.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_implicit_starts_new_when_stale() {
+        let dir = temp_dir("stale");
+        save_session(
+            &dir,
+            "2026-09-15_calm-hawk",
+            "openai",
+            "gpt-4o",
+            Duration::from_secs(session::RESUME_WINDOW_SECS + 10),
+        );
+        let s = resolve_session(&cli(), &dir, "sys", "gpt-4o", "openai", true).unwrap();
+        assert_ne!(s.name, "2026-09-15_calm-hawk");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_implicit_starts_new_when_model_differs() {
+        let dir = temp_dir("mismatch");
+        save_session(
+            &dir,
+            "2026-09-15_calm-hawk",
+            "openai",
+            "gpt-4o",
+            Duration::from_secs(60),
+        );
+        let s = resolve_session(&cli(), &dir, "sys", "gpt-4.1", "openai", true).unwrap();
+        assert_ne!(s.name, "2026-09-15_calm-hawk");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_non_implicit_ignores_existing_session() {
+        let dir = temp_dir("none");
+        save_session(
+            &dir,
+            "2026-09-15_calm-hawk",
+            "openai",
+            "gpt-4o",
+            Duration::from_secs(60),
+        );
+        let s = resolve_session(&cli(), &dir, "sys", "gpt-4o", "openai", false).unwrap();
+        assert_ne!(s.name, "2026-09-15_calm-hawk");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn test_resolve_known_provider_uses_static_defaults() {
