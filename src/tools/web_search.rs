@@ -11,9 +11,13 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "browser")]
 use super::browser_state::BrowserState;
 use super::fmt_offset_limit;
+use super::search_api::{
+    EngineError, SearchResult, brave, exa, fetch_json, parse_brave, parse_exa, parse_searxng,
+    parse_serper, parse_tavily, parse_tavily_answer, render_results, searxng, serper, tavily,
+};
 use super::search_html::{check_quality, fetch, html_to_markdown, searxng_search_url};
 use super::shared::ToolError;
-use crate::config::SearchConfig;
+use crate::config::{SearchConfig, SearchProviderConfig, SearchProviderName};
 use crate::policy::{Action, Policy};
 
 /// Minimum time between two requests to the same engine.
@@ -27,6 +31,10 @@ const ENGINE_RETRIES: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SearchEngine {
+    Brave,
+    Tavily,
+    Exa,
+    Serper,
     Searxng,
     DuckDuckGo,
     Google,
@@ -36,6 +44,10 @@ pub enum SearchEngine {
 impl SearchEngine {
     pub fn name(&self) -> &'static str {
         match self {
+            SearchEngine::Brave => "Brave",
+            SearchEngine::Tavily => "Tavily",
+            SearchEngine::Exa => "Exa",
+            SearchEngine::Serper => "Serper",
             SearchEngine::Searxng => "SearXNG",
             SearchEngine::DuckDuckGo => "DuckDuckGo",
             SearchEngine::Google => "Google",
@@ -43,45 +55,47 @@ impl SearchEngine {
         }
     }
 
-    pub const ALL: [SearchEngine; 4] = [
-        SearchEngine::Searxng,
-        SearchEngine::DuckDuckGo,
-        SearchEngine::Google,
-        SearchEngine::Bing,
-    ];
-}
-
-/// Structured failure from a search engine, used to decide whether to retry
-/// and how long to cool the engine down.
-#[derive(Debug)]
-pub(super) enum EngineError {
-    NotConfigured,
-    Fetch(String),
-    Quality(String),
-}
-
-impl EngineError {
-    pub(super) fn detail(&self) -> String {
-        match self {
-            EngineError::NotConfigured => "not configured".to_string(),
-            EngineError::Fetch(e) => format!("fetch: {e}"),
-            EngineError::Quality(e) => format!("quality: {e}"),
+    fn from_name(name: SearchProviderName) -> Self {
+        match name {
+            SearchProviderName::Brave => SearchEngine::Brave,
+            SearchProviderName::Tavily => SearchEngine::Tavily,
+            SearchProviderName::Exa => SearchEngine::Exa,
+            SearchProviderName::Serper => SearchEngine::Serper,
+            SearchProviderName::Searxng => SearchEngine::Searxng,
+            SearchProviderName::DuckDuckGo => SearchEngine::DuckDuckGo,
+            SearchProviderName::Google => SearchEngine::Google,
+            SearchProviderName::Bing => SearchEngine::Bing,
         }
     }
+}
 
-    /// Errors worth one retry: anything that reached the network and failed
-    /// (timeouts, rate limits, 403/503, browser failures). Configuration and
-    /// quality failures are treated as permanent for this call.
-    fn is_transient(&self) -> bool {
-        matches!(self, EngineError::Fetch(_))
+/// A configured backend with its resolved credentials.
+#[derive(Debug, Clone)]
+pub(super) struct ResolvedProvider {
+    engine: SearchEngine,
+    config: SearchProviderConfig,
+}
+
+impl ResolvedProvider {
+    fn configured(&self) -> bool {
+        self.config.is_configured()
     }
 
-    /// Errors that indicate the engine is blocking us (CAPTCHA, Cloudflare,
-    /// challenge pages). These get a longer cooldown so the ladder skips the
-    /// engine for a while instead of hammering it.
-    fn is_block(&self) -> bool {
-        matches!(self, EngineError::Quality(e)
-            if e.contains("blocked marker") || e.contains("no results area found"))
+    fn key(&self) -> Option<&str> {
+        self.config.api_key.as_deref()
+    }
+
+    fn url(&self) -> Option<&str> {
+        self.config.url.as_deref()
+    }
+}
+
+impl From<&SearchProviderConfig> for ResolvedProvider {
+    fn from(p: &SearchProviderConfig) -> Self {
+        ResolvedProvider {
+            engine: SearchEngine::from_name(p.name),
+            config: p.clone(),
+        }
     }
 }
 
@@ -98,7 +112,7 @@ pub struct WebSearchArgs {
 #[derive(Debug, Clone)]
 pub struct WebSearchTool {
     policy: Policy,
-    search: SearchConfig,
+    providers: Vec<ResolvedProvider>,
     proxy: Option<String>,
     last_request: Arc<Mutex<Option<Instant>>>,
     engine_last: Arc<Mutex<HashMap<SearchEngine, Instant>>>,
@@ -108,11 +122,35 @@ pub struct WebSearchTool {
 }
 
 impl WebSearchTool {
+    /// Resolve configured providers and warn about listed-but-unconfigured ones.
+    fn resolve_providers(search: &SearchConfig) -> Vec<ResolvedProvider> {
+        let providers: Vec<ResolvedProvider> = search
+            .resolved_entries()
+            .iter()
+            .map(ResolvedProvider::from)
+            .collect();
+        for p in &providers {
+            if !p.configured() {
+                let missing = if p.engine == SearchEngine::Searxng {
+                    "url"
+                } else {
+                    "api_key"
+                };
+                log::warn!(
+                    "search provider {} is configured but missing its {}; it will be skipped",
+                    p.engine.name(),
+                    missing
+                );
+            }
+        }
+        providers
+    }
+
     #[cfg(not(feature = "browser"))]
     pub fn new(policy: Policy, search: SearchConfig, proxy: Option<String>) -> Self {
         Self {
             policy,
-            search,
+            providers: Self::resolve_providers(&search),
             proxy,
             last_request: Arc::new(Mutex::new(None)),
             engine_last: Arc::new(Mutex::new(HashMap::new())),
@@ -129,13 +167,18 @@ impl WebSearchTool {
     ) -> Self {
         Self {
             policy,
-            search,
+            providers: Self::resolve_providers(&search),
             proxy,
             last_request: Arc::new(Mutex::new(None)),
             engine_last: Arc::new(Mutex::new(HashMap::new())),
             engine_cooldown: Arc::new(Mutex::new(HashMap::new())),
             browser,
         }
+    }
+
+    /// The configured backends in order, for `--probe-web`.
+    pub(super) fn providers(&self) -> Vec<SearchEngine> {
+        self.providers.iter().map(|p| p.engine).collect()
     }
 }
 
@@ -171,9 +214,16 @@ impl PortableTool for WebSearchTool {
             )));
         }
 
+        if self.providers.is_empty() {
+            return Err(ToolError::Message(
+                "no search providers configured; add search.providers to the config".to_string(),
+            ));
+        }
+
         self.rate_limit_wait().await;
 
-        for engine in SearchEngine::ALL {
+        for provider in &self.providers {
+            let engine = provider.engine;
             if self.engine_cooling_down(engine) {
                 debug!("{DIM}  skipping {} (cooldown){RESET}", engine.name());
                 continue;
@@ -189,6 +239,13 @@ impl PortableTool for WebSearchTool {
                     return super::search_html::finalize(result, args.offset, args.limit);
                 }
                 Err(reason) => {
+                    if matches!(reason, EngineError::Denied(_)) {
+                        log::warn!(
+                            "search via {} was rejected: {}",
+                            engine.name(),
+                            reason.detail()
+                        );
+                    }
                     self.record_engine_failure(engine, &reason);
                     debug!(
                         "{DIM}  {} rejected: {}{RESET}",
@@ -200,7 +257,7 @@ impl PortableTool for WebSearchTool {
         }
 
         Err(ToolError::Message(
-            "Search failed. All engines returned no results. Try rephrasing your query."
+            "Search failed. All providers returned no results. Try rephrasing your query."
                 .to_string(),
         ))
     }
@@ -331,18 +388,51 @@ impl WebSearchTool {
         engine: SearchEngine,
         query: &str,
     ) -> Result<String, EngineError> {
+        let provider = self
+            .providers
+            .iter()
+            .find(|p| p.engine == engine)
+            .ok_or(EngineError::NotConfigured)?;
         match engine {
+            SearchEngine::Brave => {
+                let key = provider.key().ok_or(EngineError::NotConfigured)?;
+                let body = fetch_json(brave(query, key), self.proxy.as_deref()).await?;
+                self.finish_api(&parse_brave(&body), None)
+            }
+            SearchEngine::Serper => {
+                let key = provider.key().ok_or(EngineError::NotConfigured)?;
+                let body = fetch_json(serper(query, key), self.proxy.as_deref()).await?;
+                self.finish_api(&parse_serper(&body), None)
+            }
+            SearchEngine::Tavily => {
+                let key = provider.key().ok_or(EngineError::NotConfigured)?;
+                let body = fetch_json(tavily(query, key), self.proxy.as_deref()).await?;
+                let answer = parse_tavily_answer(&body);
+                self.finish_api(&parse_tavily(&body), answer.as_deref())
+            }
+            SearchEngine::Exa => {
+                let key = provider.key().ok_or(EngineError::NotConfigured)?;
+                let body = fetch_json(exa(query, key), self.proxy.as_deref()).await?;
+                self.finish_api(&parse_exa(&body), None)
+            }
             SearchEngine::Searxng => {
-                let Some(url) = self.search.searxng_url.as_ref().filter(|u| !u.is_empty()) else {
-                    return Err(EngineError::NotConfigured);
-                };
-                let search_url = searxng_search_url(url, query);
-                let body = fetch(&search_url, self.proxy.as_deref())
-                    .await
-                    .map_err(EngineError::Fetch)?;
-                let md = html_to_markdown(&body);
-                check_quality(&md).map_err(EngineError::Quality)?;
-                Ok(md)
+                let url = provider.url().ok_or(EngineError::NotConfigured)?;
+                match fetch_json(searxng(query, url), self.proxy.as_deref()).await {
+                    Ok(body) => self.finish_api(&parse_searxng(&body), None),
+                    Err(e) => {
+                        debug!(
+                            "{DIM}  SearXNG JSON unavailable ({}); using HTML{RESET}",
+                            e.detail()
+                        );
+                        let search_url = searxng_search_url(url, query);
+                        let html = fetch(&search_url, self.proxy.as_deref())
+                            .await
+                            .map_err(EngineError::Fetch)?;
+                        let md = html_to_markdown(&html);
+                        check_quality(&md).map_err(EngineError::Quality)?;
+                        Ok(md)
+                    }
+                }
             }
             SearchEngine::DuckDuckGo => {
                 let html = self.search_ddg(query).await.map_err(EngineError::Fetch)?;
@@ -375,6 +465,18 @@ impl WebSearchTool {
                 Ok(md)
             }
         }
+    }
+
+    /// Normalize an API response into result text, rejecting empty results.
+    fn finish_api(
+        &self,
+        results: &[SearchResult],
+        answer: Option<&str>,
+    ) -> Result<String, EngineError> {
+        if results.is_empty() {
+            return Err(EngineError::Quality("no results".to_string()));
+        }
+        Ok(render_results(results, answer))
     }
 
     async fn search_ddg(&self, query: &str) -> Result<String, String> {
@@ -426,10 +528,66 @@ mod tests {
 
     #[test]
     fn test_engine_names() {
+        assert_eq!(SearchEngine::Brave.name(), "Brave");
+        assert_eq!(SearchEngine::Tavily.name(), "Tavily");
+        assert_eq!(SearchEngine::Exa.name(), "Exa");
+        assert_eq!(SearchEngine::Serper.name(), "Serper");
         assert_eq!(SearchEngine::Searxng.name(), "SearXNG");
         assert_eq!(SearchEngine::DuckDuckGo.name(), "DuckDuckGo");
         assert_eq!(SearchEngine::Google.name(), "Google");
         assert_eq!(SearchEngine::Bing.name(), "Bing");
+    }
+
+    #[test]
+    fn test_engine_from_name_and_requires_key() {
+        assert_eq!(
+            SearchEngine::from_name(SearchProviderName::Brave),
+            SearchEngine::Brave
+        );
+        assert_eq!(
+            SearchEngine::from_name(SearchProviderName::Searxng),
+            SearchEngine::Searxng
+        );
+        assert!(SearchProviderName::Brave.requires_key());
+        assert!(!SearchProviderName::Searxng.requires_key());
+        assert!(!SearchProviderName::DuckDuckGo.requires_key());
+    }
+
+    fn tool(search: SearchConfig) -> WebSearchTool {
+        #[cfg(feature = "browser")]
+        {
+            WebSearchTool::with_browser(Policy::default(), search, None, None)
+        }
+        #[cfg(not(feature = "browser"))]
+        {
+            WebSearchTool::new(Policy::default(), search, None)
+        }
+    }
+
+    #[test]
+    fn test_providers_follow_config_order() {
+        let yaml = "providers:\n  - name: exa\n    api_key: k\n  - name: duckduckgo\n  - name: brave\n    api_key: k\n";
+        let search: SearchConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(
+            tool(search).providers(),
+            vec![
+                SearchEngine::Exa,
+                SearchEngine::DuckDuckGo,
+                SearchEngine::Brave
+            ]
+        );
+    }
+
+    #[test]
+    fn test_default_providers_when_unset() {
+        assert_eq!(
+            tool(SearchConfig::default()).providers(),
+            vec![
+                SearchEngine::DuckDuckGo,
+                SearchEngine::Google,
+                SearchEngine::Bing
+            ]
+        );
     }
 
     #[test]

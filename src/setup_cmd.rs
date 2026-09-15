@@ -171,10 +171,13 @@ fn print_config_summary(path: &Path, config: &Config) {
         value(path_value(config.memory.as_ref()))
     );
     println!("    proxy:               {}", value(config.proxy.clone()));
-    println!(
-        "    search.searxng_url:  {}",
-        value(config.search.searxng_url.clone())
-    );
+    let search_providers = config.search.providers.as_ref().map(|list| {
+        list.iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    });
+    println!("    search.providers:    {}", value(search_providers));
     println!(
         "    container.image:     {}",
         value(config.container.default_image.clone())
@@ -598,11 +601,21 @@ fn setup_policy() -> Policy {
     policy
 }
 
-/// Serialize the config for the prompt with the API key omitted, so the secret
-/// never reaches the model. The `write_config` tool restores it on save.
+/// Serialize the config for the prompt with secrets omitted, so they never
+/// reach the model. The `write_config` tool restores them on save.
 fn config_for_prompt(config: &Config) -> String {
     let mut shown = config.clone();
     shown.api_key = None;
+    if let Some(providers) = shown.search.providers.as_mut() {
+        for p in providers.iter_mut() {
+            if p.api_key
+                .as_deref()
+                .is_some_and(|k| !k.is_empty() && !k.starts_with("env:"))
+            {
+                p.api_key = None;
+            }
+        }
+    }
     serde_yaml_ng::to_string(&shown).unwrap_or_default()
 }
 
@@ -611,9 +624,9 @@ fn setup_system_prompt(config: &Config, policy: &Policy) -> String {
         .unwrap_or_else(|_| "{}".to_string());
     format!(
         "You are configuring the `ai` CLI agent. The user has already chosen the LLM \
-         connection; `provider`, `api_key`, `api_base`, `model`, and `flavor` are preserved \
-         automatically, so never try to change or reveal them.\n\n\
-         Current configuration (the API key is intentionally omitted):\n\
+         connection; `provider`, `api_key`, `api_base`, `model`, `flavor`, and search provider \
+         keys are preserved automatically, so never try to change or reveal them.\n\n\
+         Current configuration (API keys are intentionally omitted):\n\
          ```yaml\n{current}\n```\n\n\
          You cannot read or write the config file directly. To save changes, call the \
          `write_config` tool with the complete updated configuration as YAML. It checks the \
@@ -752,8 +765,11 @@ const GUIDE: &str = "\
   `allow read PATH`, `deny write PATH`, etc.).
 - `proxy`: proxy URL for web requests, e.g. `http://127.0.0.1:8080` or
   `socks5h://127.0.0.1:1080`. Falls back to HTTP_PROXY/HTTPS_PROXY/ALL_PROXY.
-- `search.searxng_url`: SearXNG instance used for web search. A bare URL gets `?q=`
-  appended; `{query}` may be used as the placeholder.
+- `search.providers`: ordered web-search backends; the first that succeeds wins.
+  Each entry is `{ name, api_key?, url? }`. Names: `brave`, `tavily`, `exa`, `serper`
+  (API key required), `searxng` (`url` required), and the keyless `duckduckgo`,
+  `google`, `bing`. Prefer `api_key: env:VAR` over a literal. When unset, the
+  default is DuckDuckGo, Google, then Bing.
 - `container.default_image`: run external commands inside this image (Docker/Podman).
   Unset runs commands on the host.
 - `container.runtime`: `auto` (default), `docker`, or `podman`.

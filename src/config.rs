@@ -13,12 +13,132 @@ pub enum ProviderFlavor {
     Anthropic,
 }
 
+/// Search backend name. Keyed APIs require an `api_key`; `searxng` requires a
+/// `url`; `duckduckgo`, `google`, and `bing` are name-only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchProviderName {
+    Brave,
+    Tavily,
+    Exa,
+    Serper,
+    Searxng,
+    #[serde(rename = "duckduckgo")]
+    DuckDuckGo,
+    Google,
+    Bing,
+}
+
+impl SearchProviderName {
+    /// Lowercase config name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SearchProviderName::Brave => "brave",
+            SearchProviderName::Tavily => "tavily",
+            SearchProviderName::Exa => "exa",
+            SearchProviderName::Serper => "serper",
+            SearchProviderName::Searxng => "searxng",
+            SearchProviderName::DuckDuckGo => "duckduckgo",
+            SearchProviderName::Google => "google",
+            SearchProviderName::Bing => "bing",
+        }
+    }
+
+    /// Conventional environment variable holding this provider's API key.
+    pub fn env_var(self) -> Option<&'static str> {
+        match self {
+            SearchProviderName::Brave => Some("BRAVE_API_KEY"),
+            SearchProviderName::Tavily => Some("TAVILY_API_KEY"),
+            SearchProviderName::Exa => Some("EXA_API_KEY"),
+            SearchProviderName::Serper => Some("SERPER_API_KEY"),
+            _ => None,
+        }
+    }
+
+    /// Whether this provider needs an API key to run.
+    pub fn requires_key(self) -> bool {
+        self.env_var().is_some()
+    }
+}
+
+/// One configured search backend.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SearchProviderConfig {
+    pub name: SearchProviderName,
+    /// API key literal or `env:VAR`. When omitted, the provider's conventional
+    /// environment variable is used (`BRAVE_API_KEY`, `TAVILY_API_KEY`, ...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// Base URL (SearXNG only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+impl SearchProviderConfig {
+    /// Whether the entry has what it needs to run: a URL for SearXNG, a key
+    /// for the keyed APIs, nothing for the scrapers.
+    pub fn is_configured(&self) -> bool {
+        let non_empty = |v: &Option<String>| v.as_deref().is_some_and(|s| !s.is_empty());
+        if self.name == SearchProviderName::Searxng {
+            non_empty(&self.url)
+        } else if self.name.requires_key() {
+            non_empty(&self.api_key)
+        } else {
+            true
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct SearchConfig {
-    /// Full URL of a SearXNG instance used for web search. `{query}` may be
-    /// used as the query placeholder; a bare URL gets `?q=` appended.
-    #[serde(default)]
-    pub searxng_url: Option<String>,
+    /// Ordered search backends; the first that succeeds wins. When unset, the
+    /// default is DuckDuckGo, Google, then Bing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub providers: Option<Vec<SearchProviderConfig>>,
+}
+
+impl SearchConfig {
+    /// The configured providers in order, or the default ladder when unset.
+    /// `api_key` is resolved (literals kept, `env:VAR` expanded, and an omitted
+    /// key falls back to the provider's conventional environment variable).
+    /// Entries still missing a key or URL are skipped at call time.
+    pub fn resolved_entries(&self) -> Vec<SearchProviderConfig> {
+        match &self.providers {
+            Some(list) => list
+                .iter()
+                .map(|p| SearchProviderConfig {
+                    name: p.name,
+                    api_key: p
+                        .api_key
+                        .as_deref()
+                        .and_then(resolve_secret)
+                        .or_else(|| p.name.env_var().and_then(|v| std::env::var(v).ok()))
+                        .filter(|s| !s.is_empty()),
+                    url: p.url.clone().filter(|s| !s.is_empty()),
+                })
+                .collect(),
+            None => [
+                SearchProviderName::DuckDuckGo,
+                SearchProviderName::Google,
+                SearchProviderName::Bing,
+            ]
+            .into_iter()
+            .map(|name| SearchProviderConfig {
+                name,
+                api_key: None,
+                url: None,
+            })
+            .collect(),
+        }
+    }
+}
+
+/// Resolve a config secret that may be a literal or `env:VAR`.
+pub fn resolve_secret(value: &str) -> Option<String> {
+    match value.strip_prefix("env:") {
+        Some(env_var) => std::env::var(env_var).ok(),
+        None => Some(value.to_string()),
+    }
 }
 
 /// Container isolation for external commands. When `default_image` is set, all
@@ -157,14 +277,47 @@ impl Config {
         dirs::config_dir().map(|d| d.join("ai").join("config.yaml"))
     }
 
-    pub fn resolve_api_key(&self) -> Option<String> {
-        self.api_key.as_ref().and_then(|key| {
-            if let Some(env_var) = key.strip_prefix("env:") {
-                std::env::var(env_var).ok()
-            } else {
-                Some(key.clone())
+    /// Restore search API keys from `original` for providers whose key the setup
+    /// AI omitted or blanked. New providers are left as-is (env fallback applies).
+    pub fn preserve_search_secrets(&mut self, original: &Config) {
+        let Some(providers) = self.search.providers.as_mut() else {
+            return;
+        };
+        let originals: Vec<(SearchProviderName, Option<String>)> = original
+            .search
+            .providers
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|p| (p.name, p.api_key.clone()))
+            .collect();
+        for p in providers.iter_mut() {
+            let missing = p
+                .api_key
+                .as_deref()
+                .is_none_or(|k| k.is_empty() || k == "(redacted)");
+            if missing && let Some((_, key)) = originals.iter().find(|(n, _)| *n == p.name) {
+                p.api_key = key.clone();
             }
-        })
+        }
+    }
+
+    /// Replace literal search API keys with a placeholder for display.
+    pub fn redact_search_secrets(&mut self) {
+        if let Some(providers) = self.search.providers.as_mut() {
+            for p in providers.iter_mut() {
+                if p.api_key
+                    .as_deref()
+                    .is_some_and(|k| !k.is_empty() && !k.starts_with("env:"))
+                {
+                    p.api_key = Some("(redacted)".to_string());
+                }
+            }
+        }
+    }
+
+    pub fn resolve_api_key(&self) -> Option<String> {
+        self.api_key.as_deref().and_then(resolve_secret)
     }
 
     pub fn session_dir_resolved(&self) -> PathBuf {
@@ -256,7 +409,70 @@ mod tests {
         assert_eq!(c.model, "llama-3.3-70b-versatile");
         assert!(c.api_key.is_none());
         assert!(c.system_prompt.is_none());
-        assert!(c.search.searxng_url.is_none());
+        assert!(c.search.providers.is_none());
+    }
+
+    #[test]
+    fn test_search_default_providers() {
+        let names: Vec<_> = Config::default()
+            .search
+            .resolved_entries()
+            .iter()
+            .map(|p| p.name)
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                SearchProviderName::DuckDuckGo,
+                SearchProviderName::Google,
+                SearchProviderName::Bing
+            ]
+        );
+    }
+
+    #[test]
+    fn test_search_provider_list_and_env_fallback() {
+        let yaml = "search:\n  providers:\n    - name: brave\n    - name: searxng\n      url: http://localhost:8080/search\n    - name: tavily\n      api_key: env:AI_TEST_TAVILY\n";
+        let c: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        // SAFETY: env mutation is contained to this uniquely-named test.
+        unsafe {
+            std::env::set_var("BRAVE_API_KEY", "brave-key");
+            std::env::set_var("AI_TEST_TAVILY", "tav-key");
+        }
+        let entries = c.search.resolved_entries();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].name, SearchProviderName::Brave);
+        assert_eq!(entries[0].api_key.as_deref(), Some("brave-key"));
+        assert!(entries[0].is_configured());
+        assert_eq!(entries[1].name, SearchProviderName::Searxng);
+        assert_eq!(
+            entries[1].url.as_deref(),
+            Some("http://localhost:8080/search")
+        );
+        assert_eq!(entries[2].name, SearchProviderName::Tavily);
+        assert_eq!(entries[2].api_key.as_deref(), Some("tav-key"));
+        unsafe {
+            std::env::remove_var("BRAVE_API_KEY");
+            std::env::remove_var("AI_TEST_TAVILY");
+        }
+    }
+
+    #[test]
+    fn test_search_unconfigured_keyed_provider() {
+        let yaml = "search:\n  providers:\n    - name: exa\n";
+        let c: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        // SAFETY: env mutation is contained to this uniquely-named test.
+        unsafe {
+            std::env::remove_var("EXA_API_KEY");
+        }
+        let entries = c.search.resolved_entries();
+        assert!(!entries[0].is_configured());
+    }
+
+    #[test]
+    fn test_search_unknown_provider_errors() {
+        let yaml = "search:\n  providers:\n    - name: nope\n";
+        assert!(serde_yaml_ng::from_str::<Config>(yaml).is_err());
     }
 
     #[test]

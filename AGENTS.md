@@ -71,12 +71,14 @@ shell (see `container.rs`). Filesystem ops are policy-checked via `policy_fs.rs`
 limit/offset helpers, search/walk utilities.
 - `browser_state.rs` + `browser_*.rs` — Obscura headless browser state and one tool per
 file (feature-gated). `search_browser.rs` holds the browser-driven search-engine fallback.
+- `search_api.rs` — configurable search-API providers: `SearchResult` + renderer, JSON
+request/parse pairs for Brave/Tavily/Exa/Serper/SearXNG, and status→`EngineError` mapping.
 - `search_html.rs` / `search_probe.rs` — search-result HTML/markdown/quality helpers and the
 `--probe-web` diagnostics.
 - `file_view.rs` — extracts text from PDF/DOCX/XLSX/etc via `anydoc`.
 - `write_config.rs` — setup-only `write_config` tool: strictly parses the AI's YAML, restores
-the real provider/credentials, and saves through the sandbox (write approval). It never takes
-or reports the config path, so the setup AI cannot read the secret file.
+the real provider/credentials (including search keys), and saves through the sandbox (write
+approval). It never takes or reports the config path, so the setup AI cannot read the secret file.
 
 ## Conventions
 

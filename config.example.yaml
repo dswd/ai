@@ -52,11 +52,21 @@ system_prompt: "You are a concise, helpful CLI assistant."
 # proxy: "http://127.0.0.1:8080"
 # proxy: "socks5h://127.0.0.1:1080"
 
-# Web-search settings.
+# Web-search settings. `providers` is an ordered ladder: the first backend that
+# returns results wins. Keyed APIs need an api_key; SearXNG needs a url; the rest
+# are name-only. When unset, the default is DuckDuckGo, Google, then Bing.
 # search:
-#   # SearXNG instance for the first search ladder engine.
-#   # A bare URL works; a "{query}" placeholder is appended with ?q= automatically.
-#   searxng_url: "http://localhost:8080/search?q={query}"
+#   providers:
+#     - name: brave                 # api_key defaults to env BRAVE_API_KEY
+#     - name: tavily
+#       api_key: env:TAVILY_API_KEY
+#     - name: exa
+#     - name: serper
+#     - name: searxng
+#       url: "http://localhost:8080/search"
+#     - name: duckduckgo
+#     - name: google
+#     - name: bing
 
 # Container isolation for external commands. When `default_image` is set, a
 # single container is started at agent startup and every `execute` command runs

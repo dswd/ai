@@ -4,7 +4,7 @@ use std::time::Instant;
 
 #[cfg(feature = "browser")]
 use super::browser_state::BrowserState;
-use super::web_search::{SearchEngine, WebSearchTool};
+use super::web_search::WebSearchTool;
 use crate::config::SearchConfig;
 use crate::policy::Policy;
 
@@ -34,7 +34,7 @@ pub async fn probe_web_search(
     let tool = WebSearchTool::new(Policy::default(), search.clone(), proxy);
 
     let mut results = Vec::new();
-    for engine in SearchEngine::ALL {
+    for engine in tool.providers() {
         let start = Instant::now();
         let outcome = tool.run_engine(engine, query).await;
         let latency_ms = start.elapsed().as_millis() as u64;

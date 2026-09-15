@@ -15,8 +15,8 @@ use crate::sandbox::Sandbox;
 pub struct WriteConfigArgs {
     #[schemars(
         description = "The complete configuration as YAML. Unknown keys are rejected, and \
-                       provider, api_key, api_base, model, and flavor are restored from the \
-                       existing config."
+                       provider, api_key, api_base, model, flavor, and search provider keys \
+                       are restored from the existing config."
     )]
     pub content: String,
 }
@@ -53,8 +53,8 @@ impl PortableTool for WriteConfigTool {
 
     fn description(&self) -> String {
         "Validate and save the agent configuration. Pass the complete configuration as YAML. \
-         The syntax is checked, the existing provider/credentials/model/flavor are kept, and \
-         the user is asked to approve the save."
+         The syntax is checked, the existing provider/credentials/model/flavor and search \
+         provider keys are kept, and the user is asked to approve the save."
             .to_string()
     }
 
@@ -67,6 +67,7 @@ impl PortableTool for WriteConfigTool {
         let mut config = Config::parse_strict(&args.content)
             .map_err(|e| ToolError::Message(format!("invalid config: {e}")))?;
         config.copy_connection_from(&self.target.original);
+        config.preserve_search_secrets(&self.target.original);
         let yaml = serde_yaml_ng::to_string(&config)
             .map_err(|e| ToolError::Message(format!("cannot serialize config: {e}")))?;
 
@@ -80,6 +81,7 @@ impl PortableTool for WriteConfigTool {
 
         let mut display = config.clone();
         display.api_key = display.api_key.map(|_| "(redacted)".to_string());
+        display.redact_search_secrets();
         let shown = serde_yaml_ng::to_string(&display).unwrap_or_default();
         Ok(format!(
             "Configuration saved and validated. Current configuration:\n```yaml\n{shown}```"
@@ -148,6 +150,44 @@ mod tests {
         assert_eq!(written.model, "claude-sonnet-4-20250514");
         assert_eq!(written.system_prompt.as_deref(), Some("be terse"));
         assert_eq!(written.proxy.as_deref(), Some("http://127.0.0.1:8080"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn preserves_and_redacts_search_keys() {
+        let (dir, path, mut original) = temp_setup("search");
+        original.search.providers = Some(vec![
+            crate::config::SearchProviderConfig {
+                name: crate::config::SearchProviderName::Brave,
+                api_key: Some("brave-literal".to_string()),
+                url: None,
+            },
+            crate::config::SearchProviderConfig {
+                name: crate::config::SearchProviderName::Tavily,
+                api_key: Some("env:TAVILY_API_KEY".to_string()),
+                url: None,
+            },
+        ]);
+        let tool = WriteConfigTool::new(
+            allow_write(&path),
+            Arc::new(SetupTarget {
+                path: path.clone(),
+                original,
+            }),
+        );
+        let out = tool
+            .call(WriteConfigArgs {
+                content: "search:\n  providers:\n    - name: brave\n      api_key: (redacted)\n    - name: tavily\n      api_key: env:TAVILY_API_KEY\n".to_string(),
+            })
+            .await
+            .unwrap();
+        assert!(out.contains("(redacted)"));
+        assert!(!out.contains("brave-literal"));
+
+        let written = Config::from_file(&path).unwrap();
+        let providers = written.search.providers.unwrap();
+        assert_eq!(providers[0].api_key.as_deref(), Some("brave-literal"));
+        assert_eq!(providers[1].api_key.as_deref(), Some("env:TAVILY_API_KEY"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -16,10 +16,12 @@
 - **`--no-color`** — disable colored output (in addition to the `NO_COLOR` environment variable). ANSI styling is stripped from tool logs and reasoning output, not just assistant markdown.
 - **First-token spinner** — while waiting for the model on an interactive terminal, a spinner is shown on stderr and cleared before any output.
 - **Unknown config-key warnings** — `config.yaml` keys that don't match a known field now print a `warning: unknown config key '…'` instead of being silently ignored.
+- **Configurable search-API providers** — `search.providers` is an ordered ladder of web-search backends: keyed APIs (`brave`, `tavily`, `exa`, `serper`), SearXNG (now queried via its JSON API with an HTML fallback), and the keyless `duckduckgo`/`google`/`bing`. Entries are `{ name, api_key?, url? }`; an omitted key falls back to `BRAVE_API_KEY` / `TAVILY_API_KEY` / `EXA_API_KEY` / `SERPER_API_KEY`. The ladder returns the first success; a listed provider missing its key/URL is skipped with a startup warning, and 401/403/402 fall through to the next provider. `--probe-web` probes only the configured providers, and the setup AI never sees literal search keys.
 
 ### Changed
 
 - **Breaking: `--init` renamed to `--setup`** — no alias. `ai --setup` creates or reconfigures the config; an existing file is backed up to `config.yaml.bak` first.
+- **Breaking: `search.searxng_url` replaced by `search.providers`** — SearXNG is now a normal provider entry (`{ name: searxng, url: ... }`) in the ordered list. Configs still using `search.searxng_url` get an unknown-key warning (and fail strict parsing during `--setup`); migrate by listing the provider.
 - **Breaking: `rig` 0.40 → 0.42** — the agent runtime moved out of `rig-core` into the `rig` facade (`rig-core` + `rig-agent`). Tools now implement `rig::tool::PortableTool`; the `Agent` type is no longer model-generic; and context pruning uses the hook-v2 `AgentHook::on_completion_call` event instead of `on_event`/`Flow`. MCP stays on `rmcp` 2.x because that is what `rig-agent` 0.42 targets (3.x is not yet compatible).
 - **Breaking: session files from the previous rig version** — assistant content is now tagged in the serialized log, so sessions written by rig 0.40 may fail to load. They are skipped with a warning and a new session starts; delete old session files to silence the warning.
 

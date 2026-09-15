@@ -189,20 +189,59 @@ your current network, run the hidden probe flag:
 ai --probe-web="your query"
 ```
 
-It runs each engine in the search ladder (SearXNG → DuckDuckGo → Google → Bing) and
-prints per-engine diagnostics: HTTP outcome, latency, response size, and the reason
-an engine was rejected (e.g. a detected Cloudflare/CAPTCHA marker). It also prints
-each engine's results exactly as they would be returned to the AI, so you can inspect
-what the model sees. Web requests use rotating user-agents and a shared cookie jar;
-`web_fetch` automatically retries through the stealth browser when it detects a block.
+It runs every configured search provider in order and prints per-provider
+diagnostics: HTTP outcome, latency, response size, and the reason a provider was
+rejected (e.g. a detected Cloudflare/CAPTCHA marker, or a 401/402 from an API).
+It also prints each provider's results exactly as they would be returned to the
+AI, so you can inspect what the model sees. Only configured providers are probed,
+so a keyed API is queried at most once. Web requests use rotating user-agents and
+a shared cookie jar; `web_fetch` automatically retries through the stealth
+browser when it detects a block.
+
+### Search providers
+
+`web_search` walks an ordered list of providers and returns the first success.
+Configure it under `search.providers`; each entry is `{ name, api_key?, url? }`:
+
+```yaml
+# ~/.config/ai/config.yaml
+search:
+  providers:
+    - name: brave                 # uses BRAVE_API_KEY when api_key is omitted
+    - name: tavily
+      api_key: env:TAVILY_API_KEY
+    - name: searxng
+      url: "http://localhost:8080/search"
+    - name: duckduckgo
+    - name: google                # needs the browser feature
+    - name: bing                  # needs the browser feature
+```
+
+- **Keyed APIs** — `brave`, `tavily`, `exa`, `serper`. An omitted `api_key` falls
+  back to `BRAVE_API_KEY` / `TAVILY_API_KEY` / `EXA_API_KEY` / `SERPER_API_KEY`.
+  A literal key or `env:VAR` both work; `env:` is preferred.
+- **SearXNG** — a normal entry that needs `url`. It queries the instance's JSON
+  API and falls back to HTML scraping if JSON is disabled.
+- **Keyless scrapers** — `duckduckgo`, `google`, `bing` (`google`/`bing` need the
+  `browser` feature). Their old search APIs are retired/sunsetting, so only the
+  scrape paths exist.
+- Unset `search.providers` defaults to DuckDuckGo → Google → Bing. Keyed
+  providers run only when you list them, so an env var set for another tool never
+  spends money.
+- A listed provider missing its key/URL is reported at startup and skipped; a
+  rejected key (401/403) or exhausted quota (402) skips to the next provider.
 
 ### Avoiding search-engine blocks
 
 Search engines rate-limit and block automated clients. In order of effectiveness:
 
-1. **Run your own SearXNG instance (recommended).** SearXNG aggregates results
-   from many upstream engines and rotates them itself, so your IP is rarely the
-   one being blocked. Minimal setup:
+1. **Add an API provider (recommended).** A keyed backend such as Brave or Tavily
+   returns structured results without scraping, so it is unaffected by CAPTCHA or
+   IP blocks. Put it first in `search.providers`.
+
+2. **Run your own SearXNG instance.** SearXNG aggregates results from many upstream
+   engines and rotates them itself, so your IP is rarely the one being blocked.
+   Minimal setup:
 
    ```yaml
    # docker-compose.yml
@@ -212,19 +251,18 @@ Search engines rate-limit and block automated clients. In order of effectiveness
        ports: ["8080:8080"]
    ```
 
-   Then point the agent at it (also configurable during `ai --setup`):
+   Then list it (also configurable during `ai --setup`):
 
    ```yaml
-   # ~/.config/ai/config.yaml
    search:
-     searxng_url: "http://localhost:8080/search?q={query}"
+     providers:
+       - name: searxng
+         url: "http://localhost:8080/search"
    ```
 
-   Searches use your instance first; if it is unreachable the ladder falls back
-   to DuckDuckGo, Google, and Bing. The `{query}` placeholder is optional — a
-   bare instance URL gets `?q=` appended automatically.
+   If the instance is unreachable the ladder falls back to the next provider.
 
-2. **Route through a proxy.** Pass `--proxy=http://127.0.0.1:8080` (or
+3. **Route through a proxy.** Pass `--proxy=http://127.0.0.1:8080` (or
    `--proxy=socks5h://127.0.0.1:1080` for SOCKS5), or set `proxy` in
    `config.yaml`. Without an explicit proxy, the standard environment variables
    (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`) are honored. The
@@ -233,7 +271,7 @@ Search engines rate-limit and block automated clients. In order of effectiveness
    feature) use the browser's own network stack, which honors the environment
    variables above.
 
-3. **Let the built-in throttling work.** Requests are rate-limited (a 2s floor
+4. **Let the built-in throttling work.** Requests are rate-limited (a 2s floor
    with jitter between searches, at least 3s between hits to the same engine),
    transient failures are retried with backoff, and engines that return a block
    page are put on a cooldown and skipped for a while instead of being hammered.

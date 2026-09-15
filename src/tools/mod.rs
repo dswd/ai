@@ -28,6 +28,7 @@ pub mod move_file;
 pub mod policy_fs;
 pub mod read_file;
 pub mod replace_in_file;
+pub mod search_api;
 pub mod search_browser;
 pub mod search_content;
 pub mod search_html;
