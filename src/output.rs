@@ -23,7 +23,7 @@ pub fn set_no_color(enabled: bool) {
     NO_COLOR.store(enabled, Ordering::SeqCst);
 }
 
-fn color_disabled() -> bool {
+pub(crate) fn color_disabled() -> bool {
     NO_COLOR.load(Ordering::SeqCst) || std::env::var_os("NO_COLOR").is_some()
 }
 

@@ -312,6 +312,11 @@ impl ContainerSession {
         })
     }
 
+    /// The configured image for this session's container.
+    pub(crate) fn image(&self) -> &str {
+        &self.rt.image
+    }
+
     /// Ensure the container is running, restarting it once if it died.
     fn ensure_running(&self) -> Result<(), String> {
         let mut inner = self

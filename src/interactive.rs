@@ -26,6 +26,7 @@ pub(crate) async fn run_interactive(
     memory: Option<Arc<memory::Memory>>,
     transient: bool,
     exit_flag: Option<Arc<AtomicBool>>,
+    container: Option<Arc<crate::container::ContainerSession>>,
 ) -> anyhow::Result<()> {
     let mut chat_history: Vec<Message> = session.chat_history();
 
@@ -50,6 +51,11 @@ pub(crate) async fn run_interactive(
     let start = Instant::now();
     let mut total_usage = Usage::new();
     let mut last_input_tokens: u64 = 0;
+
+    let prompt_info = PromptInfo {
+        session: cap_name(&session.name, 24),
+        container: container.as_ref().map(|c| short_image(c.image())),
+    };
 
     if let Some(text) = initial_prompt {
         session.add_user(&text);
@@ -83,7 +89,7 @@ pub(crate) async fn run_interactive(
     }
 
     while !exit_requested(&exit_flag) {
-        let prompt = format_interactive_prompt(last_input_tokens, context_window);
+        let prompt = format_interactive_prompt(&prompt_info, last_input_tokens, context_window);
         let input = io::read_user_input(&prompt);
         match input {
             Some(line) => {
@@ -319,23 +325,79 @@ pub(crate) fn augment_prompt(prompt: &str, memory: Option<&memory::Memory>) -> O
     ))
 }
 
-fn format_interactive_prompt(last_input_tokens: u64, context_window: Option<usize>) -> String {
-    match context_window {
-        Some(window) if window > 0 && last_input_tokens > 0 => {
-            let percent = (last_input_tokens as f64 / window as f64) * 100.0;
-            let warning = if percent >= 75.0 {
-                "\u{26A0}\u{FE0F} "
-            } else {
-                ""
-            };
-            format!(
-                "{warning}[{inp}/{win}] > ",
-                inp = fmt_tok(last_input_tokens),
-                win = fmt_tok(window as u64),
-            )
-        }
-        _ => "> ".to_string(),
+/// Fixed, session-scoped parts of the interactive prompt.
+struct PromptInfo {
+    session: String,
+    container: Option<String>,
+}
+
+/// Build the `(raw, styled)` pair rustyline wants: `raw` is plain text it
+/// measures, `styled` adds color only, so both share the same display width.
+fn format_interactive_prompt(
+    info: &PromptInfo,
+    last_input_tokens: u64,
+    context_window: Option<usize>,
+) -> (String, String) {
+    let mut raw_parts: Vec<String> = Vec::new();
+    let mut styled_parts: Vec<String> = Vec::new();
+
+    raw_parts.push(info.session.clone());
+    styled_parts.push(format!("{DIM}{GREY}{}{RESET}", info.session));
+
+    if let Some(image) = &info.container {
+        raw_parts.push(format!("⬢ {image}"));
+        styled_parts.push(format!("{DIM}{GREY}⬢ {image}{RESET}"));
     }
+
+    if let Some((raw, styled)) = usage_segment(last_input_tokens, context_window) {
+        raw_parts.push(raw);
+        styled_parts.push(styled);
+    }
+
+    let raw = format!("{} ❯ ", raw_parts.join(" │ "));
+    let styled = format!(
+        "{} {BOLD}{GREEN}❯{RESET} ",
+        styled_parts.join(&format!("{DIM}{GREY} │ {RESET}"))
+    );
+    (raw, styled)
+}
+
+/// A five-cell bar plus integer percent, colored by how full the window is.
+/// `None` until a token count is known.
+fn usage_segment(tokens: u64, window: Option<usize>) -> Option<(String, String)> {
+    let window = window.filter(|w| *w > 0)?;
+    if tokens == 0 {
+        return None;
+    }
+    let percent = (tokens as f64 / window as f64 * 100.0).round() as u64;
+    let color = if percent >= 75 {
+        RED
+    } else if percent >= 50 {
+        YELLOW
+    } else {
+        GREEN
+    };
+    let filled = ((percent as f64 / 20.0).round() as usize).clamp(1, 5);
+    let bar = format!("{}{}", "▰".repeat(filled), "▱".repeat(5 - filled));
+    let text = format!("{bar} {percent}%");
+    Some((text.clone(), format!("{color}{text}{RESET}")))
+}
+
+/// The image's last path component with any `:tag`/`@digest` stripped, capped.
+fn short_image(image: &str) -> String {
+    let last = image.rsplit('/').next().unwrap_or(image);
+    let name = last.split([':', '@']).next().unwrap_or(last);
+    cap_name(name, 16)
+}
+
+/// Truncate to `max` characters (not bytes), adding `…` when shortened.
+fn cap_name(name: &str, max: usize) -> String {
+    if name.chars().count() <= max || max == 0 {
+        return name.to_string();
+    }
+    let mut out: String = name.chars().take(max - 1).collect();
+    out.push('…');
+    out
 }
 
 fn accumulate(total: &Usage, usage: &Usage) -> Usage {
@@ -386,5 +448,71 @@ fn format_duration(secs: f64) -> String {
         let m = (secs / 60.0) as u64;
         let s = secs % 60.0;
         format!("{m}m {s:.0}s")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strip_ansi(s: &str) -> String {
+        regex::Regex::new("\x1b\\[[0-9;]*m")
+            .unwrap()
+            .replace_all(s, "")
+            .into_owned()
+    }
+
+    #[test]
+    fn test_short_image() {
+        assert_eq!(short_image("debian:stable-slim"), "debian");
+        assert_eq!(short_image("ghcr.io/acme/tool:1.2"), "tool");
+        assert_eq!(short_image("repo/img@sha256:abc"), "img");
+        assert_eq!(short_image("alpine"), "alpine");
+    }
+
+    #[test]
+    fn test_cap_name() {
+        assert_eq!(cap_name("calm-hawk", 24), "calm-hawk");
+        assert_eq!(cap_name("abcdef", 4), "abc…");
+        assert_eq!(cap_name("héllo", 3), "hé…");
+    }
+
+    #[test]
+    fn test_usage_segment_tiers() {
+        let (raw, styled) = usage_segment(25, Some(100)).unwrap();
+        assert_eq!(raw, "▰▱▱▱▱ 25%");
+        assert!(styled.contains(GREEN));
+
+        let (_, styled) = usage_segment(60, Some(100)).unwrap();
+        assert!(styled.contains(YELLOW));
+
+        let (raw, styled) = usage_segment(82, Some(100)).unwrap();
+        assert_eq!(raw, "▰▰▰▰▱ 82%");
+        assert!(styled.contains(RED));
+
+        assert!(usage_segment(0, Some(100)).is_none());
+        assert!(usage_segment(50, None).is_none());
+        assert!(usage_segment(50, Some(0)).is_none());
+    }
+
+    #[test]
+    fn test_prompt_width_invariant() {
+        let host = PromptInfo {
+            session: "2026-09-15_calm-hawk".to_string(),
+            container: None,
+        };
+        let with_container = PromptInfo {
+            session: "2026-09-15_calm-hawk".to_string(),
+            container: Some("debian".to_string()),
+        };
+        let cases = [
+            format_interactive_prompt(&host, 0, Some(128_000)),
+            format_interactive_prompt(&host, 57_600, Some(128_000)),
+            format_interactive_prompt(&with_container, 105_000, Some(128_000)),
+        ];
+        for (raw, styled) in cases {
+            assert_eq!(strip_ansi(&styled), raw);
+            assert_ne!(raw, styled, "styled should carry ANSI");
+        }
     }
 }

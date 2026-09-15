@@ -72,6 +72,7 @@ async fn dispatch_agent(agent: rig::agent::Agent, ctx: AgentContext<'_>) -> anyh
             ctx.memory.as_ref().map(Arc::clone),
             ctx.transient,
             ctx.exit_flag,
+            ctx.container_session.clone(),
         )
         .await?;
     } else if let Some(text) = ctx.prompt_text {
