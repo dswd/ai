@@ -69,6 +69,13 @@ pub fn stdout_push(s: &str) {
     }
 }
 
+/// Render subsequent stdout output dimmed (used for replayed session history).
+pub fn set_dim(enabled: bool) {
+    if let Ok(mut f) = formatter().lock() {
+        f.set_dim(enabled);
+    }
+}
+
 /// Emit a thinking token to stderr (no trailing newline).
 /// Continues on same stderr line if previous was also stderr token.
 pub fn stderr_push(s: &str) {

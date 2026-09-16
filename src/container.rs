@@ -8,7 +8,7 @@
 
 use crate::policy::{Action, Policy};
 use ansi_color_constants::*;
-use log::info;
+use log::{debug, info};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
@@ -295,7 +295,7 @@ impl ContainerSession {
     pub(crate) fn start(rt: ContainerRuntime) -> Result<Self, String> {
         let name = session_name();
         run_detached(&rt, &name)?;
-        info!(
+        debug!(
             "{DIM}📦 container started '{}' ({} via {}){RESET}",
             name,
             rt.image,
@@ -370,7 +370,7 @@ impl ContainerSession {
     /// Remove the container (best-effort).
     pub(crate) fn shutdown(&self) {
         if let Ok(inner) = self.inner.lock() {
-            info!("{DIM}📦 removing container '{}'{RESET}", inner.name);
+            debug!("{DIM}📦 removing container '{}'{RESET}", inner.name);
             let _ = Command::new(self.rt.runtime.binary())
                 .arg("rm")
                 .arg("-f")

@@ -36,16 +36,18 @@ pub(crate) async fn run_interactive(
             .iter()
             .rposition(|(r, _)| *r == Role::User)
             .unwrap_or(0);
+        output::set_dim(true);
         for (role, content) in &transcript[last_user_idx..] {
             match role {
                 Role::Assistant => {
                     output::stdout_push(content);
                     output::stdout_finish();
                 }
-                Role::User => output::stderr_line(&format!("> {content}")),
+                Role::User => output::stderr_line(&format!("{DIM}> {content}{RESET}")),
                 Role::System => {}
             }
         }
+        output::set_dim(false);
     }
 
     let start = Instant::now();
@@ -68,12 +70,12 @@ pub(crate) async fn run_interactive(
                 .add_hook(ContextPruneHook::default())
                 .await;
             drop(spinner);
-            let response = stream_response(&mut stream).await?;
+            let response = stream_response(&mut stream, exit_flag.as_ref()).await?;
             Ok::<_, anyhow::Error>(response)
         }
         .await;
         match result {
-            Ok(response) => {
+            Ok(Some(response)) => {
                 last_input_tokens = response.usage.input_tokens;
                 total_usage = accumulate(&total_usage, &response.usage);
                 record_turn(session, &mut chat_history, response);
@@ -81,6 +83,7 @@ pub(crate) async fn run_interactive(
                     session.save(session_dir)?;
                 }
             }
+            Ok(None) => {}
             Err(e) => {
                 error!("Error: {e}");
                 io::stderr_line(&format!("Error: {e}"));
@@ -171,12 +174,12 @@ pub(crate) async fn run_interactive(
                         .add_hook(ContextPruneHook::default())
                         .await;
                     drop(spinner);
-                    let response = stream_response(&mut stream).await?;
+                    let response = stream_response(&mut stream, exit_flag.as_ref()).await?;
                     Ok::<_, anyhow::Error>(response)
                 }
                 .await;
                 match result {
-                    Ok(response) => {
+                    Ok(Some(response)) => {
                         last_input_tokens = response.usage.input_tokens;
                         total_usage = accumulate(&total_usage, &response.usage);
                         record_turn(session, &mut chat_history, response);
@@ -184,6 +187,7 @@ pub(crate) async fn run_interactive(
                             session.save(session_dir)?;
                         }
                     }
+                    Ok(None) => {}
                     Err(e) => {
                         error!("Error: {e}");
                         io::stderr_line(&format!("Error: {e}"));
@@ -567,7 +571,7 @@ mod tests {
             styled.contains(&format!("{RED}[82%]{RESET}")),
             "usage should be red: {styled:?}"
         );
-        assert!(raw.ends_with("[82%] ❯ "));
+        assert!(raw.trim_end().ends_with("[82%] ❯"));
 
         let (_, styled) = format_interactive_prompt(&with_container, 76_800, Some(128_000));
         assert!(styled.contains(&format!("{ORANGE}[60%]{RESET}")));

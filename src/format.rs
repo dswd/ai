@@ -19,6 +19,7 @@ pub struct MarkdownFormatter {
     in_code_block: bool,
     tty: bool,
     ends_with_newline: bool,
+    dim: bool,
 }
 
 impl MarkdownFormatter {
@@ -28,7 +29,13 @@ impl MarkdownFormatter {
             in_code_block: false,
             tty,
             ends_with_newline: false,
+            dim: false,
         }
+    }
+
+    /// Render subsequent output dimmed (used for replayed session history).
+    pub fn set_dim(&mut self, dim: bool) {
+        self.dim = dim;
     }
 
     pub fn push<W: Write>(&mut self, chunk: &str, writer: &mut W) {
@@ -71,6 +78,18 @@ impl MarkdownFormatter {
             return line.to_string();
         }
 
+        let rendered = self.render_line_styled(line);
+        if self.dim {
+            format!(
+                "{DIM}{}{RESET}",
+                rendered.replace(RESET, &format!("{RESET}{DIM}"))
+            )
+        } else {
+            rendered
+        }
+    }
+
+    fn render_line_styled(&mut self, line: &str) -> String {
         let trimmed = line.trim_start();
         if trimmed.starts_with("```") {
             let rendered = format!("{DIM}{line}{RESET}");
@@ -148,6 +167,17 @@ mod tests {
         String::from_utf8(out).unwrap()
     }
 
+    fn fmt_dim(tty: bool, input: &[&str]) -> String {
+        let mut f = MarkdownFormatter::new(tty);
+        f.set_dim(true);
+        let mut out = Vec::new();
+        for chunk in input {
+            f.push(chunk, &mut out);
+        }
+        f.finish(&mut out);
+        String::from_utf8(out).unwrap()
+    }
+
     #[test]
     fn test_bold() {
         let out = fmt(true, &["**bold**\n"]);
@@ -212,5 +242,23 @@ mod tests {
     fn test_non_tty_passthrough() {
         let out = fmt(false, &["**bold** `code`\n", "```rs\n", "x\n", "```\n"]);
         assert_eq!(out, "**bold** `code`\n```rs\nx\n```\n");
+    }
+
+    #[test]
+    fn test_dim_plain_line() {
+        assert_eq!(fmt_dim(true, &["hello\n"]), "\u{1b}[2mhello\u{1b}[0m\n");
+    }
+
+    #[test]
+    fn test_dim_keeps_bold() {
+        assert_eq!(
+            fmt_dim(true, &["**bold**\n"]),
+            "\u{1b}[2m\u{1b}[1mbold\u{1b}[0m\u{1b}[2m\u{1b}[0m\n"
+        );
+    }
+
+    #[test]
+    fn test_dim_non_tty_passthrough() {
+        assert_eq!(fmt_dim(false, &["**bold**\n"]), "**bold**\n");
     }
 }

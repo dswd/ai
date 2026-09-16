@@ -20,7 +20,7 @@ use rig::{
     tool::server::ToolServer,
 };
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 pub(crate) struct AgentContext<'a> {
@@ -243,8 +243,17 @@ fn build_agent<M: CompletionModel + 'static>(
 
 pub(crate) async fn stream_response(
     stream: &mut StreamingResult,
-) -> anyhow::Result<PromptResponse> {
+    exit_flag: Option<&Arc<AtomicBool>>,
+) -> anyhow::Result<Option<PromptResponse>> {
     while let Some(item) = stream.next().await {
+        // The `exit_program` tool sets the flag while rig executes the tool batch;
+        // the tool result surfaces only afterwards, so by the time we see another
+        // item the tool has run. Drop the stream here to cancel any further model
+        // generation.
+        if exit_flag.is_some_and(|f| f.load(Ordering::SeqCst)) {
+            output::stdout_finish();
+            return Ok(None);
+        }
         match item {
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text))) => {
                 output::stdout_push(&text.text);
@@ -265,7 +274,7 @@ pub(crate) async fn stream_response(
             }
             Ok(MultiTurnStreamItem::FinalResponse(resp)) => {
                 output::stdout_finish();
-                return Ok(resp);
+                return Ok(Some(resp));
             }
             Err(e) => {
                 output::stderr_line(&format!("Error: {e}"));
@@ -295,7 +304,9 @@ async fn run_oneshot(
             .add_hook(ContextPruneHook::default())
             .await;
         drop(spinner);
-        let response = stream_response(&mut stream).await?;
+        let response = stream_response(&mut stream, None)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("stream ended without a response"))?;
         crate::interactive::print_usage(&response.usage, start.elapsed());
         return Ok(());
     }
@@ -309,10 +320,32 @@ async fn run_oneshot(
         .add_hook(ContextPruneHook::default())
         .await;
     drop(spinner);
-    let response = stream_response(&mut stream).await?;
+    let response = stream_response(&mut stream, None)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("stream ended without a response"))?;
     let usage = response.usage;
     crate::interactive::record_turn(session, &mut chat_history, response);
     session.save(session_dir)?;
     crate::interactive::print_usage(&usage, start.elapsed());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream;
+
+    #[tokio::test]
+    async fn test_stream_response_aborts_when_exit_flag_set() {
+        let flag = Arc::new(AtomicBool::new(true));
+        let item =
+            MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ReasoningDelta {
+                id: "r1".to_string(),
+                provider_id: None,
+                reasoning: "hidden".to_string(),
+            });
+        let mut stream: StreamingResult = Box::pin(stream::iter(vec![Ok(item)]));
+        let result = stream_response(&mut stream, Some(&flag)).await.unwrap();
+        assert!(result.is_none());
+    }
 }

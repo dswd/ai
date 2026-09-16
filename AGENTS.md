@@ -80,7 +80,8 @@ request/parse pairs for Brave/Tavily/Exa/Serper/SearXNG, and status→`EngineErr
 the real provider/credentials (including search keys), and saves through the sandbox (write
 approval). It never takes or reports the config path, so the setup AI cannot read the secret file.
 - `exit_program.rs` — tool the model calls to end interactive sessions and `--setup` when the
-user asks; signals the loop via a shared `Arc<AtomicBool>` in `AgentContext`. Not `Action`-gated,
+user asks; signals the loop via a shared `Arc<AtomicBool>` in `AgentContext`. `stream_response`
+checks the flag per stream item and aborts generation once it is set. Not `Action`-gated,
 and not registered for one-off runs.
 
 ## Conventions
