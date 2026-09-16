@@ -29,7 +29,7 @@ pub struct Cli {
     #[arg(
         short = 's',
         long = "session",
-        help = "Start an interactive session (or continue one given NAME), implies --ask",
+        help = "Start an interactive session (implies --ask). Without NAME, resume the most recent session (<60 min, same model) or start a new one. With NAME: an undated NAME matches any date (latest) and is created as YYYY-MM-DD_NAME; a dated NAME is used exactly",
         num_args = 0..=1,
         value_name = "NAME",
         default_missing_value = "",
@@ -248,7 +248,7 @@ pub struct Cli {
 
     #[arg(
         long = "delete",
-        help = "Delete a session by NAME",
+        help = "Delete a session by NAME (an undated NAME matches the latest session across dates)",
         value_name = "NAME",
         require_equals = true,
         conflicts_with_all = ["list", "setup", "session"]

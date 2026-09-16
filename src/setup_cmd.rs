@@ -13,6 +13,7 @@ use rig::client::CompletionClient;
 use rig::completion::{CompletionModel, Message};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 const CURATED: &[&str] = &[
     "openai",
@@ -640,7 +641,8 @@ fn setup_system_prompt(config: &Config, policy: &Policy) -> String {
          every change, show the user the complete current configuration as a YAML code block \
          so they always have an overview, and call `write_config` when they are done (not \
          after every step, to avoid repeated approval prompts). Do not invent options that \
-         are absent from the schema.",
+         are absent from the schema. If the user asks to quit or exit, call the \
+         `exit_program` tool.",
         current = config_for_prompt(config),
         schema = schema,
         guide = GUIDE,
@@ -696,7 +698,7 @@ async fn run_ai_setup(path: &Path, config: &Config) -> Result<(), Phase2Error> {
         ),
         context_window: resolved.context_window,
         transient: true,
-        exit_flag: None,
+        exit_flag: Some(Arc::new(AtomicBool::new(false))),
         setup_target: Some(target),
     };
 
@@ -779,3 +781,14 @@ const GUIDE: &str = "\
 
 Prefer relative or `~` paths where a path is expected. Ask the user before enabling
 container execution or broad policies.";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_setup_prompt_mentions_exit_program() {
+        let prompt = setup_system_prompt(&Config::default(), &Policy::default());
+        assert!(prompt.contains("exit_program"));
+    }
+}

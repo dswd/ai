@@ -1,12 +1,11 @@
 use crate::cli::Cli;
 use crate::config::Config;
 use crate::io;
-use crate::logging::is_quiet;
 use crate::output;
 use crate::policy::{self, Action, Policy, PolicyRule};
 use crate::providers;
 use crate::session::{self, Role, Session};
-use log::info;
+use log::debug;
 use std::time::SystemTime;
 
 /// A session file modified within the resume window is eligible for continuity.
@@ -53,23 +52,31 @@ pub(crate) fn resolve_session(
     system_prompt: &str,
     model_name: &str,
     provider_name: &str,
-    implicit: bool,
+    auto_session: bool,
 ) -> anyhow::Result<Session> {
-    let session_name = match &cli.session {
-        Some(name) => {
-            if name.is_empty() {
-                Some(session::generate_session_name(session_dir))
-            } else {
-                if !session::is_safe_name(name) {
-                    anyhow::bail!("invalid session name: {name:?}");
-                }
+    let explicit_name = match &cli.session {
+        Some(name) if !name.is_empty() => {
+            if !session::is_safe_name(name) {
+                anyhow::bail!("invalid session name: {name:?}");
+            }
+            // A dated name is exact; an undated one is an alias for the most
+            // recently used session across dates, created dated when new.
+            if session::is_dated(name) {
                 Some(name.clone())
+            } else {
+                Some(
+                    session::find_named(session_dir, name)
+                        .unwrap_or_else(|| session::dated_name(name)),
+                )
             }
         }
-        None => None,
+        _ => None,
     };
+    // An explicit name picks that session; otherwise (no `-s`, or `-s` with no
+    // name) we select the current session.
+    let auto = auto_session || cli.session.as_deref() == Some("");
 
-    let session = if let Some(ref name) = session_name {
+    let session = if let Some(ref name) = explicit_name {
         match Session::load(name, session_dir) {
             Ok(s) => {
                 if s.provider != provider_name || s.model != model_name {
@@ -104,7 +111,7 @@ pub(crate) fn resolve_session(
                             "[note] the system prompt has changed since this session was saved",
                         );
                     }
-                    info!("Continuing session: {name}");
+                    debug!("Continuing session: {name}");
                     s
                 }
             }
@@ -121,11 +128,11 @@ pub(crate) fn resolve_session(
                     model_name.to_string(),
                     provider_name.to_string(),
                 );
-                info!("Started new session: {name}");
+                debug!("Started new session: {name}");
                 s
             }
         }
-    } else if implicit {
+    } else if auto {
         match current_session(session_dir, model_name, provider_name) {
             Some(s) => {
                 if s.system_prompt != system_prompt {
@@ -133,18 +140,12 @@ pub(crate) fn resolve_session(
                         "[note] the system prompt has changed since this session was saved",
                     );
                 }
-                if !is_quiet() {
-                    output::stderr_line(&format!("[session: {} (continued)]", s.name));
-                }
-                info!("Continuing session: {}", s.name);
+                debug!("Continuing session: {}", s.name);
                 s
             }
             None => {
                 let name = session::generate_session_name(session_dir);
-                if !is_quiet() {
-                    output::stderr_line(&format!("[session: {name} (new)]"));
-                }
-                info!("Started new session: {name}");
+                debug!("Started new session: {name}");
                 Session::new(
                     name,
                     system_prompt.to_string(),
@@ -265,6 +266,23 @@ pub(crate) fn resolve_thinking(
     requested
 }
 
+/// Explain why container runtime detection failed, distinguishing an unknown
+/// requested value from a runtime that is simply not installed.
+fn runtime_unavailable_message(preferred: Option<&str>) -> String {
+    match preferred.map(str::to_lowercase).as_deref() {
+        Some("docker") | Some("podman") => format!(
+            "container runtime '{}' is not available on PATH",
+            preferred.unwrap_or_default()
+        ),
+        Some(other) if !other.is_empty() && other != "auto" => {
+            format!("unknown container runtime '{other}' (expected auto, docker, or podman)")
+        }
+        _ => "no container runtime found; install docker or podman, \
+              or pass --no-container to run on the host"
+            .to_string(),
+    }
+}
+
 /// Resolve the container isolation for external commands: image from
 /// `--container` or `container.default_image`, runtime auto-detected, and bind
 /// mounts derived from the policy. Returns `None` for host execution.
@@ -288,13 +306,8 @@ pub(crate) fn resolve_container(
         .container_runtime
         .clone()
         .or_else(|| config.container.runtime.clone());
-    let runtime = crate::container::detect_runtime(preferred.as_deref()).ok_or_else(|| {
-        let requested = preferred.unwrap_or_else(|| "auto".to_string());
-        anyhow::anyhow!(
-            "no container runtime found (requested: {requested}); install docker or podman, \
-             or pass --no-container to run on the host"
-        )
-    })?;
+    let runtime = crate::container::detect_runtime(preferred.as_deref())
+        .ok_or_else(|| anyhow::anyhow!(runtime_unavailable_message(preferred.as_deref())))?;
 
     let (mounts, warnings) = crate::container::mounts_from_policy(policy);
     for warning in warnings {
@@ -455,6 +468,14 @@ mod tests {
         Cli::parse_from(["ai", "hi"])
     }
 
+    fn cli_session() -> Cli {
+        Cli::parse_from(["ai", "-s"])
+    }
+
+    fn cli_explicit(name: &str) -> Cli {
+        Cli::parse_from(["ai", &format!("-s={name}")])
+    }
+
     fn save_session(dir: &Path, name: &str, provider: &str, model: &str, age: Duration) {
         let mut s = Session::new(
             name.to_string(),
@@ -520,6 +541,52 @@ mod tests {
     }
 
     #[test]
+    fn test_session_without_name_resumes_current() {
+        let dir = temp_dir("sflag-fresh");
+        save_session(
+            &dir,
+            "2026-09-15_calm-hawk",
+            "openai",
+            "gpt-4o",
+            Duration::from_secs(60),
+        );
+        let s = resolve_session(&cli_session(), &dir, "sys", "gpt-4o", "openai", false).unwrap();
+        assert_eq!(s.name, "2026-09-15_calm-hawk");
+        assert_eq!(s.log.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_session_without_name_starts_new_when_stale() {
+        let dir = temp_dir("sflag-stale");
+        save_session(
+            &dir,
+            "2026-09-15_calm-hawk",
+            "openai",
+            "gpt-4o",
+            Duration::from_secs(session::RESUME_WINDOW_SECS + 10),
+        );
+        let s = resolve_session(&cli_session(), &dir, "sys", "gpt-4o", "openai", false).unwrap();
+        assert_ne!(s.name, "2026-09-15_calm-hawk");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_session_without_name_starts_new_when_model_differs() {
+        let dir = temp_dir("sflag-mismatch");
+        save_session(
+            &dir,
+            "2026-09-15_calm-hawk",
+            "openai",
+            "gpt-4o",
+            Duration::from_secs(60),
+        );
+        let s = resolve_session(&cli_session(), &dir, "sys", "gpt-4.1", "openai", false).unwrap();
+        assert_ne!(s.name, "2026-09-15_calm-hawk");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn test_non_implicit_ignores_existing_session() {
         let dir = temp_dir("none");
         save_session(
@@ -532,6 +599,98 @@ mod tests {
         let s = resolve_session(&cli(), &dir, "sys", "gpt-4o", "openai", false).unwrap();
         assert_ne!(s.name, "2026-09-15_calm-hawk");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_explicit_undated_resumes_dated_match() {
+        let dir = temp_dir("explicit-resume");
+        save_session(
+            &dir,
+            "2026-01-01_foo",
+            "openai",
+            "gpt-4o",
+            Duration::from_secs(60),
+        );
+        let s =
+            resolve_session(&cli_explicit("foo"), &dir, "sys", "gpt-4o", "openai", false).unwrap();
+        assert_eq!(s.name, "2026-01-01_foo");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_explicit_undated_creates_dated_name() {
+        let dir = temp_dir("explicit-create");
+        let s =
+            resolve_session(&cli_explicit("foo"), &dir, "sys", "gpt-4o", "openai", false).unwrap();
+        assert_eq!(s.name, session::dated_name("foo"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_explicit_undated_picks_latest_match() {
+        let dir = temp_dir("explicit-latest");
+        save_session(
+            &dir,
+            "2026-09-15_foo",
+            "openai",
+            "gpt-4o",
+            Duration::from_secs(3600),
+        );
+        save_session(
+            &dir,
+            "2026-01-01_foo",
+            "openai",
+            "gpt-4o",
+            Duration::from_secs(60),
+        );
+        let s =
+            resolve_session(&cli_explicit("foo"), &dir, "sys", "gpt-4o", "openai", false).unwrap();
+        assert_eq!(s.name, "2026-01-01_foo");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_explicit_dated_input_is_exact() {
+        let dir = temp_dir("explicit-dated");
+        save_session(
+            &dir,
+            "2026-01-01_foo",
+            "openai",
+            "gpt-4o",
+            Duration::from_secs(3600),
+        );
+        save_session(
+            &dir,
+            "2026-09-15_foo",
+            "openai",
+            "gpt-4o",
+            Duration::from_secs(60),
+        );
+        let s = resolve_session(
+            &cli_explicit("2026-01-01_foo"),
+            &dir,
+            "sys",
+            "gpt-4o",
+            "openai",
+            false,
+        )
+        .unwrap();
+        assert_eq!(s.name, "2026-01-01_foo");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_runtime_unavailable_message() {
+        assert!(runtime_unavailable_message(Some("bogus")).contains("unknown container runtime"));
+        assert!(runtime_unavailable_message(Some("docker")).contains("not available on PATH"));
+        assert!(runtime_unavailable_message(Some("podman")).contains("not available on PATH"));
+        for value in [None, Some("auto"), Some("AUTO"), Some("")] {
+            let msg = runtime_unavailable_message(value);
+            assert!(
+                msg.contains("install docker or podman"),
+                "{value:?} -> {msg}"
+            );
+        }
     }
 
     #[test]

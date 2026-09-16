@@ -32,7 +32,7 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `container.rs` | Session-scoped container for external commands (Docker/Podman): policy→bind mounts, network none unless web |
 | `context.rs` | Deterministic context editing: prune stale tool outputs from the history sent to the model |
 | `skills.rs` | Skill discovery/loading (markdown front-matter files) |
-| `session.rs` | Session persistence (JSON, schema v2: full chat log + provider/model binding); newest-session selection and the 60-minute resume window used to continue one-off runs |
+| `session.rs` | Session persistence (JSON, schema v2: full chat log + provider/model binding); newest-session selection, the 60-minute resume window, and date-aware name lookup (`NAME` matches `YYYY-MM-DD_NAME`) used to continue one-off runs, `-s` with no name, and explicit names |
 | `memory.rs` | Persistent agent memory |
 | `tools/` | One file per tool (see below) |
 | `format.rs` | Streaming markdown-to-ANSI console formatting for assistant output |
@@ -79,9 +79,9 @@ request/parse pairs for Brave/Tavily/Exa/Serper/SearXNG, and status→`EngineErr
 - `write_config.rs` — setup-only `write_config` tool: strictly parses the AI's YAML, restores
 the real provider/credentials (including search keys), and saves through the sandbox (write
 approval). It never takes or reports the config path, so the setup AI cannot read the secret file.
-- `exit_program.rs` — interactive-only tool the model calls to end the program when the user
-asks; signals the loop via a shared `Arc<AtomicBool>` in `AgentContext`. Not `Action`-gated,
-and not registered for one-off runs or setup.
+- `exit_program.rs` — tool the model calls to end interactive sessions and `--setup` when the
+user asks; signals the loop via a shared `Arc<AtomicBool>` in `AgentContext`. Not `Action`-gated,
+and not registered for one-off runs.
 
 ## Conventions
 

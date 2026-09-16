@@ -110,12 +110,80 @@ pub(crate) fn cmd_delete_session(name: &str, dir: &std::path::Path) -> anyhow::R
     if !crate::session::is_safe_name(name) {
         anyhow::bail!("invalid session name: {name:?}");
     }
-    let path = dir.join(format!("{name}.json"));
+    let resolved = if crate::session::is_dated(name) {
+        name.to_string()
+    } else {
+        match crate::session::find_named(dir, name) {
+            Some(found) => found,
+            None => anyhow::bail!("Session not found: {name}"),
+        }
+    };
+    let path = dir.join(format!("{resolved}.json"));
     if path.exists() {
         std::fs::remove_file(&path)?;
-        output::stderr_line(&format!("Deleted session: {name}"));
+        output::stderr_line(&format!("Deleted session: {resolved}"));
     } else {
-        anyhow::bail!("Session not found: {name}");
+        anyhow::bail!("Session not found: {resolved}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use super::*;
+
+    fn set_mtime(path: &std::path::Path, when: SystemTime) {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ai-del-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn test_delete_undated_removes_latest_match() {
+        let dir = temp_dir("latest");
+        let old = dir.join("2026-09-15_foo.json");
+        let new = dir.join("2026-01-01_foo.json");
+        std::fs::write(&old, "{}").unwrap();
+        std::fs::write(&new, "{}").unwrap();
+        set_mtime(&old, SystemTime::now() - Duration::from_secs(3600));
+        set_mtime(&new, SystemTime::now());
+
+        cmd_delete_session("foo", &dir).unwrap();
+        assert!(!new.exists());
+        assert!(old.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_delete_dated_is_exact() {
+        let dir = temp_dir("dated");
+        let older = dir.join("2026-01-01_foo.json");
+        let newer = dir.join("2026-09-15_foo.json");
+        std::fs::write(&older, "{}").unwrap();
+        std::fs::write(&newer, "{}").unwrap();
+
+        cmd_delete_session("2026-01-01_foo", &dir).unwrap();
+        assert!(!older.exists());
+        assert!(newer.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_delete_missing_errors() {
+        let dir = temp_dir("missing");
+        assert!(cmd_delete_session("nope", &dir).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

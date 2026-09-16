@@ -70,8 +70,7 @@ pub(crate) fn detect_runtime(preferred: Option<&str>) -> Option<Runtime> {
     match preferred.map(str::to_lowercase).as_deref() {
         Some("docker") => usable("docker").then_some(Runtime::Docker),
         Some("podman") => usable("podman").then_some(Runtime::Podman),
-        Some(_) => None,
-        None => {
+        Some("") | Some("auto") | None => {
             if usable("docker") {
                 Some(Runtime::Docker)
             } else if usable("podman") {
@@ -80,6 +79,7 @@ pub(crate) fn detect_runtime(preferred: Option<&str>) -> Option<Runtime> {
                 None
             }
         }
+        Some(_) => None,
     }
 }
 
@@ -525,6 +525,14 @@ mod tests {
     fn test_detect_runtime_rejects_unknown() {
         assert!(detect_runtime(Some("nonesuch-runtime")).is_none());
         let _ = detect_runtime(None);
+    }
+
+    #[test]
+    fn test_detect_runtime_auto_is_autodetect() {
+        let auto = detect_runtime(None);
+        assert_eq!(detect_runtime(Some("auto")), auto);
+        assert_eq!(detect_runtime(Some("AUTO")), auto);
+        assert_eq!(detect_runtime(Some("")), auto);
     }
 
     fn spec(network: Network) -> ContainerRuntime {

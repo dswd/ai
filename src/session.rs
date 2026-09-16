@@ -258,6 +258,56 @@ fn today_prefix() -> String {
         .unwrap_or_default()
 }
 
+/// `YYYY-MM-DD_name`: prefix an explicit base with today's date.
+pub fn dated_name(base: &str) -> String {
+    format!("{}_{base}", today_prefix())
+}
+
+/// True for a name of the form `YYYY-MM-DD_<rest>`.
+pub fn is_dated(name: &str) -> bool {
+    let b = name.as_bytes();
+    b.len() > 11
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[10] == b'_'
+        && [0, 1, 2, 3, 5, 6, 8, 9]
+            .iter()
+            .all(|&i| b[i].is_ascii_digit())
+}
+
+/// True when `stem` is the base itself or a date-prefixed form of it.
+fn matches_base(stem: &str, base: &str) -> bool {
+    if stem == base {
+        return true;
+    }
+    is_dated(stem) && &stem[11..] == base
+}
+
+/// The most recently modified `*.json` session whose name is `base` itself or a
+/// date-prefixed variant of it (`YYYY-MM-DD_base`).
+pub fn find_named(dir: &Path, base: &str) -> Option<String> {
+    let mut best: Option<(String, SystemTime)> = None;
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|e| e != "json") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if !matches_base(stem, base) {
+            continue;
+        }
+        let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        if best.as_ref().is_none_or(|(_, t)| modified > *t) {
+            best = Some((stem.to_string(), modified));
+        }
+    }
+    best.map(|(name, _)| name)
+}
+
 /// Generate a unique session name `YYYY-MM-DD_<adj>-<noun>` in `dir`.
 pub fn generate_session_name(dir: &Path) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -470,6 +520,44 @@ mod tests {
         set_mtime(&new, SystemTime::now());
 
         assert_eq!(newest(&dir).unwrap().0, "new");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_is_dated_and_matches_base() {
+        assert!(is_dated("2026-09-15_calm-hawk"));
+        assert!(!is_dated("calm-hawk"));
+        assert!(!is_dated("2026-09-15"));
+        assert!(!is_dated("2026-9-15_calm"));
+        assert!(!is_dated("abcd-09-15_calm"));
+
+        assert!(matches_base("foo", "foo"));
+        assert!(matches_base("2026-01-01_foo", "foo"));
+        assert!(!matches_base("2026-01-01_foobar", "foo"));
+        assert!(!matches_base("2026-01-01_foo_bar", "foo"));
+    }
+
+    #[test]
+    fn test_find_named_picks_latest_match() {
+        let dir = std::env::temp_dir().join(format!("ai-findnamed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let newer = dir.join("2026-01-01_foo.json");
+        let older = dir.join("2026-09-15_foo.json");
+        for path in [&newer, &older] {
+            std::fs::write(path, "{}").unwrap();
+        }
+        std::fs::write(dir.join("other.json"), "{}").unwrap();
+
+        set_mtime(
+            &older,
+            SystemTime::now() - std::time::Duration::from_secs(3600),
+        );
+        set_mtime(&newer, SystemTime::now());
+
+        assert_eq!(find_named(&dir, "foo").as_deref(), Some("2026-01-01_foo"));
+        assert_eq!(find_named(&dir, "nope"), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

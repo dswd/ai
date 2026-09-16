@@ -1,3 +1,4 @@
+use rustyline::config::BellStyle;
 use rustyline::{ColorMode, Config, Editor, Prompt, history::DefaultHistory};
 use std::io;
 use std::sync::{Mutex, OnceLock};
@@ -10,9 +11,15 @@ fn editor() -> &'static Mutex<Editor<(), DefaultHistory>> {
         } else {
             ColorMode::Enabled
         };
-        let config = Config::builder().color_mode(color_mode).build();
-        let ed = Editor::<(), DefaultHistory>::with_config(config)
+        let config = Config::builder()
+            .color_mode(color_mode)
+            .bell_style(BellStyle::None)
+            .build();
+        let mut ed = Editor::<(), DefaultHistory>::with_config(config)
             .expect("failed to create line editor");
+        // rustyline only renders the styled prompt when a Highlighter is
+        // installed; `()` is the identity highlighter.
+        ed.set_helper(Some(()));
         Mutex::new(ed)
     })
 }

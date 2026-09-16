@@ -6,7 +6,7 @@ use crate::memory;
 use crate::output;
 use crate::session::{self, Role, Session};
 use ansi_color_constants::*;
-use log::{error, info};
+use log::{debug, error};
 use rig::{
     agent::{Agent, PromptResponse},
     completion::{Chat, Message, Usage},
@@ -53,7 +53,7 @@ pub(crate) async fn run_interactive(
     let mut last_input_tokens: u64 = 0;
 
     let prompt_info = PromptInfo {
-        session: cap_name(&session.name, 24),
+        session: cap_name(undated(&session.name), 24),
         container: container.as_ref().map(|c| short_image(c.image())),
     };
 
@@ -203,8 +203,8 @@ pub(crate) async fn run_interactive(
     if !session.log.is_empty() {
         if !transient {
             session.save(session_dir)?;
-            info!("Session saved: {}", session.name);
-            output::stderr_line(&format!("  resume: ai -s {}", session.name));
+            debug!("Session saved: {}", session.name);
+            debug!("  resume: ai -s {}", session.name);
         }
         print_usage(&total_usage, start.elapsed());
     }
@@ -331,6 +331,9 @@ struct PromptInfo {
     container: Option<String>,
 }
 
+/// 256-color orange for the mid usage tier (the palette has no orange).
+const ORANGE: &str = "\x1b[38;5;208m";
+
 /// Build the `(raw, styled)` pair rustyline wants: `raw` is plain text it
 /// measures, `styled` adds color only, so both share the same display width.
 fn format_interactive_prompt(
@@ -338,33 +341,29 @@ fn format_interactive_prompt(
     last_input_tokens: u64,
     context_window: Option<usize>,
 ) -> (String, String) {
-    let mut raw_parts: Vec<String> = Vec::new();
-    let mut styled_parts: Vec<String> = Vec::new();
-
-    raw_parts.push(info.session.clone());
-    styled_parts.push(format!("{DIM}{GREY}{}{RESET}", info.session));
+    let mut raw_parts = vec![info.session.clone()];
+    let mut styled_parts = vec![format!("{BLUE}{}{RESET}", info.session)];
 
     if let Some(image) = &info.container {
-        raw_parts.push(format!("⬢ {image}"));
-        styled_parts.push(format!("{DIM}{GREY}⬢ {image}{RESET}"));
+        raw_parts.push(format!("@ {image}"));
+        styled_parts.push(format!("{YELLOW}@ {image}{RESET}"));
     }
 
-    if let Some((raw, styled)) = usage_segment(last_input_tokens, context_window) {
-        raw_parts.push(raw);
-        styled_parts.push(styled);
+    if let Some((percent, color)) = usage_segment(last_input_tokens, context_window) {
+        let text = format!("[{percent:>2}%]");
+        raw_parts.push(text.clone());
+        styled_parts.push(format!("{color}{text}{RESET}"));
     }
 
-    let raw = format!("{} ❯ ", raw_parts.join(" │ "));
-    let styled = format!(
-        "{} {BOLD}{GREEN}❯{RESET} ",
-        styled_parts.join(&format!("{DIM}{GREY} │ {RESET}"))
-    );
-    (raw, styled)
+    (
+        format!("{} ❯  ", raw_parts.join(" ")),
+        format!("{} {WHITE}❯{RESET}  ", styled_parts.join(" ")),
+    )
 }
 
-/// A five-cell bar plus integer percent, colored by how full the window is.
-/// `None` until a token count is known.
-fn usage_segment(tokens: u64, window: Option<usize>) -> Option<(String, String)> {
+/// Integer percent of the context window used and its tier color. `None` until
+/// a token count and window are known.
+fn usage_segment(tokens: u64, window: Option<usize>) -> Option<(u64, &'static str)> {
     let window = window.filter(|w| *w > 0)?;
     if tokens == 0 {
         return None;
@@ -373,14 +372,20 @@ fn usage_segment(tokens: u64, window: Option<usize>) -> Option<(String, String)>
     let color = if percent >= 75 {
         RED
     } else if percent >= 50 {
-        YELLOW
+        ORANGE
     } else {
         GREEN
     };
-    let filled = ((percent as f64 / 20.0).round() as usize).clamp(1, 5);
-    let bar = format!("{}{}", "▰".repeat(filled), "▱".repeat(5 - filled));
-    let text = format!("{bar} {percent}%");
-    Some((text.clone(), format!("{color}{text}{RESET}")))
+    Some((percent, color))
+}
+
+/// The session name without its `YYYY-MM-DD_` date prefix, when present.
+fn undated(name: &str) -> &str {
+    if session::is_dated(name) {
+        &name[11..]
+    } else {
+        name
+    }
 }
 
 /// The image's last path component with any `:tag`/`@digest` stripped, capped.
@@ -478,17 +483,17 @@ mod tests {
     }
 
     #[test]
+    fn test_undated_session_name() {
+        assert_eq!(undated("2026-09-15_calm-hawk"), "calm-hawk");
+        assert_eq!(undated("calm-hawk"), "calm-hawk");
+        assert_eq!(undated("2026-09-15_x"), "x");
+    }
+
+    #[test]
     fn test_usage_segment_tiers() {
-        let (raw, styled) = usage_segment(25, Some(100)).unwrap();
-        assert_eq!(raw, "▰▱▱▱▱ 25%");
-        assert!(styled.contains(GREEN));
-
-        let (_, styled) = usage_segment(60, Some(100)).unwrap();
-        assert!(styled.contains(YELLOW));
-
-        let (raw, styled) = usage_segment(82, Some(100)).unwrap();
-        assert_eq!(raw, "▰▰▰▰▱ 82%");
-        assert!(styled.contains(RED));
+        assert_eq!(usage_segment(25, Some(100)).unwrap(), (25, GREEN));
+        assert_eq!(usage_segment(60, Some(100)).unwrap(), (60, ORANGE));
+        assert_eq!(usage_segment(82, Some(100)).unwrap(), (82, RED));
 
         assert!(usage_segment(0, Some(100)).is_none());
         assert!(usage_segment(50, None).is_none());
@@ -496,13 +501,25 @@ mod tests {
     }
 
     #[test]
+    fn test_usage_padding() {
+        let host = PromptInfo {
+            session: "s".to_string(),
+            container: None,
+        };
+        let raw = |tokens| format_interactive_prompt(&host, tokens, Some(100)).0;
+        assert!(raw(5).contains("[ 5%]"));
+        assert!(raw(42).contains("[42%]"));
+        assert!(raw(100).contains("[100%]"));
+    }
+
+    #[test]
     fn test_prompt_width_invariant() {
         let host = PromptInfo {
-            session: "2026-09-15_calm-hawk".to_string(),
+            session: "calm-hawk".to_string(),
             container: None,
         };
         let with_container = PromptInfo {
-            session: "2026-09-15_calm-hawk".to_string(),
+            session: "calm-hawk".to_string(),
             container: Some("debian".to_string()),
         };
         let cases = [
@@ -514,5 +531,45 @@ mod tests {
             assert_eq!(strip_ansi(&styled), raw);
             assert_ne!(raw, styled, "styled should carry ANSI");
         }
+    }
+
+    #[test]
+    fn test_prompt_colors() {
+        let host = PromptInfo {
+            session: "calm-hawk".to_string(),
+            container: None,
+        };
+        let (raw, styled) = format_interactive_prompt(&host, 0, Some(128_000));
+        assert!(
+            styled.contains(&format!("{BLUE}calm-hawk{RESET}")),
+            "session should be blue: {styled:?}"
+        );
+        assert!(styled.contains(&format!("{WHITE}❯{RESET}")), "white caret");
+        assert!(raw.contains("❯"));
+        assert!(
+            !styled.contains("\x1b[4"),
+            "no background colors: {styled:?}"
+        );
+
+        let with_container = PromptInfo {
+            session: "calm-hawk".to_string(),
+            container: Some("debian".to_string()),
+        };
+        let (raw, styled) = format_interactive_prompt(&with_container, 0, Some(128_000));
+        assert!(
+            styled.contains(&format!("{YELLOW}@ debian{RESET}")),
+            "container should be yellow: {styled:?}"
+        );
+        assert!(raw.contains("calm-hawk @ debian"));
+
+        let (raw, styled) = format_interactive_prompt(&with_container, 105_000, Some(128_000));
+        assert!(
+            styled.contains(&format!("{RED}[82%]{RESET}")),
+            "usage should be red: {styled:?}"
+        );
+        assert!(raw.ends_with("[82%] ❯ "));
+
+        let (_, styled) = format_interactive_prompt(&with_container, 76_800, Some(128_000));
+        assert!(styled.contains(&format!("{ORANGE}[60%]{RESET}")));
     }
 }

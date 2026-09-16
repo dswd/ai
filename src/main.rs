@@ -110,14 +110,14 @@ async fn run(cli: Cli, config: Config, session_dir: PathBuf, policy: Policy) -> 
 
     let resolved = resolve_provider(&config)?;
     let prompt_text = resolve_prompt_text(&cli).await;
-    let implicit = !cli.is_interactive() && !cli.no_session && prompt_text.is_some();
+    let auto_session = !cli.is_interactive() && !cli.no_session && prompt_text.is_some();
     let mut session = resolve_session(
         &cli,
         &session_dir,
         &system_prompt,
         &model_name,
         &resolved.name,
-        implicit,
+        auto_session,
     )?;
     if let Some(ref mem) = memory {
         mem.set_session_name(&session.name);
