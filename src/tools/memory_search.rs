@@ -55,10 +55,17 @@ impl PortableTool for MemorySearchTool {
         let out = hits
             .iter()
             .map(|h| match h.kind {
-                HitKind::Memory => format!("({}) {}", h.key, h.text),
+                HitKind::Memory => format!(
+                    "({}) {}",
+                    h.key,
+                    crate::memory::fragment(&h.text, &args.query)
+                ),
                 HitKind::Transcript => {
                     let session = h.session.as_deref().unwrap_or("?");
-                    format!("(transcript {session}) {}", h.text.replace('\n', " / "))
+                    format!(
+                        "(transcript {session}) {}",
+                        crate::memory::fragment(&h.text, &args.query)
+                    )
                 }
             })
             .collect::<Vec<_>>()

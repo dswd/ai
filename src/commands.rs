@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::memory::{Hit, HitKind, Memory, MemoryEntry};
+use crate::memory::{self, Hit, HitKind, Memory, MemoryEntry};
 use crate::output;
 use crate::session::Session;
 use crate::tools;
@@ -54,7 +54,7 @@ fn format_memory_entry(e: &MemoryEntry, color: bool) -> String {
 }
 
 /// Format one search hit as a kind badge plus an indented metadata line.
-fn format_memory_hit(h: &Hit, color: bool) -> String {
+fn format_memory_hit(h: &Hit, query: &str, color: bool) -> String {
     let (badge, mut meta) = match h.kind {
         HitKind::Memory => {
             let mut meta = vec![format!(
@@ -82,7 +82,7 @@ fn format_memory_hit(h: &Hit, color: bool) -> String {
     };
     meta.push(paint(color, GREY, &format!("created {}", day(&h.created))));
 
-    let text = h.text.replace('\n', " / ");
+    let text = memory::fragment(&h.text, query);
     format!(
         "{badge}  {text}\n  {}",
         meta.join(&paint(color, GREY, " · "))
@@ -199,7 +199,7 @@ pub(crate) fn cmd_memory_search(mem: &Memory, query: &str) -> anyhow::Result<()>
     );
     for h in &hits {
         println!();
-        println!("{}", format_memory_hit(h, color));
+        println!("{}", format_memory_hit(h, query, color));
     }
     Ok(())
 }
@@ -378,7 +378,7 @@ mod tests {
             created: "2026-09-16T10:00:00Z".to_string(),
         };
         assert_eq!(
-            format_memory_hit(&memory, false),
+            format_memory_hit(&memory, "rust", false),
             "memory  likes rust\n  id m1 · tags: lang · created 2026-09-16"
         );
 
@@ -391,8 +391,25 @@ mod tests {
             created: "2026-09-17T08:00:00Z".to_string(),
         };
         assert_eq!(
-            format_memory_hit(&transcript, false),
-            "transcript  user: hi / agent: yo\n  session 2026-09-16_x · created 2026-09-17"
+            format_memory_hit(&transcript, "hi", false),
+            "transcript  user: hi agent: yo\n  session 2026-09-16_x · created 2026-09-17"
         );
+    }
+
+    #[test]
+    fn test_format_memory_hit_fragments_long_text() {
+        let hit = Hit {
+            kind: HitKind::Memory,
+            key: "m2".to_string(),
+            text: format!("{} needle {}", "x".repeat(120), "y".repeat(120)),
+            tags: Vec::new(),
+            session: None,
+            created: "2026-09-16T10:00:00Z".to_string(),
+        };
+        let out = format_memory_hit(&hit, "needle", false);
+        let text_line = out.lines().next().unwrap();
+        assert!(text_line.contains("needle"));
+        assert!(text_line.contains('…'));
+        assert!(text_line.chars().count() <= "memory  ".chars().count() + memory::FRAGMENT_CHARS);
     }
 }

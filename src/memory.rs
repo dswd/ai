@@ -19,6 +19,12 @@ const MEMORY_WEIGHT: f64 = 1.0;
 const TRANSCRIPT_WEIGHT: f64 = 0.5;
 const TRANSCRIPT_CAP: usize = 3;
 const MAX_MATCH_TERMS: usize = 8;
+/// A hit must share at least this many distinct query terms to be returned;
+/// single-term queries match on that one term. Keeps incidental overlap on a
+/// single common word from being injected.
+const MIN_MATCHED_TERMS: usize = 2;
+/// Query terms shorter than this are ignored when building the FTS match.
+const MIN_MATCH_TERM_LEN: usize = 2;
 const OVERFETCH: usize = 4;
 /// Transcripts are pruned once processed and older than this many days.
 pub const RETENTION_DAYS: i64 = 7;
@@ -118,6 +124,70 @@ fn tokenize(text: &str) -> Vec<String> {
 
 fn now_iso() -> String {
     crate::util::now_iso()
+}
+
+/// Maximum length of a memory hit fragment shown or injected.
+pub const FRAGMENT_CHARS: usize = 100;
+
+/// Reduce `text` to at most [`FRAGMENT_CHARS`] characters around the first
+/// occurrence of a query term. Whitespace is collapsed; `…` marks truncation.
+pub fn fragment(text: &str, query: &str) -> String {
+    let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let chars: Vec<char> = flat.chars().collect();
+    if chars.len() <= FRAGMENT_CHARS {
+        return flat;
+    }
+
+    // Reserve two characters for the ellipsis markers so the total stays capped.
+    let budget = FRAGMENT_CHARS.saturating_sub(2);
+    let (start, end) = match first_match(&flat, query) {
+        Some((idx, len)) => {
+            let before = budget.saturating_sub(len) / 2;
+            let mut start = idx.saturating_sub(before);
+            let mut end = (start + budget).min(chars.len());
+            if end - start < budget {
+                start = end.saturating_sub(budget);
+            }
+            end = (start + budget).min(chars.len());
+            (start, end)
+        }
+        None => (0, budget),
+    };
+
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.extend(&chars[start..end]);
+    if end < chars.len() {
+        out.push('…');
+    }
+    out
+}
+
+/// The earliest `(char_index, char_len)` at which any query term appears in `text`.
+fn first_match(text: &str, query: &str) -> Option<(usize, usize)> {
+    let mut best: Option<(usize, usize)> = None;
+    for term in tokenize(query) {
+        if let Some(byte) = find_ascii_ci(text, &term) {
+            let idx = text[..byte].chars().count();
+            let len = term.chars().count();
+            if best.is_none_or(|(i, _)| idx < i) {
+                best = Some((idx, len));
+            }
+        }
+    }
+    best
+}
+
+/// Case-insensitive ASCII substring search; returns the byte offset of the match.
+fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    if n.is_empty() || n.len() > h.len() {
+        return None;
+    }
+    (0..=h.len() - n.len()).find(|&i| h[i..i + n.len()].eq_ignore_ascii_case(n))
 }
 
 fn iso_days_ago(days: i64) -> String {
@@ -412,9 +482,11 @@ impl Memory {
     /// Combined memory + transcript retrieval, fused with reciprocal rank fusion.
     /// Transcript hits are capped so memory keeps the majority of the slots.
     pub fn retrieve(&self, query: &str, top_k: usize) -> Vec<Hit> {
+        let query_terms = match_terms(query);
         let Some(match_expr) = build_match(query) else {
             return Vec::new();
         };
+        let required = query_terms.len().min(MIN_MATCHED_TERMS);
         let conn = self.store.conn.lock().unwrap();
         let fetch = top_k.max(1) * OVERFETCH;
         let mut fused: HashMap<String, (Hit, f64)> = HashMap::new();
@@ -426,17 +498,21 @@ impl Memory {
         ) {
             let rows = stmt
                 .query_map(params![match_expr, fetch as i64], |r| {
-                    let tags: String = r.get(2)?;
-                    Ok(Hit {
+                    let text: String = r.get(1)?;
+                    let tags = parse_tags(&r.get::<_, String>(2)?);
+                    if matched_terms(&query_terms, &text, &tags) < required {
+                        return Ok(None);
+                    }
+                    Ok(Some(Hit {
                         kind: HitKind::Memory,
                         key: r.get(0)?,
-                        text: r.get(1)?,
-                        tags: parse_tags(&tags),
+                        text,
+                        tags,
                         session: None,
                         created: r.get(3)?,
-                    })
+                    }))
                 })
-                .map(|rows| rows.flatten().collect::<Vec<_>>())
+                .map(|rows| rows.filter_map(|r| r.ok().flatten()).collect::<Vec<_>>())
                 .unwrap_or_default();
             for (rank, hit) in rows.into_iter().enumerate() {
                 let score = MEMORY_WEIGHT / (RRF_K + (rank + 1) as f64);
@@ -451,20 +527,23 @@ impl Memory {
         ) {
             let rows = stmt
                 .query_map(params![match_expr, fetch as i64], |r| {
+                    let session: String = r.get(0)?;
                     let seq: i64 = r.get(1)?;
                     let user: String = r.get(2)?;
                     let agent: String = r.get(3)?;
-                    let session: String = r.get(0)?;
-                    Ok(Hit {
+                    if matched_terms(&query_terms, &format!("{user} {agent}"), &[]) < required {
+                        return Ok(None);
+                    }
+                    Ok(Some(Hit {
                         kind: HitKind::Transcript,
                         key: format!("{session}#{seq}"),
                         text: format!("user: {user}\nagent: {agent}"),
                         tags: Vec::new(),
                         session: Some(session),
                         created: r.get(4)?,
-                    })
+                    }))
                 })
-                .map(|rows| rows.flatten().collect::<Vec<_>>())
+                .map(|rows| rows.filter_map(|r| r.ok().flatten()).collect::<Vec<_>>())
                 .unwrap_or_default();
             for (rank, hit) in rows.into_iter().enumerate() {
                 let score = TRANSCRIPT_WEIGHT / (RRF_K + (rank + 1) as f64);
@@ -724,25 +803,50 @@ fn load_transcripts(conn: &Connection, processed: bool) -> rusqlite::Result<Vec<
     .map(|rows| rows.flatten().collect())
 }
 
+/// Tokenized, stopword-filtered, deduplicated query terms long enough to be
+/// meaningful, capped at [`MAX_MATCH_TERMS`].
+fn match_terms(query: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut parts = Vec::new();
+    for term in tokenize(query) {
+        if term.chars().count() < MIN_MATCH_TERM_LEN || !seen.insert(term.clone()) {
+            continue;
+        }
+        parts.push(term);
+        if parts.len() >= MAX_MATCH_TERMS {
+            break;
+        }
+    }
+    parts
+}
+
 /// Build a safe FTS5 `MATCH` expression from a user query: tokenized, stopword
 /// filtered, deduplicated, and quoted so operators or stray quotes cannot reach
 /// the FTS parser.
 fn build_match(query: &str) -> Option<String> {
-    let terms = tokenize(query);
+    let terms = match_terms(query);
     if terms.is_empty() {
         return None;
     }
-    let mut seen = HashSet::new();
-    let mut parts = Vec::new();
-    for term in terms {
-        if seen.insert(term.clone()) {
-            parts.push(format!("\"{term}\""));
-            if parts.len() >= MAX_MATCH_TERMS {
-                break;
-            }
-        }
+    Some(
+        terms
+            .iter()
+            .map(|term| format!("\"{term}\""))
+            .collect::<Vec<_>>()
+            .join(" OR "),
+    )
+}
+
+/// How many distinct `query_terms` appear in an entry's text and tags.
+fn matched_terms(query_terms: &[String], text: &str, tags: &[String]) -> usize {
+    let mut entry: HashSet<String> = tokenize(text).into_iter().collect();
+    for tag in tags {
+        entry.extend(tokenize(tag));
     }
-    Some(parts.join(" OR "))
+    query_terms
+        .iter()
+        .filter(|term| entry.contains(*term))
+        .count()
 }
 
 fn jaccard_overlap(a: &[String], b: &[String]) -> f64 {
@@ -1128,10 +1232,100 @@ mod tests {
     fn test_build_match_sanitizes() {
         assert!(build_match("").is_none());
         assert!(build_match("the a of").is_none());
+        assert!(build_match("s").is_none());
         let m = build_match("berlin\" OR NEAR(").unwrap();
         assert!(m.contains("\"berlin\""));
         assert!(!m.contains("NEAR"));
         assert!(!m.contains('('));
+
+        let short = build_match("let's").unwrap();
+        assert!(short.contains("\"let\""));
+        assert!(!short.contains("\"s\""));
+    }
+
+    #[test]
+    fn test_min_matched_terms_gate() {
+        let (dir, mem) = temp_memory("threshold");
+        mem.add("project ai is a rust cli agent".to_string(), vec![], None)
+            .unwrap();
+        assert!(
+            mem.retrieve("let's continue with the project today", 5)
+                .is_empty(),
+            "a single incidental shared term should not inject"
+        );
+        assert_eq!(
+            mem.retrieve("project ai status", 5).len(),
+            1,
+            "two shared terms should still match"
+        );
+        assert_eq!(
+            mem.retrieve("berlin", 5).len(),
+            0,
+            "single-term query with no match stays empty"
+        );
+        cleanup(dir);
+    }
+
+    #[test]
+    fn test_single_term_query_still_matches() {
+        let (dir, mem) = temp_memory("singleterm");
+        mem.add("user lives in berlin".to_string(), vec![], None)
+            .unwrap();
+        assert_eq!(mem.retrieve("berlin", 5).len(), 1);
+        cleanup(dir);
+    }
+
+    #[test]
+    fn test_fragment_short_unchanged() {
+        assert_eq!(
+            fragment("user prefers dark mode", "dark"),
+            "user prefers dark mode"
+        );
+        assert_eq!(fragment("a  b\nc", "b"), "a b c");
+    }
+
+    #[test]
+    fn test_fragment_match_near_start() {
+        let text = format!("needle {}", "x".repeat(200));
+        let f = fragment(&text, "needle");
+        assert!(f.contains("needle"), "{f}");
+        assert!(f.ends_with('…'));
+        assert!(!f.starts_with('…'));
+        assert!(f.chars().count() <= FRAGMENT_CHARS, "{}", f.chars().count());
+    }
+
+    #[test]
+    fn test_fragment_match_in_middle() {
+        let text = format!("{} needle {}", "x".repeat(200), "y".repeat(200));
+        let f = fragment(&text, "needle");
+        assert!(f.contains("needle"), "{f}");
+        assert!(f.starts_with('…'));
+        assert!(f.ends_with('…'));
+        assert!(f.chars().count() <= FRAGMENT_CHARS, "{}", f.chars().count());
+    }
+
+    #[test]
+    fn test_fragment_no_literal_match() {
+        let f = fragment(&"x".repeat(250), "absent");
+        assert!(f.ends_with('…'));
+        assert!(!f.contains("absent"));
+        assert!(f.chars().count() <= FRAGMENT_CHARS);
+    }
+
+    #[test]
+    fn test_fragment_boundary() {
+        let exact = "a".repeat(FRAGMENT_CHARS);
+        assert_eq!(fragment(&exact, "a"), exact);
+        let over = "a".repeat(FRAGMENT_CHARS + 1);
+        assert!(fragment(&over, "a").chars().count() <= FRAGMENT_CHARS);
+    }
+
+    #[test]
+    fn test_fragment_multibyte_safe() {
+        let text = format!("{} needle {}", "😀".repeat(120), "漢".repeat(120));
+        let f = fragment(&text, "needle");
+        assert!(f.contains("needle"), "{f}");
+        assert!(f.chars().count() <= FRAGMENT_CHARS, "{}", f.chars().count());
     }
 
     #[test]

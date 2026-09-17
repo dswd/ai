@@ -57,6 +57,11 @@ ansi_color_constants = "4.0.0"
 obscura = { git = "https://github.com/h4ckf0r0day/obscura", optional = true }
 bashkit = { version = "0.18", features = ["realfs"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+sqlite-vec = "0.1.9"
+fastembed = { version = "4.9", default-features = false, features = [
+    "ort-download-binaries",
+    "hf-hub-rustls-tls",
+] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

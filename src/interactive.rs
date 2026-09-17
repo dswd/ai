@@ -264,18 +264,20 @@ pub(crate) fn augment_prompt(prompt: &str, memory: Option<&memory::Memory>) -> O
         };
         output::stderr_line(&format!(
             "{GREY}🧠 from {label}: {}{RESET}",
-            hit.text.replace('\n', " / ")
+            memory::fragment(&hit.text, prompt)
         ));
     }
     let context = hits
         .iter()
         .map(|h| match h.kind {
-            memory::HitKind::Memory => format!("- ({}) {}", h.key, h.text),
+            memory::HitKind::Memory => {
+                format!("- ({}) {}", h.key, memory::fragment(&h.text, prompt))
+            }
             memory::HitKind::Transcript => format!(
                 "- (transcript {} {}) {}",
                 h.session.as_deref().unwrap_or("?"),
                 h.created.get(..10).unwrap_or(&h.created),
-                h.text.replace('\n', " / ")
+                memory::fragment(&h.text, prompt)
             ),
         })
         .collect::<Vec<_>>()
