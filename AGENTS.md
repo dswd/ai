@@ -33,7 +33,8 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `context.rs` | Deterministic context editing: prune stale tool outputs from the history sent to the model |
 | `skills.rs` | Skill discovery/loading (markdown front-matter files) |
 | `session.rs` | Session persistence (JSON, schema v2: full chat log + provider/model binding); newest-session selection, the 60-minute resume window, and date-aware name lookup (`NAME` matches `YYYY-MM-DD_NAME`) used to continue one-off runs, an unnamed `ai` session, and explicit names; `tuples()` extracts completed user/agent exchanges for the transcript index |
-| `memory.rs` | SQLite store (`memory.db`): FTS5-backed `memory` (facts + tags + provenance) and `transcripts` (derived user+agent tuples) tables, one-time migration from `memory.json`, session backfill, and reciprocal-rank-fusion retrieval with `last_used` tracking |
+| `memory.rs` | SQLite store (`memory.db`): `memory` (facts + tags + provenance) and `transcripts` (derived user+agent tuples) tables, one-time migration from `memory.json`, session backfill, and semantic retrieval over sqlite-vec KNN with `last_used` tracking |
+| `embed.rs` | Local embedding (`fastembed`/ONNX): `Embedder` trait, `FastembedEmbedder` (lazy model load, E5 query/passage prefixes), model-id resolution, and vector serialization |
 | `dream.rs` | `ai dream` maintenance over a parallel work pool: extract memories from unprocessed transcripts, prune processed transcripts, judge stale entries |
 | `tools/` | One file per tool (see below) |
 | `format.rs` | Streaming markdown-to-ANSI console formatting for assistant output |

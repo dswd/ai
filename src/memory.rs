@@ -8,23 +8,16 @@ use std::sync::{Arc, Mutex};
 
 use rand::RngExt;
 
+use crate::embed::{self, Embedder};
 use crate::session::TranscriptTuple;
 
-pub const TOP_K: usize = 5;
+pub const TOP_K: usize = 3;
 const MAX_ENTRIES: usize = 1000;
 const UPSERT_JACCARD: f64 = 0.7;
 const UPSERT_MIN_SHARED: usize = 2;
-const RRF_K: f64 = 60.0;
-const MEMORY_WEIGHT: f64 = 1.0;
-const TRANSCRIPT_WEIGHT: f64 = 0.5;
+/// Transcript hits kept at most when merging with memory hits.
 const TRANSCRIPT_CAP: usize = 3;
-const MAX_MATCH_TERMS: usize = 8;
-/// A hit must share at least this many distinct query terms to be returned;
-/// single-term queries match on that one term. Keeps incidental overlap on a
-/// single common word from being injected.
-const MIN_MATCHED_TERMS: usize = 2;
-/// Query terms shorter than this are ignored when building the FTS match.
-const MIN_MATCH_TERM_LEN: usize = 2;
+/// KNN candidates fetched per source before the distance cutoff and merging.
 const OVERFETCH: usize = 4;
 /// Transcripts are pruned once processed and older than this many days.
 pub const RETENTION_DAYS: i64 = 7;
@@ -60,25 +53,6 @@ CREATE TABLE IF NOT EXISTS memory (
   source_session TEXT
 );
 
-CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-  text, tags, content='memory', content_rowid='rowid'
-);
-
-CREATE TRIGGER IF NOT EXISTS memory_ai AFTER INSERT ON memory BEGIN
-  INSERT INTO memory_fts(rowid, text, tags) VALUES (new.rowid, new.text, new.tags);
-END;
-CREATE TRIGGER IF NOT EXISTS memory_ad AFTER DELETE ON memory BEGIN
-  INSERT INTO memory_fts(memory_fts, rowid, text, tags)
-    VALUES ('delete', old.rowid, old.text, old.tags);
-END;
-CREATE TRIGGER IF NOT EXISTS memory_au AFTER UPDATE ON memory
-WHEN old.text IS NOT new.text OR old.tags IS NOT new.tags
-BEGIN
-  INSERT INTO memory_fts(memory_fts, rowid, text, tags)
-    VALUES ('delete', old.rowid, old.text, old.tags);
-  INSERT INTO memory_fts(rowid, text, tags) VALUES (new.rowid, new.text, new.tags);
-END;
-
 CREATE TABLE IF NOT EXISTS transcripts (
   rowid      INTEGER PRIMARY KEY,
   session    TEXT NOT NULL,
@@ -89,27 +63,6 @@ CREATE TABLE IF NOT EXISTS transcripts (
   processed  INTEGER NOT NULL DEFAULT 0,
   UNIQUE(session, seq)
 );
-
-CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts USING fts5(
-  user_text, agent_text, content='transcripts', content_rowid='rowid'
-);
-
-CREATE TRIGGER IF NOT EXISTS transcripts_ai AFTER INSERT ON transcripts BEGIN
-  INSERT INTO transcripts_fts(rowid, user_text, agent_text)
-    VALUES (new.rowid, new.user_text, new.agent_text);
-END;
-CREATE TRIGGER IF NOT EXISTS transcripts_ad AFTER DELETE ON transcripts BEGIN
-  INSERT INTO transcripts_fts(transcripts_fts, rowid, user_text, agent_text)
-    VALUES ('delete', old.rowid, old.user_text, old.agent_text);
-END;
-CREATE TRIGGER IF NOT EXISTS transcripts_au AFTER UPDATE ON transcripts
-WHEN old.user_text IS NOT new.user_text OR old.agent_text IS NOT new.agent_text
-BEGIN
-  INSERT INTO transcripts_fts(transcripts_fts, rowid, user_text, agent_text)
-    VALUES ('delete', old.rowid, old.user_text, old.agent_text);
-  INSERT INTO transcripts_fts(rowid, user_text, agent_text)
-    VALUES (new.rowid, new.user_text, new.agent_text);
-END;
 "#;
 
 fn tokenize(text: &str) -> Vec<String> {
@@ -231,6 +184,8 @@ pub struct Hit {
     pub tags: Vec<String>,
     pub session: Option<String>,
     pub created: String,
+    /// Cosine similarity to the query (`1 - distance`), 0..=1; higher is better.
+    pub score: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -251,6 +206,7 @@ impl TranscriptRow {
 /// The single SQLite connection, guarded for the few short critical sections.
 struct Store {
     conn: Mutex<Connection>,
+    embedder: Arc<dyn Embedder>,
 }
 
 /// A handle to the shared store carrying the provenance of whatever is writing
@@ -284,6 +240,87 @@ pub fn db_path_for(path: &Path) -> PathBuf {
     }
 }
 
+/// Register sqlite-vec with every connection opened afterwards. Must run before
+/// the first `Connection::open`.
+fn register_sqlite_vec() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| unsafe {
+        use rusqlite::auto_extension::{RawAutoExtension, register_auto_extension};
+        let entry: RawAutoExtension =
+            std::mem::transmute(sqlite_vec::sqlite3_vec_init as *const () as usize);
+        if let Err(e) = register_auto_extension(entry) {
+            log::error!("failed to register sqlite-vec: {e}");
+        }
+    });
+}
+
+/// Drop the FTS5 tables and their triggers left by pre-embedding databases.
+fn migrate_from_fts(conn: &Connection) -> anyhow::Result<()> {
+    conn.execute_batch(
+        "DROP TRIGGER IF EXISTS memory_ai;
+         DROP TRIGGER IF EXISTS memory_ad;
+         DROP TRIGGER IF EXISTS memory_au;
+         DROP TRIGGER IF EXISTS transcripts_ai;
+         DROP TRIGGER IF EXISTS transcripts_ad;
+         DROP TRIGGER IF EXISTS transcripts_au;
+         DROP TABLE IF EXISTS memory_fts;
+         DROP TABLE IF EXISTS transcripts_fts;",
+    )?;
+    Ok(())
+}
+
+fn get_meta(conn: &Connection, key: &str) -> Option<String> {
+    conn.query_row("SELECT value FROM meta WHERE key=?1", params![key], |r| {
+        r.get(0)
+    })
+    .optional()
+    .ok()
+    .flatten()
+}
+
+fn set_meta(conn: &Connection, key: &str, value: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+        params![key, value],
+    )?;
+    Ok(())
+}
+
+/// Create the vector tables at the embedder's dimension, rebuilding them when
+/// the configured model or dimension changed (existing rows are re-embedded
+/// lazily by [`Memory::ensure_vectors`]).
+fn ensure_vec_tables(conn: &Connection, dims: usize, model_id: &str) -> anyhow::Result<()> {
+    let stored_dim = get_meta(conn, "embed_dim").and_then(|v| v.parse::<usize>().ok());
+    let stored_model = get_meta(conn, "embed_model");
+    if stored_dim != Some(dims) || stored_model.as_deref() != Some(model_id) {
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS memory_vec;
+             DROP TABLE IF EXISTS transcript_vec;",
+        )?;
+        log::info!("(re)building memory vector index for model '{model_id}' ({dims}d)");
+    }
+    conn.execute_batch(&format!(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(embedding float[{dims}] distance_metric=cosine);
+         CREATE VIRTUAL TABLE IF NOT EXISTS transcript_vec USING vec0(embedding float[{dims}] distance_metric=cosine);"
+    ))?;
+    set_meta(conn, "embed_dim", &dims.to_string())?;
+    set_meta(conn, "embed_model", model_id)?;
+    Ok(())
+}
+
+/// The text a memory entry is embedded from (tags included so they are searchable).
+fn memory_passage(text: &str, tags: &[String]) -> String {
+    if tags.is_empty() {
+        text.to_string()
+    } else {
+        format!("{text}\n{}", tags.join(", "))
+    }
+}
+
+fn transcript_passage(user: &str, agent: &str) -> String {
+    format!("{user}\n{agent}")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LegacyEntry {
     id: String,
@@ -311,7 +348,8 @@ fn default_origin() -> String {
 }
 
 impl Memory {
-    pub fn open(path: &Path) -> anyhow::Result<Self> {
+    pub fn open(path: &Path, embedder: Arc<dyn Embedder>) -> anyhow::Result<Self> {
+        register_sqlite_vec();
         let db = db_path_for(path);
         if !db.exists() && path.exists() {
             let count = migrate_json(path, &db)?;
@@ -330,9 +368,12 @@ impl Memory {
             .with_context(|| format!("opening memory database: {}", db.display()))?;
         conn.execute_batch(SCHEMA)
             .with_context(|| format!("initializing memory database: {}", db.display()))?;
+        migrate_from_fts(&conn)?;
+        ensure_vec_tables(&conn, embedder.dims(), &embedder.model_id())?;
         Ok(Self {
             store: Arc::new(Store {
                 conn: Mutex::new(conn),
+                embedder,
             }),
             origin: "agent".to_string(),
             source_session: None,
@@ -386,6 +427,7 @@ impl Memory {
                         params![text, tags_json, now_iso(), origin, self.source_session, id],
                     )
                     .map_err(|e| format!("failed to save memory: {e}"))?;
+                    self.reindex_memory(&conn, &id, &text, &tags);
                     return Ok((id, true));
                 }
             }
@@ -413,11 +455,35 @@ impl Memory {
             params![id, text, tags_json, now, origin, self.source_session],
         )
         .map_err(|e| format!("failed to save memory: {e}"))?;
+        self.reindex_memory(&conn, &id, &text, &tags);
         Ok((id, false))
+    }
+
+    /// Best-effort rewrite of a memory entry's vector row.
+    fn reindex_memory(&self, conn: &Connection, id: &str, text: &str, tags: &[String]) {
+        let Ok(rowid) = conn.query_row("SELECT rowid FROM memory WHERE id=?1", params![id], |r| {
+            r.get::<_, i64>(0)
+        }) else {
+            return;
+        };
+        if let Some(vector) = embed_one(&*self.store.embedder, &memory_passage(text, tags))
+            && let Err(e) = upsert_vector(conn, "memory_vec", rowid, &vector)
+        {
+            log::warn!("memory vector write failed: {e}");
+        }
     }
 
     pub fn delete(&self, key: &str) -> Result<String, String> {
         let conn = self.store.conn.lock().unwrap();
+        let rowid: Option<i64> = conn
+            .query_row("SELECT rowid FROM memory WHERE id=?1", params![key], |r| {
+                r.get(0)
+            })
+            .optional()
+            .map_err(|e| format!("failed to delete memory: {e}"))?;
+        if let Some(rowid) = rowid {
+            let _ = conn.execute("DELETE FROM memory_vec WHERE rowid=?1", params![rowid]);
+        }
         let changed = conn
             .execute("DELETE FROM memory WHERE id=?1", params![key])
             .map_err(|e| format!("failed to delete memory: {e}"))?;
@@ -427,7 +493,6 @@ impl Memory {
         Ok(format!("Deleted memory entry '{key}'."))
     }
 
-    #[cfg(test)]
     pub fn get(&self, key: &str) -> Option<MemoryEntry> {
         let conn = self.store.conn.lock().unwrap();
         conn.query_row(
@@ -479,94 +544,110 @@ impl Memory {
         }
     }
 
-    /// Combined memory + transcript retrieval, fused with reciprocal rank fusion.
-    /// Transcript hits are capped so memory keeps the majority of the slots.
+    /// Semantic retrieval over memory and transcripts: KNN by cosine distance
+    /// against the stored vectors, filtered by the embedder's distance cutoff. Memory hits are
+    /// kept ahead of transcript excerpts, which are capped.
     pub fn retrieve(&self, query: &str, top_k: usize) -> Vec<Hit> {
-        let query_terms = match_terms(query);
-        let Some(match_expr) = build_match(query) else {
-            return Vec::new();
+        let vector = match self.store.embedder.embed_query(query) {
+            Ok(vector) if !vector.is_empty() => vector,
+            Ok(_) => return Vec::new(),
+            Err(e) => {
+                log::warn!("memory retrieval unavailable: {e}");
+                return Vec::new();
+            }
         };
-        let required = query_terms.len().min(MIN_MATCHED_TERMS);
+        if let Err(e) = self.ensure_vectors() {
+            log::warn!("memory vector backfill failed: {e}");
+        }
+        let blob = embed::to_blob(&vector);
+        let max_distance = self.store.embedder.max_distance();
+        let k = (top_k.max(1) * OVERFETCH) as i64;
         let conn = self.store.conn.lock().unwrap();
-        let fetch = top_k.max(1) * OVERFETCH;
-        let mut fused: HashMap<String, (Hit, f64)> = HashMap::new();
 
+        let mut memory_hits: Vec<(f32, Hit)> = Vec::new();
         if let Ok(mut stmt) = conn.prepare(
-            "SELECT m.id, m.text, m.tags, m.created, bm25(memory_fts)
-             FROM memory_fts JOIN memory m ON m.rowid = memory_fts.rowid
-             WHERE memory_fts MATCH ?1 ORDER BY bm25(memory_fts) ASC LIMIT ?2",
+            "SELECT m.id, m.text, m.tags, m.created, v.distance
+             FROM memory_vec v JOIN memory m ON m.rowid = v.rowid
+             WHERE v.embedding MATCH ?1 AND k = ?2
+             ORDER BY v.distance",
         ) {
             let rows = stmt
-                .query_map(params![match_expr, fetch as i64], |r| {
-                    let text: String = r.get(1)?;
-                    let tags = parse_tags(&r.get::<_, String>(2)?);
-                    if matched_terms(&query_terms, &text, &tags) < required {
-                        return Ok(None);
-                    }
-                    Ok(Some(Hit {
-                        kind: HitKind::Memory,
-                        key: r.get(0)?,
-                        text,
-                        tags,
-                        session: None,
-                        created: r.get(3)?,
-                    }))
+                .query_map(params![blob, k], |r| {
+                    let tags: String = r.get(2)?;
+                    let distance = r.get::<_, f64>(4)? as f32;
+                    Ok((
+                        distance,
+                        Hit {
+                            kind: HitKind::Memory,
+                            key: r.get(0)?,
+                            text: r.get(1)?,
+                            tags: parse_tags(&tags),
+                            session: None,
+                            created: r.get(3)?,
+                            score: score_for(distance),
+                        },
+                    ))
                 })
-                .map(|rows| rows.filter_map(|r| r.ok().flatten()).collect::<Vec<_>>())
+                .map(|rows| rows.flatten().collect::<Vec<_>>())
                 .unwrap_or_default();
-            for (rank, hit) in rows.into_iter().enumerate() {
-                let score = MEMORY_WEIGHT / (RRF_K + (rank + 1) as f64);
-                fused.insert(format!("m:{}", hit.key), (hit, score));
-            }
+            memory_hits = rows
+                .into_iter()
+                .filter(|(d, _)| *d <= max_distance)
+                .collect();
         }
 
+        let mut transcript_hits: Vec<(f32, Hit)> = Vec::new();
         if let Ok(mut stmt) = conn.prepare(
-            "SELECT t.session, t.seq, t.user_text, t.agent_text, t.created, bm25(transcripts_fts)
-             FROM transcripts_fts JOIN transcripts t ON t.rowid = transcripts_fts.rowid
-             WHERE transcripts_fts MATCH ?1 ORDER BY bm25(transcripts_fts) ASC LIMIT ?2",
+            "SELECT t.session, t.seq, t.user_text, t.agent_text, t.created, v.distance
+             FROM transcript_vec v JOIN transcripts t ON t.rowid = v.rowid
+             WHERE v.embedding MATCH ?1 AND k = ?2
+             ORDER BY v.distance",
         ) {
             let rows = stmt
-                .query_map(params![match_expr, fetch as i64], |r| {
+                .query_map(params![blob, k], |r| {
                     let session: String = r.get(0)?;
                     let seq: i64 = r.get(1)?;
-                    let user: String = r.get(2)?;
-                    let agent: String = r.get(3)?;
-                    if matched_terms(&query_terms, &format!("{user} {agent}"), &[]) < required {
-                        return Ok(None);
-                    }
-                    Ok(Some(Hit {
-                        kind: HitKind::Transcript,
-                        key: format!("{session}#{seq}"),
-                        text: format!("user: {user}\nagent: {agent}"),
-                        tags: Vec::new(),
-                        session: Some(session),
-                        created: r.get(4)?,
-                    }))
+                    let distance = r.get::<_, f64>(5)? as f32;
+                    Ok((
+                        distance,
+                        Hit {
+                            kind: HitKind::Transcript,
+                            key: format!("{session}#{seq}"),
+                            text: format!(
+                                "user: {}\nagent: {}",
+                                r.get::<_, String>(2)?,
+                                r.get::<_, String>(3)?
+                            ),
+                            tags: Vec::new(),
+                            session: Some(session),
+                            created: r.get(4)?,
+                            score: score_for(distance),
+                        },
+                    ))
                 })
-                .map(|rows| rows.filter_map(|r| r.ok().flatten()).collect::<Vec<_>>())
+                .map(|rows| rows.flatten().collect::<Vec<_>>())
                 .unwrap_or_default();
-            for (rank, hit) in rows.into_iter().enumerate() {
-                let score = TRANSCRIPT_WEIGHT / (RRF_K + (rank + 1) as f64);
-                fused.insert(format!("t:{}", hit.key), (hit, score));
-            }
+            transcript_hits = rows
+                .into_iter()
+                .filter(|(d, _)| *d <= max_distance)
+                .collect();
         }
 
-        let mut ranked: Vec<(Hit, f64)> = fused.into_values().collect();
-        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        memory_hits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        transcript_hits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut out: Vec<Hit> = Vec::new();
-        let mut transcripts = 0usize;
-        for (hit, _) in ranked {
-            if hit.kind == HitKind::Transcript {
-                if transcripts >= TRANSCRIPT_CAP {
-                    continue;
-                }
-                transcripts += 1;
-            }
-            out.push(hit);
+        for (_, hit) in memory_hits {
             if out.len() >= top_k {
                 break;
             }
+            out.push(hit);
+        }
+        for (_, hit) in transcript_hits.into_iter().take(TRANSCRIPT_CAP) {
+            if out.len() >= top_k {
+                break;
+            }
+            out.push(hit);
         }
 
         // Retrieval is the usage signal the judge pool depends on.
@@ -582,6 +663,62 @@ impl Memory {
         out
     }
 
+    /// Embed any source rows that lack a vector (fresh database, model change,
+    /// or a write whose embedding failed). Idempotent and cheap when complete.
+    fn ensure_vectors(&self) -> anyhow::Result<()> {
+        let (memories, transcripts) = {
+            let conn = self.store.conn.lock().unwrap();
+            let memories = conn
+                .prepare(
+                    "SELECT rowid, text, tags FROM memory
+                     WHERE rowid NOT IN (SELECT rowid FROM memory_vec)",
+                )?
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        memory_passage(
+                            &r.get::<_, String>(1)?,
+                            &parse_tags(&r.get::<_, String>(2)?),
+                        ),
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let transcripts = conn
+                .prepare(
+                    "SELECT rowid, user_text, agent_text FROM transcripts
+                     WHERE rowid NOT IN (SELECT rowid FROM transcript_vec)",
+                )?
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        transcript_passage(&r.get::<_, String>(1)?, &r.get::<_, String>(2)?),
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            (memories, transcripts)
+        };
+        if memories.is_empty() && transcripts.is_empty() {
+            return Ok(());
+        }
+
+        let write = |table: &str, rows: Vec<(i64, String)>| -> anyhow::Result<()> {
+            if rows.is_empty() {
+                return Ok(());
+            }
+            let passages: Vec<String> = rows.iter().map(|(_, p)| p.clone()).collect();
+            let vectors = self.store.embedder.embed_passages(&passages)?;
+            let conn = self.store.conn.lock().unwrap();
+            for ((rowid, _), vector) in rows.iter().zip(vectors.iter()) {
+                upsert_vector(&conn, table, *rowid, vector)?;
+            }
+            Ok(())
+        };
+        write("memory_vec", memories)?;
+        write("transcript_vec", transcripts)?;
+        log::info!("backfilled memory vectors");
+        Ok(())
+    }
+
     /// Store one session's user+agent tuples. Rewrites rows whose text changed
     /// (resetting `processed`) and drops rows beyond the current log, so a
     /// cleared or compacted session is reflected too.
@@ -590,12 +727,47 @@ impl Memory {
         session: &str,
         tuples: &[TranscriptTuple],
     ) -> anyhow::Result<usize> {
+        let existing: HashMap<i64, (String, String)> = {
+            let conn = self.store.conn.lock().unwrap();
+            conn.prepare("SELECT seq, user_text, agent_text FROM transcripts WHERE session=?1")?
+                .query_map(params![session], |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        (r.get::<_, String>(1)?, r.get::<_, String>(2)?),
+                    ))
+                })?
+                .collect::<rusqlite::Result<HashMap<_, _>>>()?
+        };
+
+        let changed: Vec<&TranscriptTuple> = tuples
+            .iter()
+            .filter(|t| match existing.get(&(t.seq as i64)) {
+                Some((user, agent)) => user != &t.user || agent != &t.agent,
+                None => true,
+            })
+            .collect();
+        let vectors: Vec<Vec<f32>> = if changed.is_empty() {
+            Vec::new()
+        } else {
+            let passages: Vec<String> = changed
+                .iter()
+                .map(|t| transcript_passage(&t.user, &t.agent))
+                .collect();
+            match self.store.embedder.embed_passages(&passages) {
+                Ok(vectors) => vectors,
+                Err(e) => {
+                    log::warn!("transcript vectors skipped: {e}");
+                    Vec::new()
+                }
+            }
+        };
+
         let mut conn = self.store.conn.lock().unwrap();
         let tx = conn.transaction()?;
         let now = now_iso();
-        let mut changed = 0;
+        let mut changed_count = 0;
         for t in tuples {
-            changed += tx.execute(
+            changed_count += tx.execute(
                 "INSERT INTO transcripts (session, seq, user_text, agent_text, created, processed)
                  VALUES (?1, ?2, ?3, ?4, ?5, 0)
                  ON CONFLICT(session, seq) DO UPDATE SET
@@ -607,13 +779,33 @@ impl Memory {
                 params![session, t.seq as i64, t.user, t.agent, now],
             )?;
         }
+
+        let rowids: HashMap<i64, i64> = tx
+            .prepare("SELECT seq, rowid FROM transcripts WHERE session=?1")?
+            .query_map(params![session], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+            })?
+            .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+        for (t, vector) in changed.iter().zip(vectors.iter()) {
+            if let Some(rowid) = rowids.get(&(t.seq as i64)) {
+                upsert_vector(&tx, "transcript_vec", *rowid, vector)?;
+            }
+        }
+
         let max_seq = tuples.last().map(|t| t.seq as i64).unwrap_or(0);
+        let stale: Vec<i64> = tx
+            .prepare("SELECT rowid FROM transcripts WHERE session=?1 AND seq > ?2")?
+            .query_map(params![session, max_seq], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for rowid in stale {
+            let _ = tx.execute("DELETE FROM transcript_vec WHERE rowid=?1", params![rowid]);
+        }
         tx.execute(
             "DELETE FROM transcripts WHERE session=?1 AND seq > ?2",
             params![session, max_seq],
         )?;
         tx.commit()?;
-        Ok(changed)
+        Ok(changed_count)
     }
 
     /// One-time indexing of every existing session file. Guarded by `meta`.
@@ -684,6 +876,11 @@ impl Memory {
 
     pub fn prune_transcripts(&self, days: i64) -> anyhow::Result<usize> {
         let conn = self.store.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM transcript_vec WHERE rowid IN
+               (SELECT rowid FROM transcripts WHERE processed=1 AND created < ?1)",
+            params![iso_days_ago(days)],
+        )?;
         let n = conn.execute(
             "DELETE FROM transcripts WHERE processed=1 AND created < ?1",
             params![iso_days_ago(days)],
@@ -709,27 +906,37 @@ impl Memory {
             .unwrap_or_default()
     }
 
-    /// Similar entries created after `entry`, as supersession evidence.
+    /// Semantically similar entries updated after `entry`, as supersession evidence.
     pub fn similar_newer(&self, entry: &MemoryEntry, limit: usize) -> Vec<MemoryEntry> {
-        let Some(match_expr) = build_match(&entry.text) else {
+        let Ok(mut vectors) = self
+            .store
+            .embedder
+            .embed_passages(&[memory_passage(&entry.text, &entry.tags)])
+        else {
             return Vec::new();
         };
+        let Some(vector) = vectors.pop() else {
+            return Vec::new();
+        };
+        let blob = embed::to_blob(&vector);
         let conn = self.store.conn.lock().unwrap();
         let mut stmt = match conn.prepare(
             "SELECT m.id, m.text, m.tags, m.created, m.updated, m.last_used, m.last_judged, m.origin, m.source_session
-             FROM memory_fts JOIN memory m ON m.rowid = memory_fts.rowid
-             WHERE memory_fts MATCH ?1 AND m.id != ?2 AND m.updated > ?3
-             ORDER BY m.updated DESC LIMIT ?4",
+             FROM memory_vec v JOIN memory m ON m.rowid = v.rowid
+             WHERE v.embedding MATCH ?1 AND k = ?2
+             ORDER BY v.distance",
         ) {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
-        stmt.query_map(
-            params![match_expr, entry.id, entry.updated, limit as i64],
-            map_entry,
-        )
-        .map(|rows| rows.flatten().collect())
-        .unwrap_or_default()
+        stmt.query_map(params![blob, (limit.max(1) * OVERFETCH) as i64], map_entry)
+            .map(|rows| {
+                rows.flatten()
+                    .filter(|e| e.id != entry.id && e.updated > entry.updated)
+                    .take(limit)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn mark_judged(&self, ids: &[String]) -> anyhow::Result<usize> {
@@ -760,6 +967,40 @@ fn placeholders(n: usize, start: usize) -> String {
 
 fn parse_tags(raw: &str) -> Vec<String> {
     serde_json::from_str(raw).unwrap_or_default()
+}
+
+/// Embed one passage, logging (rather than failing) when the model is unavailable.
+fn embed_one(embedder: &dyn Embedder, passage: &str) -> Option<Vec<f32>> {
+    match embedder.embed_passages(&[passage.to_string()]) {
+        Ok(mut vectors) => vectors.pop(),
+        Err(e) => {
+            log::warn!("memory vector skipped: {e}");
+            None
+        }
+    }
+}
+
+/// Similarity shown to users: cosine distance inverted and clamped to 0..=1.
+fn score_for(distance: f32) -> f32 {
+    (1.0 - distance).clamp(0.0, 1.0)
+}
+
+/// Replace a source row's vector. vec0 has no `INSERT OR REPLACE`, so delete first.
+fn upsert_vector(
+    conn: &Connection,
+    table: &str,
+    rowid: i64,
+    vector: &[f32],
+) -> rusqlite::Result<()> {
+    conn.execute(
+        &format!("DELETE FROM {table} WHERE rowid=?1"),
+        params![rowid],
+    )?;
+    conn.execute(
+        &format!("INSERT INTO {table}(rowid, embedding) VALUES (?1, ?2)"),
+        params![rowid, embed::to_blob(vector)],
+    )?;
+    Ok(())
 }
 
 fn map_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryEntry> {
@@ -801,52 +1042,6 @@ fn load_transcripts(conn: &Connection, processed: bool) -> rusqlite::Result<Vec<
         })
     })
     .map(|rows| rows.flatten().collect())
-}
-
-/// Tokenized, stopword-filtered, deduplicated query terms long enough to be
-/// meaningful, capped at [`MAX_MATCH_TERMS`].
-fn match_terms(query: &str) -> Vec<String> {
-    let mut seen = HashSet::new();
-    let mut parts = Vec::new();
-    for term in tokenize(query) {
-        if term.chars().count() < MIN_MATCH_TERM_LEN || !seen.insert(term.clone()) {
-            continue;
-        }
-        parts.push(term);
-        if parts.len() >= MAX_MATCH_TERMS {
-            break;
-        }
-    }
-    parts
-}
-
-/// Build a safe FTS5 `MATCH` expression from a user query: tokenized, stopword
-/// filtered, deduplicated, and quoted so operators or stray quotes cannot reach
-/// the FTS parser.
-fn build_match(query: &str) -> Option<String> {
-    let terms = match_terms(query);
-    if terms.is_empty() {
-        return None;
-    }
-    Some(
-        terms
-            .iter()
-            .map(|term| format!("\"{term}\""))
-            .collect::<Vec<_>>()
-            .join(" OR "),
-    )
-}
-
-/// How many distinct `query_terms` appear in an entry's text and tags.
-fn matched_terms(query_terms: &[String], text: &str, tags: &[String]) -> usize {
-    let mut entry: HashSet<String> = tokenize(text).into_iter().collect();
-    for tag in tags {
-        entry.extend(tokenize(tag));
-    }
-    query_terms
-        .iter()
-        .filter(|term| entry.contains(*term))
-        .count()
 }
 
 fn jaccard_overlap(a: &[String], b: &[String]) -> f64 {
@@ -929,13 +1124,21 @@ fn parse_legacy(content: &str) -> anyhow::Result<Vec<LegacyEntry>> {
 mod tests {
     use super::*;
 
+    fn test_embedder() -> Arc<dyn Embedder> {
+        Arc::new(crate::embed::HashEmbedder::new(256))
+    }
+
     fn temp_memory(name: &str) -> (PathBuf, Memory) {
+        temp_memory_with(name, test_embedder())
+    }
+
+    fn temp_memory_with(name: &str, embedder: Arc<dyn Embedder>) -> (PathBuf, Memory) {
         let dir =
             std::env::temp_dir().join(format!("ai-memory-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("memory.db");
-        (dir, Memory::open(&path).unwrap())
+        (dir, Memory::open(&path, embedder).unwrap())
     }
 
     fn cleanup(dir: PathBuf) {
@@ -1042,6 +1245,13 @@ mod tests {
         assert_eq!(mem.get(&key).unwrap().origin, "user");
         assert!(mem.delete(&key).is_ok());
         assert!(mem.delete(&key).is_err());
+        cleanup(dir);
+    }
+
+    #[test]
+    fn test_get_unknown_key_is_none() {
+        let (dir, mem) = temp_memory("getmissing");
+        assert!(mem.get("nope").is_none());
         cleanup(dir);
     }
 
@@ -1185,7 +1395,7 @@ mod tests {
         s.add_assistant("noted");
         s.save(&sessions).unwrap();
 
-        let mem = Memory::open(&dir.join("memory.db")).unwrap();
+        let mem = Memory::open(&dir.join("memory.db"), test_embedder()).unwrap();
         assert_eq!(mem.backfill_sessions(&sessions).unwrap(), 1);
         assert_eq!(mem.backfill_sessions(&sessions).unwrap(), 0);
         assert_eq!(mem.count_transcripts(), 1);
@@ -1204,7 +1414,7 @@ mod tests {
         )
         .unwrap();
 
-        let mem = Memory::open(&path).unwrap();
+        let mem = Memory::open(&path, test_embedder()).unwrap();
         assert!(path.with_extension("json.bak").exists());
         assert!(!path.exists());
         let all = mem.list();
@@ -1223,45 +1433,24 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("memory.json");
         std::fs::write(&path, r#"{"a1b2": "legacy fact"}"#).unwrap();
-        let mem = Memory::open(&path).unwrap();
+        let mem = Memory::open(&path, test_embedder()).unwrap();
         assert_eq!(mem.list().len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn test_build_match_sanitizes() {
-        assert!(build_match("").is_none());
-        assert!(build_match("the a of").is_none());
-        assert!(build_match("s").is_none());
-        let m = build_match("berlin\" OR NEAR(").unwrap();
-        assert!(m.contains("\"berlin\""));
-        assert!(!m.contains("NEAR"));
-        assert!(!m.contains('('));
-
-        let short = build_match("let's").unwrap();
-        assert!(short.contains("\"let\""));
-        assert!(!short.contains("\"s\""));
-    }
-
-    #[test]
-    fn test_min_matched_terms_gate() {
-        let (dir, mem) = temp_memory("threshold");
-        mem.add("project ai is a rust cli agent".to_string(), vec![], None)
+    fn test_distance_cutoff_excludes_unrelated() {
+        let (dir, mem) = temp_memory_with(
+            "cutoff",
+            Arc::new(crate::embed::HashEmbedder::with_max_distance(256, 0.7)),
+        );
+        mem.add("user lives in berlin".to_string(), vec![], None)
             .unwrap();
+        assert_eq!(mem.retrieve("berlin", 5).len(), 1);
         assert!(
-            mem.retrieve("let's continue with the project today", 5)
+            mem.retrieve("quantum chromodynamics lecture notes", 5)
                 .is_empty(),
-            "a single incidental shared term should not inject"
-        );
-        assert_eq!(
-            mem.retrieve("project ai status", 5).len(),
-            1,
-            "two shared terms should still match"
-        );
-        assert_eq!(
-            mem.retrieve("berlin", 5).len(),
-            0,
-            "single-term query with no match stays empty"
+            "unrelated query should fall outside the distance cutoff"
         );
         cleanup(dir);
     }
@@ -1273,6 +1462,65 @@ mod tests {
             .unwrap();
         assert_eq!(mem.retrieve("berlin", 5).len(), 1);
         cleanup(dir);
+    }
+
+    #[test]
+    fn test_vectors_track_memory_lifecycle() {
+        let (dir, mem) = temp_memory("veclife");
+        let key = mem
+            .add("user lives in berlin".to_string(), vec![], None)
+            .unwrap()
+            .0;
+        assert_eq!(vector_count(&mem, "memory_vec"), 1);
+        mem.delete(&key).unwrap();
+        assert_eq!(vector_count(&mem, "memory_vec"), 0);
+        cleanup(dir);
+    }
+
+    #[test]
+    fn test_ensure_vectors_backfills_missing() {
+        let (dir, mem) = temp_memory("vecbackfill");
+        mem.add("user lives in berlin".to_string(), vec![], None)
+            .unwrap();
+        mem.store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM memory_vec", [])
+            .unwrap();
+        assert_eq!(mem.retrieve("berlin", 5).len(), 1);
+        assert_eq!(vector_count(&mem, "memory_vec"), 1);
+        cleanup(dir);
+    }
+
+    #[test]
+    fn test_embedding_model_change_rebuilds_vectors() {
+        let dir =
+            std::env::temp_dir().join(format!("ai-memory-test-vecmodel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("memory.db");
+        let mem = Memory::open(&path, Arc::new(crate::embed::HashEmbedder::new(256))).unwrap();
+        mem.add("user lives in berlin".to_string(), vec![], None)
+            .unwrap();
+        drop(mem);
+
+        let mem = Memory::open(&path, Arc::new(crate::embed::HashEmbedder::new(16))).unwrap();
+        assert_eq!(
+            get_meta(&mem.store.conn.lock().unwrap(), "embed_dim").as_deref(),
+            Some("16")
+        );
+        assert_eq!(mem.retrieve("berlin", 5).len(), 1);
+        cleanup(dir);
+    }
+
+    fn vector_count(mem: &Memory, table: &str) -> i64 {
+        mem.store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
     }
 
     #[test]
@@ -1354,7 +1602,7 @@ mod tests {
             .unwrap()
             .0;
         drop(mem);
-        let reloaded = Memory::open(&dir.join("memory.db")).unwrap();
+        let reloaded = Memory::open(&dir.join("memory.db"), test_embedder()).unwrap();
         let hits = reloaded.retrieve("kw", 5);
         assert_eq!(hits[0].key, key);
         cleanup(dir);

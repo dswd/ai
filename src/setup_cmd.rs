@@ -764,6 +764,11 @@ const GUIDE: &str = "\
 - `session_dir`: directory for saved sessions. Default: the platform data dir under `ai/sessions`.
 - `skills_dir`: directory scanned for skills (`SKILL.md` files). Default: platform data dir under `ai/skills`.
 - `memory`: path to the persistent memory SQLite database (memory is enabled by default; `--no-memory` disables it).
+- `embedding_model`: local model used to embed memories for semantic search (default
+  `multilingual-e5-small`; options include `multilingual-e5-base`, `multilingual-e5-large`,
+  `paraphrase-multilingual-minilm-l12-v2`, `bge-small-en-v1.5`).
+- `memory_max_distance`: cosine distance above which a memory hit is dropped (default `0.175`
+  for E5 models, `0.45` otherwise). Lower is stricter; raise it if relevant memories are missed.
 - `policy`: path to a policy file with allow/deny rules (one rule per line,
   `allow read PATH`, `deny write PATH`, etc.).
 - `proxy`: proxy URL for web requests, e.g. `http://127.0.0.1:8080` or

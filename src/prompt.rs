@@ -27,7 +27,11 @@ pub(crate) fn open_memory(
     let Some(path) = memory_path(cli, config) else {
         return Ok(None);
     };
-    let memory = memory::Memory::open(&path)?;
+    let embedder = Arc::new(crate::embed::FastembedEmbedder::new(
+        &config.embedding_model_resolved(),
+        config.memory_max_distance,
+    ));
+    let memory = memory::Memory::open(&path, embedder)?;
     if let Err(e) = memory.backfill_sessions(&config.session_dir_resolved()) {
         log::warn!("transcript backfill failed: {e}");
     }

@@ -56,15 +56,17 @@ impl PortableTool for MemorySearchTool {
             .iter()
             .map(|h| match h.kind {
                 HitKind::Memory => format!(
-                    "({}) {}",
+                    "({}) {} (score {:.2})",
                     h.key,
-                    crate::memory::fragment(&h.text, &args.query)
+                    crate::memory::fragment(&h.text, &args.query),
+                    h.score
                 ),
                 HitKind::Transcript => {
                     let session = h.session.as_deref().unwrap_or("?");
                     format!(
-                        "(transcript {session}) {}",
-                        crate::memory::fragment(&h.text, &args.query)
+                        "(transcript {session}) {} (score {:.2})",
+                        crate::memory::fragment(&h.text, &args.query),
+                        h.score
                     )
                 }
             })

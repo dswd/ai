@@ -7,7 +7,7 @@ use rig::completion::{Chat, CompletionModel, Message};
 use rig::tool::server::ToolServer;
 
 use crate::memory::{self, Memory, MemoryEntry, TranscriptRow};
-use crate::tools::{MemoryAddTool, MemoryDeleteTool, MemorySearchTool};
+use crate::tools::{MemoryAddTool, MemoryDeleteTool, MemoryGetTool, MemorySearchTool};
 
 const PREAMBLE: &str = "You are a maintenance agent for a personal AI assistant's long-term memory. \
      Follow the instructions exactly and use the provided memory tools.";
@@ -183,7 +183,8 @@ fn build_agent<M: CompletionModel + Clone + 'static>(
 ) -> rig::agent::Agent {
     let mut server = ToolServer::new()
         .tool(MemoryAddTool::new(memory.clone()))
-        .tool(MemorySearchTool::new(memory.clone()));
+        .tool(MemorySearchTool::new(memory.clone()))
+        .tool(MemoryGetTool::new(memory.clone()));
     if let Some(allowed) = allowed {
         server = server.tool(MemoryDeleteTool::scoped(memory, allowed));
     }

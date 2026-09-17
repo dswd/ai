@@ -185,6 +185,10 @@ pub struct Config {
     pub memory: Option<PathBuf>,
     /// Number of parallel requests used by `ai dream` (default 4).
     pub dream_jobs: Option<usize>,
+    /// Local embedding model used for semantic memory (default multilingual-e5-small).
+    pub embedding_model: Option<String>,
+    /// Cosine distance above which a memory hit is dropped (default 0.20 for E5 models).
+    pub memory_max_distance: Option<f32>,
     /// Context window in tokens, used for the interactive usage indicator.
     pub context_window: Option<usize>,
     /// Optional proxy for web requests (HTTP, HTTPS, or SOCKS5 URL).
@@ -214,6 +218,8 @@ impl Default for Config {
             policy: None,
             memory: None,
             dream_jobs: None,
+            embedding_model: None,
+            memory_max_distance: None,
             context_window: None,
             proxy: None,
             flavor: None,
@@ -345,6 +351,13 @@ impl Config {
                     .join("ai")
                     .join("memory.db")
             })
+    }
+
+    /// The embedding model id used for semantic memory.
+    pub fn embedding_model_resolved(&self) -> String {
+        self.embedding_model
+            .clone()
+            .unwrap_or_else(|| crate::embed::DEFAULT_MODEL.to_string())
     }
 
     pub fn skills_dir_resolved(&self) -> PathBuf {

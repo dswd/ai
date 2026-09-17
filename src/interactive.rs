@@ -263,7 +263,8 @@ pub(crate) fn augment_prompt(prompt: &str, memory: Option<&memory::Memory>) -> O
             }
         };
         output::stderr_line(&format!(
-            "{GREY}🧠 from {label}: {}{RESET}",
+            "{GREY}🧠 from {label} (score {:.2}): {}{RESET}",
+            hit.score,
             memory::fragment(&hit.text, prompt)
         ));
     }

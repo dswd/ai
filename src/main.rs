@@ -7,6 +7,7 @@ mod config;
 mod container;
 mod context;
 mod dream;
+mod embed;
 mod format;
 mod interactive;
 mod io;

@@ -206,6 +206,7 @@ fn build_agent<M: CompletionModel + 'static>(
             server = server
                 .tool(tools::MemoryAddTool::new(handle.clone()))
                 .tool(tools::MemorySearchTool::new(handle.clone()))
+                .tool(tools::MemoryGetTool::new(handle.clone()))
                 .tool(tools::MemoryDeleteTool::new(handle));
         }
 

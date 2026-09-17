@@ -81,6 +81,7 @@ fn format_memory_hit(h: &Hit, query: &str, color: bool) -> String {
         ),
     };
     meta.push(paint(color, GREY, &format!("created {}", day(&h.created))));
+    meta.push(paint(color, GREY, &format!("score {:.2}", h.score)));
 
     let text = memory::fragment(&h.text, query);
     format!(
@@ -376,10 +377,11 @@ mod tests {
             tags: vec!["lang".to_string()],
             session: None,
             created: "2026-09-16T10:00:00Z".to_string(),
+            score: 0.85,
         };
         assert_eq!(
             format_memory_hit(&memory, "rust", false),
-            "memory  likes rust\n  id m1 · tags: lang · created 2026-09-16"
+            "memory  likes rust\n  id m1 · tags: lang · created 2026-09-16 · score 0.85"
         );
 
         let transcript = Hit {
@@ -389,10 +391,11 @@ mod tests {
             tags: Vec::new(),
             session: Some("2026-09-16_x".to_string()),
             created: "2026-09-17T08:00:00Z".to_string(),
+            score: 0.62,
         };
         assert_eq!(
             format_memory_hit(&transcript, "hi", false),
-            "transcript  user: hi agent: yo\n  session 2026-09-16_x · created 2026-09-17"
+            "transcript  user: hi agent: yo\n  session 2026-09-16_x · created 2026-09-17 · score 0.62"
         );
     }
 
@@ -405,6 +408,7 @@ mod tests {
             tags: Vec::new(),
             session: None,
             created: "2026-09-16T10:00:00Z".to_string(),
+            score: 0.5,
         };
         let out = format_memory_hit(&hit, "needle", false);
         let text_line = out.lines().next().unwrap();
