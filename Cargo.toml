@@ -56,6 +56,7 @@ html2md = "0.2"
 ansi_color_constants = "4.0.0"
 obscura = { git = "https://github.com/h4ckf0r0day/obscura", optional = true }
 bashkit = { version = "0.18", features = ["realfs"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

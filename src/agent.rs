@@ -202,10 +202,11 @@ fn build_agent<M: CompletionModel + 'static>(
         }
 
         if let Some(ref mem) = ctx.memory {
+            let handle = (**mem).clone();
             server = server
-                .tool(tools::MemoryAddTool::new(Arc::clone(mem)))
-                .tool(tools::MemorySearchTool::new(Arc::clone(mem)))
-                .tool(tools::MemoryDeleteTool::new(Arc::clone(mem)));
+                .tool(tools::MemoryAddTool::new(handle.clone()))
+                .tool(tools::MemorySearchTool::new(handle.clone()))
+                .tool(tools::MemoryDeleteTool::new(handle));
         }
 
         if !ctx.skills.is_empty() {
@@ -326,6 +327,11 @@ async fn run_oneshot(
     let usage = response.usage;
     crate::interactive::record_turn(session, &mut chat_history, response);
     session.save(session_dir)?;
+    if let Some(mem) = memory
+        && let Err(e) = mem.index_session(&session.name, &session.tuples())
+    {
+        log::warn!("failed to index session transcripts: {e}");
+    }
     crate::interactive::print_usage(&usage, start.elapsed());
     Ok(())
 }

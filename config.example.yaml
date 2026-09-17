@@ -44,8 +44,11 @@ system_prompt: "You are a concise, helpful CLI assistant."
 # Policy file with allow/deny rules (default: no rules — deny everything).
 # policy: "~/.config/ai/policy.txt"
 
-# Persistent memory file (enabled with `ai -m`).
-# memory: "~/.local/share/ai/memory.json"
+# Persistent memory database (enabled by default; `--no-memory` disables it,
+# `-m=FILE` uses a different file).
+# memory: "~/.local/share/ai/memory.db"
+# Parallel requests used by `ai --dream` (default 4).
+# dream_jobs: 4
 
 # Optional proxy for web tools (HTTP, HTTPS, or SOCKS5).
 # Falls back to HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY environment variables.

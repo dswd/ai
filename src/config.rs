@@ -181,8 +181,10 @@ pub struct Config {
     pub skills_dir: Option<PathBuf>,
     /// Path to the policy file (allow/deny rules).
     pub policy: Option<PathBuf>,
-    /// Path to the persistent memory JSON file.
+    /// Path to the persistent memory SQLite database.
     pub memory: Option<PathBuf>,
+    /// Number of parallel requests used by `--dream` (default 4).
+    pub dream_jobs: Option<usize>,
     /// Context window in tokens, used for the interactive usage indicator.
     pub context_window: Option<usize>,
     /// Optional proxy for web requests (HTTP, HTTPS, or SOCKS5 URL).
@@ -211,6 +213,7 @@ impl Default for Config {
             skills_dir: None,
             policy: None,
             memory: None,
+            dream_jobs: None,
             context_window: None,
             proxy: None,
             flavor: None,
@@ -340,7 +343,7 @@ impl Config {
                 dirs::data_local_dir()
                     .unwrap_or_else(|| PathBuf::from("."))
                     .join("ai")
-                    .join("memory.json")
+                    .join("memory.db")
             })
     }
 
@@ -553,7 +556,7 @@ mod tests {
             .join("ai");
         assert_eq!(c.session_dir_resolved(), base.join("sessions"));
         assert_eq!(c.skills_dir_resolved(), base.join("skills"));
-        assert_eq!(c.memory_path_resolved(), base.join("memory.json"));
+        assert_eq!(c.memory_path_resolved(), base.join("memory.db"));
     }
 
     #[test]

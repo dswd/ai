@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use ansi_color_constants::*;
@@ -17,12 +18,25 @@ pub struct MemoryDeleteArgs {
 
 #[derive(Debug, Clone)]
 pub struct MemoryDeleteTool {
-    memory: Arc<Memory>,
+    memory: Memory,
+    /// When set, only these keys may be deleted. Used by the dreaming judge so a
+    /// confused or manipulated model cannot delete entries outside its batch.
+    allowed: Option<Arc<HashSet<String>>>,
 }
 
 impl MemoryDeleteTool {
-    pub fn new(memory: Arc<Memory>) -> Self {
-        Self { memory }
+    pub fn new(memory: Memory) -> Self {
+        Self {
+            memory,
+            allowed: None,
+        }
+    }
+
+    pub fn scoped(memory: Memory, allowed: Arc<HashSet<String>>) -> Self {
+        Self {
+            memory,
+            allowed: Some(allowed),
+        }
     }
 }
 
@@ -43,6 +57,14 @@ impl PortableTool for MemoryDeleteTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!("{DIM}🗑️ memory delete {}{RESET}", args.key);
+        if let Some(allowed) = &self.allowed
+            && !allowed.contains(&args.key)
+        {
+            return Err(ToolError::Message(format!(
+                "Key '{}' is not one of the entries under review.",
+                args.key
+            )));
+        }
         match self.memory.delete(&args.key) {
             Ok(msg) => {
                 info!("{DIM}  \u{2192} {msg}{RESET}");

@@ -763,7 +763,7 @@ const GUIDE: &str = "\
   sessions. Normally derived from the model; only override for unusual setups.
 - `session_dir`: directory for saved sessions. Default: the platform data dir under `ai/sessions`.
 - `skills_dir`: directory scanned for skills (`SKILL.md` files). Default: platform data dir under `ai/skills`.
-- `memory`: path to the persistent memory JSON file. Enables the memory tools.
+- `memory`: path to the persistent memory SQLite database (memory is enabled by default; `--no-memory` disables it).
 - `policy`: path to a policy file with allow/deny rules (one rule per line,
   `allow read PATH`, `deny write PATH`, etc.).
 - `proxy`: proxy URL for web requests, e.g. `http://127.0.0.1:8080` or

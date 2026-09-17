@@ -8,6 +8,34 @@ use std::sync::Arc;
 pub(crate) const DEFAULT_SYSTEM_PROMPT: &str = "You are a CLI assistant. Keep responses concise. \
      For multi-step tasks, work methodically and report progress.";
 
+/// The resolved memory database path. Memory is enabled by default; `--no-memory`
+/// turns it off and `-m=FILE` points at a different database.
+pub(crate) fn memory_path(cli: &Cli, config: &Config) -> Option<std::path::PathBuf> {
+    if cli.no_memory {
+        return None;
+    }
+    match cli.memory.as_deref() {
+        Some(value) if !value.is_empty() => Some(crate::util::expand_tilde(value)),
+        _ => Some(config.memory_path_resolved()),
+    }
+}
+
+/// Open the memory database, running the one-time session backfill. `None` when
+/// memory is disabled with `--no-memory`.
+pub(crate) fn open_memory(
+    cli: &Cli,
+    config: &Config,
+) -> anyhow::Result<Option<Arc<memory::Memory>>> {
+    let Some(path) = memory_path(cli, config) else {
+        return Ok(None);
+    };
+    let memory = memory::Memory::open(&path)?;
+    if let Err(e) = memory.backfill_sessions(&config.session_dir_resolved()) {
+        log::warn!("transcript backfill failed: {e}");
+    }
+    Ok(Some(Arc::new(memory)))
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Permissions {
     pub(crate) read: bool,
@@ -76,13 +104,7 @@ pub(crate) fn assemble_system_prompt(
         .or_else(|| config.system_prompt.clone())
         .unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string());
 
-    let memory = if let Some(memory_path) = &cli.memory {
-        let path = if memory_path.is_empty() {
-            config.memory_path_resolved()
-        } else {
-            crate::util::expand_tilde(memory_path)
-        };
-        let mem = Arc::new(memory::Memory::load(&path)?);
+    let memory = if let Some(mem) = open_memory(cli, config)? {
         let md = mem.summary();
         system_prompt = format!("{system_prompt}\n\n{md}");
         Some(mem)
@@ -184,7 +206,7 @@ mod tests {
     fn test_exit_guidance_only_interactive() {
         use clap::Parser;
 
-        let interactive = Cli::parse_from(["ai", "-s"]);
+        let interactive = Cli::parse_from(["ai", "-s", "--no-memory"]);
         let (prompt, _) = assemble_system_prompt(
             &interactive,
             &Config::default(),
@@ -195,10 +217,31 @@ mod tests {
         .unwrap();
         assert!(prompt.contains("exit_program"));
 
-        let oneshot = Cli::parse_from(["ai", "hi"]);
+        let oneshot = Cli::parse_from(["ai", "hi", "--no-memory"]);
         let (prompt, _) =
             assemble_system_prompt(&oneshot, &Config::default(), &Policy::default(), &[], false)
                 .unwrap();
         assert!(!prompt.contains("exit_program"));
+    }
+
+    #[test]
+    fn test_memory_default_on_and_relocatable() {
+        use clap::Parser;
+
+        let config = Config::default();
+        let plain = Cli::parse_from(["ai", "-s"]);
+        assert_eq!(
+            memory_path(&plain, &config),
+            Some(config.memory_path_resolved())
+        );
+
+        let relocated = Cli::parse_from(["ai", "-s", "-m=/tmp/x.db"]);
+        assert_eq!(
+            memory_path(&relocated, &config),
+            Some(std::path::PathBuf::from("/tmp/x.db"))
+        );
+
+        let off = Cli::parse_from(["ai", "-s", "--no-memory"]);
+        assert_eq!(memory_path(&off, &config), None);
     }
 }

@@ -27,7 +27,7 @@ pub(crate) fn color_disabled() -> bool {
     NO_COLOR.load(Ordering::SeqCst) || std::env::var_os("NO_COLOR").is_some()
 }
 
-fn tty_enabled() -> bool {
+pub(crate) fn tty_enabled() -> bool {
     if color_disabled() {
         return false;
     }

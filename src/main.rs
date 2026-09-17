@@ -6,6 +6,7 @@ mod commands;
 mod config;
 mod container;
 mod context;
+mod dream;
 mod format;
 mod interactive;
 mod io;
@@ -80,6 +81,49 @@ fn main() -> anyhow::Result<()> {
 
     let policy = load_policy(&cli, &config)?;
 
+    if cli.memory_list || cli.memory_search.is_some() {
+        let Some(mem) = prompt::open_memory(&cli, &config)? else {
+            anyhow::bail!("memory is disabled by --no-memory");
+        };
+        return match &cli.memory_search {
+            Some(query) => commands::cmd_memory_search(&mem, query),
+            None => commands::cmd_memory_list(&mem),
+        };
+    }
+
+    if cli.dream {
+        let Some(mem) = prompt::open_memory(&cli, &config)? else {
+            anyhow::bail!("memory is disabled by --no-memory");
+        };
+        let resolved = resolve_provider(&config)?;
+        let jobs = cli.dream_jobs.or(config.dream_jobs).unwrap_or(4).max(1);
+        let max_turns = cli.max_turns;
+        let model_name = config.model.clone();
+        return tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?
+            .block_on(async {
+                match resolved.flavor {
+                    providers::Flavor::OpenAi => {
+                        let model =
+                            openai_client(&config, &resolved.base_url, "dream", resolved.env_var)?
+                                .completion_model(&model_name);
+                        dream::run(model, mem, jobs, max_turns).await
+                    }
+                    providers::Flavor::Anthropic => {
+                        let model = anthropic_client(
+                            &config,
+                            &resolved.base_url,
+                            "dream",
+                            resolved.env_var,
+                        )?
+                        .completion_model(&model_name);
+                        dream::run(model, mem, jobs, max_turns).await
+                    }
+                }
+            });
+    }
+
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
@@ -119,9 +163,7 @@ async fn run(cli: Cli, config: Config, session_dir: PathBuf, policy: Policy) -> 
         &resolved.name,
         auto_session,
     )?;
-    if let Some(ref mem) = memory {
-        mem.set_session_name(&session.name);
-    }
+    let memory = memory.map(|mem| Arc::new(mem.fork(Some(&session.name), "agent")));
     let thinking = resolve_thinking(cli.thinking.or(config.thinking), &resolved);
 
     let tool_sets = if !cli.tool.is_empty() {

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use ansi_color_constants::*;
 use log::info;
 use rig::tool::PortableTool;
@@ -13,20 +11,21 @@ use crate::memory::Memory;
 pub struct MemoryAddArgs {
     #[schemars(description = "The data to store in memory")]
     pub data: String,
-    #[schemars(
-        description = "Optional keywords to improve retrieval (e.g. topics, entities, names)"
-    )]
+    #[schemars(description = "Optional tags to improve retrieval (e.g. topics, entities, names)")]
     #[serde(default)]
-    pub keywords: Vec<String>,
+    pub tags: Vec<String>,
+    #[schemars(description = "Who stated the fact: \"user\" or \"agent\" (default: agent)")]
+    #[serde(default)]
+    pub origin: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct MemoryAddTool {
-    memory: Arc<Memory>,
+    memory: Memory,
 }
 
 impl MemoryAddTool {
-    pub fn new(memory: Arc<Memory>) -> Self {
+    pub fn new(memory: Memory) -> Self {
         Self { memory }
     }
 }
@@ -39,7 +38,10 @@ impl PortableTool for MemoryAddTool {
     type Error = ToolError;
 
     fn description(&self) -> String {
-        "Store a piece of data in persistent memory. Optionally provide keywords to improve retrieval later. Returns a unique key that can be used to reference or delete the entry later.".to_string()
+        "Store a piece of data in persistent memory. Optionally provide tags to improve retrieval \
+         and an origin (\"user\" or \"agent\") recording who stated the fact. Returns a unique key \
+         that can be used to reference or delete the entry later."
+            .to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -48,10 +50,18 @@ impl PortableTool for MemoryAddTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         info!("{DIM}🧠 memory add '{}'{RESET}", args.data);
-        match self.memory.add(args.data, args.keywords) {
-            Ok(key) => {
+        let origin = args
+            .origin
+            .as_deref()
+            .filter(|o| *o == "user" || *o == "agent");
+        match self.memory.add(args.data, args.tags, origin) {
+            Ok((key, updated)) => {
                 info!("{DIM}  \u{2192} stored as {key}{RESET}");
-                Ok(format!("Stored as {key}"))
+                Ok(if updated {
+                    format!("Updated existing entry {key}")
+                } else {
+                    format!("Stored as {key}")
+                })
             }
             Err(e) => {
                 info!("{DIM}  \u{2192} error: {e}{RESET}");

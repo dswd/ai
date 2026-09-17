@@ -34,8 +34,17 @@ struct LegacySession {
     pub system_prompt: String,
     pub model: String,
     pub messages: Vec<LegacyMessage>,
-    #[serde(default)]
-    pub reconciled_until: usize,
+}
+
+/// One completed user/agent exchange, as indexed for transcript search and
+/// dreaming. Tool calls and tool results are not represented; they stay in the
+/// session's full log for resume.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranscriptTuple {
+    /// Ordinal of the user turn within the session (1-based).
+    pub seq: usize,
+    pub user: String,
+    pub agent: String,
 }
 
 /// A saved session. `log` is the complete, provider-agnostic chat message list
@@ -58,8 +67,6 @@ pub struct Session {
     pub log: Vec<ChatMessage>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub messages: Vec<LegacyMessage>,
-    #[serde(default)]
-    pub reconciled_until: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forked_from: Option<String>,
     /// True when loaded from a v1 file whose tool history is unavailable.
@@ -68,23 +75,6 @@ pub struct Session {
 }
 
 pub const SESSION_VERSION: u32 = 2;
-
-/// Extract user-authored text from a message. Returns `None` for tool-result
-/// messages (which are also `Message::User`) and non-text content.
-pub fn user_text(msg: &ChatMessage) -> Option<String> {
-    if let ChatMessage::User { content } = msg {
-        let mut text = String::new();
-        for item in content.iter() {
-            if let UserContent::Text(t) = item {
-                text.push_str(&t.text);
-            }
-        }
-        if !text.is_empty() {
-            return Some(text);
-        }
-    }
-    None
-}
 
 /// A session name must be a single path component so it cannot escape the
 /// session directory (`-s=../../x`, `--delete=../foo`).
@@ -105,7 +95,6 @@ impl Session {
             version: SESSION_VERSION,
             log: Vec::new(),
             messages: Vec::new(),
-            reconciled_until: 0,
             forked_from: None,
             partial: false,
         }
@@ -169,6 +158,51 @@ impl Session {
             .collect()
     }
 
+    /// Completed user/agent exchanges in order. Each tuple is a user turn plus
+    /// the text the agent produced for it; intermediate tool traffic is dropped.
+    /// A trailing user turn without an agent reply yet is not emitted.
+    pub fn tuples(&self) -> Vec<TranscriptTuple> {
+        let mut tuples = Vec::new();
+        let mut ordinal = 0usize;
+        let mut pending: Option<(usize, String)> = None;
+        let mut agent = String::new();
+        let flush = |pending: &mut Option<(usize, String)>,
+                     agent: &mut String,
+                     tuples: &mut Vec<TranscriptTuple>| {
+            if let Some((seq, user)) = pending.take() {
+                let agent = agent.trim();
+                if !agent.is_empty() {
+                    tuples.push(TranscriptTuple {
+                        seq,
+                        user,
+                        agent: agent.to_string(),
+                    });
+                }
+            }
+            agent.clear();
+        };
+        for (role, text) in self.transcript() {
+            match role {
+                Role::User => {
+                    flush(&mut pending, &mut agent, &mut tuples);
+                    ordinal += 1;
+                    pending = Some((ordinal, text));
+                }
+                Role::Assistant => {
+                    if pending.is_some() {
+                        if !agent.is_empty() {
+                            agent.push('\n');
+                        }
+                        agent.push_str(&text);
+                    }
+                }
+                Role::System => {}
+            }
+        }
+        flush(&mut pending, &mut agent, &mut tuples);
+        tuples
+    }
+
     pub fn save(&self, dir: &Path) -> anyhow::Result<()> {
         if !is_safe_name(&self.name) {
             anyhow::bail!("invalid session name: {:?}", self.name);
@@ -222,7 +256,6 @@ impl Session {
                 version: SESSION_VERSION,
                 log,
                 messages: Vec::new(),
-                reconciled_until: legacy.reconciled_until,
                 forked_from: None,
                 partial: true,
             })
@@ -559,5 +592,30 @@ mod tests {
         assert_eq!(find_named(&dir, "foo").as_deref(), Some("2026-01-01_foo"));
         assert_eq!(find_named(&dir, "nope"), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_tuples_pair_exchanges() {
+        let mut s = Session::new("t".into(), "sys".into(), "m".into(), "openai".into());
+        s.add_user("first");
+        s.add_assistant("answer one");
+        s.add_user("second");
+        s.add_assistant("answer two");
+        let tuples = s.tuples();
+        assert_eq!(tuples.len(), 2);
+        assert_eq!(tuples[0].seq, 1);
+        assert_eq!(tuples[0].user, "first");
+        assert_eq!(tuples[0].agent, "answer one");
+        assert_eq!(tuples[1].seq, 2);
+    }
+
+    #[test]
+    fn test_tuples_skip_unreplied_turn() {
+        let mut s = Session::new("t".into(), "sys".into(), "m".into(), "openai".into());
+        s.add_user("answered");
+        s.add_assistant("reply");
+        s.add_user("still waiting");
+        let tuples = s.tuples();
+        assert_eq!(tuples.len(), 1, "unreplied trailing turn is not emitted");
     }
 }

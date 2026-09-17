@@ -32,8 +32,9 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `container.rs` | Session-scoped container for external commands (Docker/Podman): policy→bind mounts, network none unless web |
 | `context.rs` | Deterministic context editing: prune stale tool outputs from the history sent to the model |
 | `skills.rs` | Skill discovery/loading (markdown front-matter files) |
-| `session.rs` | Session persistence (JSON, schema v2: full chat log + provider/model binding); newest-session selection, the 60-minute resume window, and date-aware name lookup (`NAME` matches `YYYY-MM-DD_NAME`) used to continue one-off runs, `-s` with no name, and explicit names |
-| `memory.rs` | Persistent agent memory |
+| `session.rs` | Session persistence (JSON, schema v2: full chat log + provider/model binding); newest-session selection, the 60-minute resume window, and date-aware name lookup (`NAME` matches `YYYY-MM-DD_NAME`) used to continue one-off runs, `-s` with no name, and explicit names; `tuples()` extracts completed user/agent exchanges for the transcript index |
+| `memory.rs` | SQLite store (`memory.db`): FTS5-backed `memory` (facts + tags + provenance) and `transcripts` (derived user+agent tuples) tables, one-time migration from `memory.json`, session backfill, and reciprocal-rank-fusion retrieval with `last_used` tracking |
+| `dream.rs` | `--dream` maintenance over a parallel work pool: extract memories from unprocessed transcripts, prune processed transcripts, judge stale entries |
 | `tools/` | One file per tool (see below) |
 | `format.rs` | Streaming markdown-to-ANSI console formatting for assistant output |
 | `output.rs` | stdout/stderr stream routing (TTY-aware, `NO_COLOR`-aware) |
@@ -48,7 +49,7 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `commands.rs` | Non-agent subcommands: `--probe-web`, `--list`, `--delete` sessions |
 | `tool.rs` | MCP tool-server connection (`--tool`) |
 | `logging.rs` | Console logger, log-level setup |
-| `interactive.rs` | Interactive session loop, `/` commands, memory reconciliation, usage reporting |
+| `interactive.rs` | Interactive session loop, `/` commands, transcript indexing on save, usage reporting |
 
 ## Tool architecture
 

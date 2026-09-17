@@ -47,13 +47,51 @@ pub struct Cli {
     #[arg(
         short = 'm',
         long = "memory",
-        help = "Enable persistent memory with optional FILE",
+        help = "Use a different persistent memory database FILE (memory is enabled by default)",
         num_args = 0..=1,
         value_name = "FILE",
         default_missing_value = "",
         require_equals = true,
     )]
     pub memory: Option<String>,
+
+    #[arg(
+        long = "no-memory",
+        help = "Disable persistent memory for this run",
+        conflicts_with = "memory"
+    )]
+    pub no_memory: bool,
+
+    #[arg(
+        long = "memory-list",
+        help = "List all persistent memory entries and exit",
+        conflicts_with_all = ["setup", "list", "delete", "session", "dream", "no_memory"]
+    )]
+    pub memory_list: bool,
+
+    #[arg(
+        long = "memory-search",
+        help = "Search memory and past conversation transcripts, then exit",
+        value_name = "QUERY",
+        require_equals = true,
+        conflicts_with_all = ["setup", "list", "delete", "session", "dream", "no_memory"]
+    )]
+    pub memory_search: Option<String>,
+
+    #[arg(
+        long = "dream",
+        help = "Run memory maintenance: distill transcripts into memories, prune processed transcripts, judge stale entries",
+        conflicts_with_all = ["setup", "list", "delete", "session", "no_memory"]
+    )]
+    pub dream: bool,
+
+    #[arg(
+        long = "dream-jobs",
+        help = "Number of parallel dream requests (default 4)",
+        value_name = "N",
+        require_equals = true
+    )]
+    pub dream_jobs: Option<usize>,
 
     #[arg(
         short = 'c',
@@ -314,6 +352,11 @@ impl Cli {
             && self.session.is_none()
             && !self.no_session
             && self.memory.is_none()
+            && !self.no_memory
+            && !self.memory_list
+            && self.memory_search.is_none()
+            && !self.dream
+            && self.dream_jobs.is_none()
             && self.config.is_none()
             && self.model.is_none()
             && self.provider.is_none()
@@ -425,5 +468,45 @@ mod tests {
         );
         assert!(parse(&["--no-color"]).no_color);
         assert!(!parse(&[]).no_color);
+    }
+
+    #[test]
+    fn test_memory_and_dream_flags() {
+        let c = parse(&["--memory-list"]);
+        assert!(c.memory_list);
+        assert!(c.memory_search.is_none());
+        assert!(!c.is_vanilla());
+
+        let c = parse(&["--memory-search=berlin"]);
+        assert_eq!(c.memory_search.as_deref(), Some("berlin"));
+        assert!(!c.is_vanilla());
+
+        let c = parse(&["--dream"]);
+        assert!(c.dream);
+        assert!(!c.is_vanilla());
+
+        let c = parse(&["--dream-jobs=8"]);
+        assert_eq!(c.dream_jobs, Some(8));
+        assert!(!c.dream);
+
+        assert!(Cli::try_parse_from(["ai", "--dream", "-s=foo"]).is_err());
+    }
+
+    #[test]
+    fn test_memory_flag_unchanged() {
+        assert_eq!(parse(&["-m"]).memory.as_deref(), Some(""));
+        assert_eq!(
+            parse(&["--memory=/tmp/m.db"]).memory.as_deref(),
+            Some("/tmp/m.db")
+        );
+    }
+
+    #[test]
+    fn test_no_memory_flag() {
+        assert!(parse(&["--no-memory"]).no_memory);
+        assert!(!parse(&["--no-memory"]).is_vanilla());
+        assert!(Cli::try_parse_from(["ai", "-m", "--no-memory"]).is_err());
+        assert!(Cli::try_parse_from(["ai", "--dream", "--no-memory"]).is_err());
+        assert!(Cli::try_parse_from(["ai", "--memory-list", "--no-memory"]).is_err());
     }
 }

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use ansi_color_constants::*;
 use log::info;
 use rig::tool::PortableTool;
@@ -7,7 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::shared::ToolError;
-use crate::memory::Memory;
+use crate::memory::{HitKind, Memory};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct MemorySearchArgs {
@@ -20,11 +18,11 @@ pub struct MemorySearchArgs {
 
 #[derive(Debug, Clone)]
 pub struct MemorySearchTool {
-    memory: Arc<Memory>,
+    memory: Memory,
 }
 
 impl MemorySearchTool {
-    pub fn new(memory: Arc<Memory>) -> Self {
+    pub fn new(memory: Memory) -> Self {
         Self { memory }
     }
 }
@@ -37,7 +35,9 @@ impl PortableTool for MemorySearchTool {
     type Error = ToolError;
 
     fn description(&self) -> String {
-        "Search persistent memory for entries relevant to a query. Returns the best-matching memory entries (with their unique keys) so they can be referenced or deleted.".to_string()
+        "Search persistent memory and past conversation excerpts for entries relevant to a query. \
+         Returns the best-matching items with their unique keys so they can be referenced or deleted."
+            .to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -54,7 +54,13 @@ impl PortableTool for MemorySearchTool {
         }
         let out = hits
             .iter()
-            .map(|e| format!("({}) {}", e.id, e.text))
+            .map(|h| match h.kind {
+                HitKind::Memory => format!("({}) {}", h.key, h.text),
+                HitKind::Transcript => {
+                    let session = h.session.as_deref().unwrap_or("?");
+                    format!("(transcript {session}) {}", h.text.replace('\n', " / "))
+                }
+            })
             .collect::<Vec<_>>()
             .join("\n");
         info!("{DIM}  \u{2192} {} results{RESET}", hits.len());
