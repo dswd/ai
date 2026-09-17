@@ -86,7 +86,7 @@ async fn dispatch_agent(agent: rig::agent::Agent, ctx: AgentContext<'_>) -> anyh
         )
         .await?;
     } else {
-        anyhow::bail!("No prompt provided. Pass a prompt argument or pipe text to stdin.");
+        anyhow::bail!("No prompt provided. Pass a prompt to `ai run` or pipe text to stdin.");
     }
     Ok(())
 }

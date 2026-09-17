@@ -54,7 +54,7 @@ pub(crate) fn resolve_session(
     provider_name: &str,
     auto_session: bool,
 ) -> anyhow::Result<Session> {
-    let explicit_name = match &cli.session {
+    let explicit_name = match &cli.session_name {
         Some(name) if !name.is_empty() => {
             if !session::is_safe_name(name) {
                 anyhow::bail!("invalid session name: {name:?}");
@@ -72,9 +72,10 @@ pub(crate) fn resolve_session(
         }
         _ => None,
     };
-    // An explicit name picks that session; otherwise (no `-s`, or `-s` with no
-    // name) we select the current session.
-    let auto = auto_session || cli.session.as_deref() == Some("");
+    // An explicit name picks that session; otherwise we select the current
+    // session when running interactively, or when a one-shot run auto-continues.
+    let auto = auto_session
+        || (cli.is_interactive() && cli.session_name.as_deref().is_none_or(str::is_empty));
 
     let session = if let Some(ref name) = explicit_name {
         match Session::load(name, session_dir) {
@@ -176,10 +177,9 @@ pub(crate) fn resolve_session(
     Ok(session)
 }
 
-pub(crate) async fn resolve_prompt_text(cli: &Cli) -> Option<String> {
-    let cli_prompt = cli.prompt_text();
+pub(crate) async fn resolve_prompt_text(prompt: Option<String>) -> Option<String> {
     let stdin_prompt = io::read_stdin_async().await;
-    match (cli_prompt, stdin_prompt) {
+    match (prompt, stdin_prompt) {
         (Some(a), Some(b)) => Some(format!("{a}\n\n{b}")),
         (Some(a), None) => Some(a),
         (None, Some(b)) => Some(b),
@@ -356,7 +356,7 @@ pub(crate) fn load_config(cli: &Cli, vanilla: bool) -> anyhow::Result<Config> {
             Config::from_file(&default_path)
         } else {
             if vanilla {
-                output::stderr_line("No config found. Run `ai --setup` to create one.");
+                output::stderr_line("No config found. Run `ai setup` to create one.");
             }
             Ok(Config::default())
         }
@@ -465,15 +465,17 @@ mod tests {
     }
 
     fn cli() -> Cli {
-        Cli::parse_from(["ai", "hi"])
+        Cli::parse_from(["ai"])
     }
 
     fn cli_session() -> Cli {
-        Cli::parse_from(["ai", "-s"])
+        let mut c = Cli::parse_from(["ai"]);
+        c.interactive = true;
+        c
     }
 
     fn cli_explicit(name: &str) -> Cli {
-        Cli::parse_from(["ai", &format!("-s={name}")])
+        Cli::parse_from(["ai", "-s", name])
     }
 
     fn save_session(dir: &Path, name: &str, provider: &str, model: &str, age: Duration) {

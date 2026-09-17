@@ -13,19 +13,20 @@ fn version_prints() {
 }
 
 #[test]
-fn help_lists_new_flags() {
+fn help_lists_subcommands_and_flags() {
     let out = bin().arg("--help").output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("--completions"));
+    assert!(stdout.contains("run"));
+    assert!(stdout.contains("session"));
+    assert!(stdout.contains("memory"));
     assert!(stdout.contains("--no-color"));
-    assert!(stdout.contains("--setup"));
     assert!(!stdout.contains("--init"));
 }
 
 #[test]
 fn completions_bash_outputs_script() {
-    let out = bin().arg("--completions=bash").output().unwrap();
+    let out = bin().args(["completions", "bash"]).output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("_ai"));
@@ -40,8 +41,9 @@ fn list_sessions_uses_temp_config() {
     std::fs::write(&config, format!("session_dir: {}\n", dir.display())).unwrap();
 
     let out = bin()
-        .arg(format!("--config={}", config.display()))
-        .arg("--list")
+        .arg("--config")
+        .arg(config.display().to_string())
+        .args(["session", "list"])
         .output()
         .unwrap();
     assert!(out.status.success());

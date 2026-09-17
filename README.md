@@ -6,13 +6,13 @@ A CLI agent for interacting with AI models, with tool use, filesystem and comman
 
 ## Features
 
-- **Multi-provider support** — OpenAI, Anthropic, Ollama, Groq, DeepSeek, Google (Gemini), Mistral, OpenRouter, and xAI (Grok), plus every compatible provider in the [models.dev](https://models.dev) catalog, configurable via `ai --setup`. Providers map to an OpenAI- or Anthropic-compatible endpoint (`flavor`); `openai-compatible` and `anthropic-compatible` cover custom endpoints (requires `api_base`).
-- **Interactive & one-shot modes** — Run with a direct prompt, pipe text via stdin, or start an interactive session with persistent history.
-- **Sessions** — Save, list (`-l`), continue (`-s NAME`), and delete (`--delete=NAME`) sessions with message history and system prompt preservation.
+- **Multi-provider support** — OpenAI, Anthropic, Ollama, Groq, DeepSeek, Google (Gemini), Mistral, OpenRouter, and xAI (Grok), plus every compatible provider in the [models.dev](https://models.dev) catalog, configurable via `ai setup`. Providers map to an OpenAI- or Anthropic-compatible endpoint (`flavor`); `openai-compatible` and `anthropic-compatible` cover custom endpoints (requires `api_base`).
+- **Interactive & one-shot modes** — Run `ai` for an interactive session with persistent history, or `ai run "PROMPT"` (or `cat f | ai run`) for a one-shot request.
+- **Sessions** — Start, name (`-s NAME`), list (`ai session list`), and delete (`ai session delete NAME`) sessions with message history and system prompt preservation.
 - **Tool system** — Filesystem tools, code search, web fetch/search, command execution, downloads, document extraction, and more.
 - **Sandboxed command execution** — The `execute` tool runs through a virtual bash interpreter (bashkit) with ~150 in-process builtins; external commands require explicit policy approval and, when a container image is configured (`-X`/`--container`), the whole command runs in a session container with only the policy-granted paths bind-mounted.
 - **Policy engine** — Granular allow/deny rules for read, write, execute, web fetch, and web search. Supports policy files, CLI overrides, interactive approval (`--ask`), and `--yolo` mode.
-- **Persistent memory** — Optional agent memory stored to disk and injected into the system prompt.
+- **Persistent memory** — Agent memory stored to disk (path configurable via `memory:` in the config) and injected into the system prompt; `--no-memory` disables it.
 - **Skills** — Load reusable skill definitions from `SKILL.md` files (via `--skill=PATH` or the skills folder), listed in the system prompt and loadable on demand with the `load_skill` tool.
 - **Extended thinking** — Optional reasoning budgets for models that support it.
 - **Headless browser** — Optional stealth-mode browser (Obscura) for web tools.
@@ -44,7 +44,7 @@ The binary is `target/release/ai`.
 Run the interactive setup to pick a provider, enter an API key, and choose a model:
 
 ```sh
-ai --setup
+ai setup
 ```
 
 Setup runs in two phases. First it connects to an LLM: it reuses an existing
@@ -59,7 +59,7 @@ opens with a tiny test call; if the provider or model can't be reached, setup
 reports the error and returns you to the provider selection.
 
 The config is written to `~/.config/ai/config.yaml` (or the path you pass to
-`--setup=/path/to/config.yaml`). Running `ai --setup` again reconfigures an
+`ai setup /path/to/config.yaml`). Running `ai setup` again reconfigures an
 existing file, backing it up to `config.yaml.bak` first.
 A fully-commented template with every supported key lives at [`config.example.yaml`](config.example.yaml):
 
@@ -88,17 +88,20 @@ model: "some-model"
 ### One-shot prompt
 
 ```sh
-ai "explain the code in main.rs"
-cat file.txt | ai "summarize this"
+ai run "explain the code in main.rs"
+cat file.txt | ai run "summarize this"
+cat file.txt | ai run
 ```
 
 ### Interactive session
 
+Running `ai` with no subcommand starts an interactive session:
+
 ```sh
-ai -s          # start a new session
-ai -s=myname   # continue an existing session
-ai -l          # list sessions
-ai --delete=myname
+ai                    # start a new session
+ai -s myname          # start or continue the named session
+ai session list       # list sessions
+ai session delete myname
 ```
 
 ### Granting the agent access
@@ -107,19 +110,19 @@ By default the agent is denied access to everything. Grant access explicitly:
 
 ```sh
 # read-only access to the current directory
-ai -r=. "what does this repo do?"
+ai run -r . "what does this repo do?"
 
 # read/write access to a directory
-ai -w=./src "refactor this module"
+ai run -w ./src "refactor this module"
 
 # allow specific commands to run
-ai -x="cargo,git" -r=. "run the tests and show me the failures"
+ai run -x cargo,git -r . "run the tests and show me the failures"
 
 # allow all web access
-ai --web "find the latest docs for rig-core"
+ai run --web "find the latest docs for rig-core"
 
 # everything, everywhere (dangerous)
-ai --yolo "do whatever it takes"
+ai run --yolo "do whatever it takes"
 ```
 
 With `--ask` (interactive approval), the agent can request access and you approve each request as it happens. Approvals are remembered for the session only: choose allow-once, remember the exact target, remember its directory, or deny.
@@ -161,7 +164,7 @@ allow web-search **
 
 Load it with `ai -p=~/.config/ai/policy.txt ...`.
 
-If a task needs a capability that isn't granted, the agent will suggest the exact flag to re-run with (e.g. `-r=.`, `-w=./src`, `-x=cargo,git`, `--web`).
+If a task needs a capability that isn't granted, the agent will suggest the exact flag to re-run with (e.g. `-r .`, `-w ./src`, `-x cargo,git`, `--web`).
 
 ## Agent tools
 
@@ -251,7 +254,7 @@ Search engines rate-limit and block automated clients. In order of effectiveness
        ports: ["8080:8080"]
    ```
 
-   Then list it (also configurable during `ai --setup`):
+   Then list it (also configurable during `ai setup`):
 
    ```yaml
    search:
@@ -281,46 +284,53 @@ Search engines rate-limit and block automated clients. In order of effectiveness
 ## CLI reference
 
 ```
-Usage: ai [OPTIONS] [PROMPT]...
+Usage: ai [OPTIONS] [COMMAND]
 
-Arguments:
-  [PROMPT]...  Prompt text (if absent, read from stdin)
+Commands:
+  run          Run the agent once with an inline prompt (or read it from stdin)
+  session      Manage saved sessions (list, delete)
+  setup        Set up or reconfigure the AI interactively
+  dream        Run memory maintenance
+  memory       Inspect persistent memory (list, search)
+  completions  Generate a shell completion script and exit
 
 Options:
-      --system=<PROMPT>      Set the system prompt
-  -s, --session=[<NAME>]     Start an interactive session (or continue NAME, implies --ask)
-  -m, --memory=[<FILE>]      Enable persistent memory
-  -c, --config=<FILE>        Load configuration from FILE
-      --model=<MODEL>        Override the model
-      --provider=<PROVIDER>  Override the provider
-  -r, --read=<PATH>          Allow read-only access to PATH
-  -w, --write=<PATH>         Allow read/write access to PATH
-  -x, --execute=<PATTERN>    Allow execution of PATTERN
+  -s, --session-name <NAME>  Name of the session (continue it when it exists)
+      --no-session           Do not read or write a session; run stateless
+      --no-memory            Disable persistent memory for this run
+      --system <PROMPT>      Set the system prompt
+  -c, --config <FILE>        Load configuration from FILE
+      --model <MODEL>        Override the model
+      --provider <PROVIDER>  Override the provider
+  -r, --read <PATH>          Allow read-only access to PATH
+  -w, --write <PATH>         Allow read/write access to PATH
+  -x, --execute <PATTERN>    Allow execution of PATTERN
       --web                  Allow all web access (fetch and search)
-      --web-fetch=<PATTERN>  Allow web fetch for matching URL pattern
-      --web-search=<PATTERN> Allow web search with matching query pattern
-      --proxy=<URL>          Route web requests through a proxy (http://… or socks5h://…)
-  -p, --policy=<FILE>        Load policy from FILE
-      --skill=<PATH>         Load a skill (SKILL.md file or folder; repeatable)
+      --web-fetch <PATTERN>  Allow web fetch for matching URL pattern
+      --web-search <PATTERN> Allow web search with matching query pattern
+      --proxy <URL>          Route web requests through a proxy (http://… or socks5h://…)
+  -p, --policy <FILE>        Load policy from FILE
+      --skill <PATH>         Load a skill (SKILL.md file or folder; repeatable)
   -i, --ask                  Ask for approval instead of denying
-  -t, --tool=<URL>           Connect to an MCP tool server (repeatable)
+  -t, --tool <URL>           Connect to an MCP tool server (repeatable)
   -y, --yolo                 Allow everything without asking (overrides all policy, dangerous)
-  -X, --container[=<IMAGE>]  Run all external commands in this container image (default debian:stable-slim)
-      --container-runtime=<RUNTIME>  Container runtime: auto (default), docker, or podman
-      --no-container        Run external commands on the host, ignoring any configured container
-      --max-tokens=<N>       Maximum number of tokens
-      --max-turns=<N>        Maximum agent turns (tool call rounds) [default: 100]
-      --thinking=[<TOKENS>]  Enable extended thinking [default: 16000]
-  -l, --list                 List all saved sessions
-      --setup=[<FILE>]       Set up or reconfigure the AI interactively
-      --delete=<NAME>        Delete a session by NAME
-      --completions=<SHELL>  Generate a shell completion script (bash, zsh, fish, …) and exit
+  -X, --container [<IMAGE>]  Run all external commands in this container image (default debian:stable-slim)
+      --container-runtime <RUNTIME>  Container runtime: auto (default), docker, or podman
+      --no-container         Run external commands on the host, ignoring any configured container
+      --max-tokens <N>       Maximum number of tokens
+      --max-turns <N>        Maximum agent turns (tool call rounds) [default: 100]
+      --thinking [<TOKENS>]  Enable extended thinking [default: 16000]
   -v, --verbose              Enable verbose mode
   -q, --quiet                Enable quiet mode
       --no-color             Disable colored output (also honors NO_COLOR)
   -h, --help                 Print help
   -V, --version              Print version
 ```
+
+Global options (`--config`, `--provider`, `--model`, `--max-turns`, `--verbose`,
+`--quiet`, `--no-color`) may also follow any subcommand. Value flags accept both
+`--opt value` and `--opt=value`. The persistent memory database location is a
+config setting (`memory:`), not a CLI flag; use `--no-memory` to disable memory.
 
 ## Interactive session commands
 

@@ -1,7 +1,7 @@
 # Example configuration for `ai`.
-# Copy to ~/.config/ai/config.yaml (or pass a path with `ai -c=FILE` / `ai --setup=FILE`),
+# Copy to ~/.config/ai/config.yaml (or pass a path with `ai -c FILE` / `ai setup FILE`),
 # then customize. All keys are optional; unset values fall back to defaults.
-# Generate a starting point interactively with `ai --setup`.
+# Generate a starting point interactively with `ai setup`.
 
 # Provider name. Built-ins: openai, anthropic, ollama, groq, deepseek, google,
 # mistral, openrouter, xai, openai-compatible, anthropic-compatible. Any
@@ -44,10 +44,9 @@ system_prompt: "You are a concise, helpful CLI assistant."
 # Policy file with allow/deny rules (default: no rules — deny everything).
 # policy: "~/.config/ai/policy.txt"
 
-# Persistent memory database (enabled by default; `--no-memory` disables it,
-# `-m=FILE` uses a different file).
+# Persistent memory database (enabled by default; `--no-memory` disables it).
 # memory: "~/.local/share/ai/memory.db"
-# Parallel requests used by `ai --dream` (default 4).
+# Parallel requests used by `ai dream` (default 4).
 # dream_jobs: 4
 
 # Optional proxy for web tools (HTTP, HTTPS, or SOCKS5).

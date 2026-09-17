@@ -27,7 +27,7 @@ mod util;
 
 use agent::{AgentContext, run_agent};
 use clap::{CommandFactory, Parser};
-use cli::Cli;
+use cli::{AgentArgs, Cli, Command, MemoryCommand, SessionCommand};
 use clients::{anthropic_client, openai_client};
 use commands::{cmd_delete_session, cmd_list_sessions, cmd_probe_web};
 use config::Config;
@@ -44,93 +44,123 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
     setup_logging(cli.verbose, cli.quiet);
     output::set_no_color(cli.no_color);
 
-    if let Some(shell) = cli.completions {
-        print_completions(shell);
+    cli.interactive = cli.command.is_none();
+    let mut command = cli.command.take();
+
+    if let Some(Command::Completions { shell }) = &command {
+        print_completions(*shell);
         return Ok(());
     }
 
-    if let Some(ref setup_path) = cli.setup {
-        let path = setup_path.clone();
+    if let Some(Command::Setup { file }) = &command {
+        let file = file.clone();
         return tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?
-            .block_on(setup_cmd::run(path));
+            .block_on(setup_cmd::run(file.unwrap_or_default()));
     }
+
+    let prompt_arg = match command.take() {
+        Some(Command::Run { prompt, agent }) => {
+            if cli.agent != AgentArgs::default() {
+                anyhow::bail!("agent options for a run must follow `run`");
+            }
+            cli.agent = agent;
+            let joined = prompt.join(" ");
+            (!joined.trim().is_empty()).then_some(joined)
+        }
+        other => {
+            command = other;
+            None
+        }
+    };
 
     let vanilla = cli.is_vanilla();
     let mut config = load_config(&cli, vanilla)?;
     apply_cli_overrides(&cli, &mut config);
     let session_dir = config.session_dir_resolved();
 
-    if cli.list {
-        return cmd_list_sessions(&session_dir);
-    }
-    if let Some(ref name) = cli.delete {
-        return cmd_delete_session(name, &session_dir);
-    }
-    if let Some(ref query) = cli.probe_web {
-        return tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()?
-            .block_on(cmd_probe_web(query, &config));
+    match command {
+        Some(Command::Session(SessionCommand::List)) => return cmd_list_sessions(&session_dir),
+        Some(Command::Session(SessionCommand::Delete { name })) => {
+            return cmd_delete_session(&name, &session_dir);
+        }
+        Some(Command::ProbeWeb { query }) => {
+            return tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?
+                .block_on(cmd_probe_web(&query, &config));
+        }
+        Some(Command::Memory(cmd)) => {
+            let Some(mem) = prompt::open_memory(&cli, &config)? else {
+                anyhow::bail!("memory is disabled by --no-memory");
+            };
+            return match cmd {
+                MemoryCommand::List => commands::cmd_memory_list(&mem),
+                MemoryCommand::Search { query } => commands::cmd_memory_search(&mem, &query),
+            };
+        }
+        Some(Command::Dream { jobs }) => {
+            let Some(mem) = prompt::open_memory(&cli, &config)? else {
+                anyhow::bail!("memory is disabled by --no-memory");
+            };
+            let resolved = resolve_provider(&config)?;
+            let jobs = jobs.or(config.dream_jobs).unwrap_or(4).max(1);
+            let max_turns = cli.max_turns;
+            let model_name = config.model.clone();
+            return tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?
+                .block_on(async {
+                    match resolved.flavor {
+                        providers::Flavor::OpenAi => {
+                            let model = openai_client(
+                                &config,
+                                &resolved.base_url,
+                                "dream",
+                                resolved.env_var,
+                            )?
+                            .completion_model(&model_name);
+                            dream::run(model, mem, jobs, max_turns).await
+                        }
+                        providers::Flavor::Anthropic => {
+                            let model = anthropic_client(
+                                &config,
+                                &resolved.base_url,
+                                "dream",
+                                resolved.env_var,
+                            )?
+                            .completion_model(&model_name);
+                            dream::run(model, mem, jobs, max_turns).await
+                        }
+                    }
+                });
+        }
+        None => {}
+        Some(Command::Run { .. })
+        | Some(Command::Setup { .. })
+        | Some(Command::Completions { .. }) => unreachable!(),
     }
 
     let policy = load_policy(&cli, &config)?;
 
-    if cli.memory_list || cli.memory_search.is_some() {
-        let Some(mem) = prompt::open_memory(&cli, &config)? else {
-            anyhow::bail!("memory is disabled by --no-memory");
-        };
-        return match &cli.memory_search {
-            Some(query) => commands::cmd_memory_search(&mem, query),
-            None => commands::cmd_memory_list(&mem),
-        };
-    }
-
-    if cli.dream {
-        let Some(mem) = prompt::open_memory(&cli, &config)? else {
-            anyhow::bail!("memory is disabled by --no-memory");
-        };
-        let resolved = resolve_provider(&config)?;
-        let jobs = cli.dream_jobs.or(config.dream_jobs).unwrap_or(4).max(1);
-        let max_turns = cli.max_turns;
-        let model_name = config.model.clone();
-        return tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()?
-            .block_on(async {
-                match resolved.flavor {
-                    providers::Flavor::OpenAi => {
-                        let model =
-                            openai_client(&config, &resolved.base_url, "dream", resolved.env_var)?
-                                .completion_model(&model_name);
-                        dream::run(model, mem, jobs, max_turns).await
-                    }
-                    providers::Flavor::Anthropic => {
-                        let model = anthropic_client(
-                            &config,
-                            &resolved.base_url,
-                            "dream",
-                            resolved.env_var,
-                        )?
-                        .completion_model(&model_name);
-                        dream::run(model, mem, jobs, max_turns).await
-                    }
-                }
-            });
-    }
-
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(run(cli, config, session_dir, policy))
+        .block_on(run(cli, config, session_dir, policy, prompt_arg))
 }
 
-async fn run(cli: Cli, config: Config, session_dir: PathBuf, policy: Policy) -> anyhow::Result<()> {
+async fn run(
+    cli: Cli,
+    config: Config,
+    session_dir: PathBuf,
+    policy: Policy,
+    prompt_arg: Option<String>,
+) -> anyhow::Result<()> {
     let container = setup::resolve_container(&cli, &config, &policy)?;
     let container_session = match &container {
         Some(rt) => {
@@ -153,7 +183,7 @@ async fn run(cli: Cli, config: Config, session_dir: PathBuf, policy: Policy) -> 
     let max_turns = cli.max_turns;
 
     let resolved = resolve_provider(&config)?;
-    let prompt_text = resolve_prompt_text(&cli).await;
+    let prompt_text = resolve_prompt_text(prompt_arg).await;
     let auto_session = !cli.is_interactive() && !cli.no_session && prompt_text.is_some();
     let mut session = resolve_session(
         &cli,

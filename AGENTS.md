@@ -23,8 +23,8 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 
 | File | Purpose |
 | --- | --- |
-| `main.rs` | Entry point; wires CLI, config, policy, agent, streaming loops |
-| `cli.rs` | clap arg definitions (note: all value args use `require_equals`, e.g. `-r=.`) |
+| `main.rs` | Entry point; subcommand dispatch (default = interactive session, `run`, `session`, `setup`, `dream`, `memory`, `completions`, `probe-web`), then wires config, policy, agent, streaming loops |
+| `cli.rs` | clap definitions: `Cli` (globals + `command`) flattens `AgentArgs` (agent options, also flattened into `run`); value args accept space or `=`; subcommand enums `Command`/`SessionCommand`/`MemoryCommand`. Interactive is the no-subcommand default; `-s/--session-name NAME` only names the session |
 | `config.rs` | YAML config, path resolution |
 | `providers.rs` | Provider registry: two flavors (OpenAi, Anthropic) + OpenAI-compatible endpoints |
 | `policy.rs` | Allow/deny rules, first-match-wins, glob matching, CLI overrides, ask mode, session approvals |
@@ -32,13 +32,13 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `container.rs` | Session-scoped container for external commands (Docker/Podman): policy→bind mounts, network none unless web |
 | `context.rs` | Deterministic context editing: prune stale tool outputs from the history sent to the model |
 | `skills.rs` | Skill discovery/loading (markdown front-matter files) |
-| `session.rs` | Session persistence (JSON, schema v2: full chat log + provider/model binding); newest-session selection, the 60-minute resume window, and date-aware name lookup (`NAME` matches `YYYY-MM-DD_NAME`) used to continue one-off runs, `-s` with no name, and explicit names; `tuples()` extracts completed user/agent exchanges for the transcript index |
+| `session.rs` | Session persistence (JSON, schema v2: full chat log + provider/model binding); newest-session selection, the 60-minute resume window, and date-aware name lookup (`NAME` matches `YYYY-MM-DD_NAME`) used to continue one-off runs, an unnamed `ai` session, and explicit names; `tuples()` extracts completed user/agent exchanges for the transcript index |
 | `memory.rs` | SQLite store (`memory.db`): FTS5-backed `memory` (facts + tags + provenance) and `transcripts` (derived user+agent tuples) tables, one-time migration from `memory.json`, session backfill, and reciprocal-rank-fusion retrieval with `last_used` tracking |
-| `dream.rs` | `--dream` maintenance over a parallel work pool: extract memories from unprocessed transcripts, prune processed transcripts, judge stale entries |
+| `dream.rs` | `ai dream` maintenance over a parallel work pool: extract memories from unprocessed transcripts, prune processed transcripts, judge stale entries |
 | `tools/` | One file per tool (see below) |
 | `format.rs` | Streaming markdown-to-ANSI console formatting for assistant output |
 | `output.rs` | stdout/stderr stream routing (TTY-aware, `NO_COLOR`-aware) |
-| `setup_cmd.rs` | Two-phase `--setup` flow: deterministic provider/model wizard, then an AI conversation that edits the config |
+| `setup_cmd.rs` | Two-phase `ai setup` flow: deterministic provider/model wizard, then an AI conversation that edits the config |
 | `catalog.rs` | models.dev provider/model catalog: fetch + cache, flavor mapping, compatibility filter |
 | `io.rs` | Line editor / stdin handling |
 | `util.rs` | Small helpers (formatting bars, byte sizes) |
@@ -46,7 +46,7 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `prompt.rs` | System prompt assembly, permission availability, missing-permission guidance |
 | `setup.rs` | Config/policy/session/provider resolution and CLI override application |
 | `clients.rs` | OpenAI/Anthropic client construction, `x-opencode-session` header |
-| `commands.rs` | Non-agent subcommands: `--probe-web`, `--list`, `--delete` sessions |
+| `commands.rs` | Non-agent subcommands: `probe-web`, `session list`, `session delete` |
 | `tool.rs` | MCP tool-server connection (`--tool`) |
 | `logging.rs` | Console logger, log-level setup |
 | `interactive.rs` | Interactive session loop, `/` commands, transcript indexing on save, usage reporting |
@@ -80,7 +80,7 @@ request/parse pairs for Brave/Tavily/Exa/Serper/SearXNG, and status→`EngineErr
 - `write_config.rs` — setup-only `write_config` tool: strictly parses the AI's YAML, restores
 the real provider/credentials (including search keys), and saves through the sandbox (write
 approval). It never takes or reports the config path, so the setup AI cannot read the secret file.
-- `exit_program.rs` — tool the model calls to end interactive sessions and `--setup` when the
+- `exit_program.rs` — tool the model calls to end interactive sessions and `ai setup` when the
 user asks; signals the loop via a shared `Arc<AtomicBool>` in `AgentContext`. `stream_response`
 checks the flag per stream item and aborts generation once it is set. Not `Action`-gated,
 and not registered for one-off runs.

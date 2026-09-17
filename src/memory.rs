@@ -403,7 +403,7 @@ impl Memory {
             format!(
                 "## Memory\n{entries} memory entries and {transcripts} transcript excerpts stored. \
                  Relevant items are injected per message; use memory_add to store new facts \
-                 (optionally with tags). Run `--dream` to distill transcripts into memories, prune \
+                 (optionally with tags). Run `ai dream` to distill transcripts into memories, prune \
                  processed transcripts, and judge stale entries."
             )
         }

@@ -77,7 +77,7 @@ pub struct Session {
 pub const SESSION_VERSION: u32 = 2;
 
 /// A session name must be a single path component so it cannot escape the
-/// session directory (`-s=../../x`, `--delete=../foo`).
+/// session directory (`--session-name=../../x`, `session delete ../foo`).
 pub fn is_safe_name(name: &str) -> bool {
     !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', '\0'])
 }

@@ -9,14 +9,12 @@ pub(crate) const DEFAULT_SYSTEM_PROMPT: &str = "You are a CLI assistant. Keep re
      For multi-step tasks, work methodically and report progress.";
 
 /// The resolved memory database path. Memory is enabled by default; `--no-memory`
-/// turns it off and `-m=FILE` points at a different database.
+/// turns it off and the config `memory:` key points at a different database.
 pub(crate) fn memory_path(cli: &Cli, config: &Config) -> Option<std::path::PathBuf> {
     if cli.no_memory {
-        return None;
-    }
-    match cli.memory.as_deref() {
-        Some(value) if !value.is_empty() => Some(crate::util::expand_tilde(value)),
-        _ => Some(config.memory_path_resolved()),
+        None
+    } else {
+        Some(config.memory_path_resolved())
     }
 }
 
@@ -63,17 +61,17 @@ pub(crate) fn missing_permissions_note(policy: &Policy, containerized: bool) -> 
     }
     if !p.read {
         lines.push(
-            "Read access not allowed. If required, ask the user to add `-r <PATH>` (e.g. `-r=.`) to the call.",
+            "Read access not allowed. If required, ask the user to add `-r <PATH>` (e.g. `-r .`) to the call.",
         );
     }
     if !p.write {
         lines.push(
-            "Write access not allowed. If required, ask the user to add `-w <PATH>` (e.g. `-w=./src`) to the call.",
+            "Write access not allowed. If required, ask the user to add `-w <PATH>` (e.g. `-w ./src`) to the call.",
         );
     }
     if !p.execute && !containerized {
         lines.push(
-            "External command execution not allowed. If required, ask the user to add `-x <PATTERN>` (e.g. `-x=cargo,git`) to the call.",
+            "External command execution not allowed. If required, ask the user to add `-x <PATTERN>` (e.g. `-x cargo,git`) to the call.",
         );
     }
     if lines.is_empty() {
@@ -206,7 +204,8 @@ mod tests {
     fn test_exit_guidance_only_interactive() {
         use clap::Parser;
 
-        let interactive = Cli::parse_from(["ai", "-s", "--no-memory"]);
+        let mut interactive = Cli::parse_from(["ai", "--no-memory"]);
+        interactive.interactive = true;
         let (prompt, _) = assemble_system_prompt(
             &interactive,
             &Config::default(),
@@ -217,7 +216,7 @@ mod tests {
         .unwrap();
         assert!(prompt.contains("exit_program"));
 
-        let oneshot = Cli::parse_from(["ai", "hi", "--no-memory"]);
+        let oneshot = Cli::parse_from(["ai", "run", "hi", "--no-memory"]);
         let (prompt, _) =
             assemble_system_prompt(&oneshot, &Config::default(), &Policy::default(), &[], false)
                 .unwrap();
@@ -228,20 +227,23 @@ mod tests {
     fn test_memory_default_on_and_relocatable() {
         use clap::Parser;
 
+        let plain = Cli::parse_from(["ai"]);
         let config = Config::default();
-        let plain = Cli::parse_from(["ai", "-s"]);
         assert_eq!(
             memory_path(&plain, &config),
             Some(config.memory_path_resolved())
         );
 
-        let relocated = Cli::parse_from(["ai", "-s", "-m=/tmp/x.db"]);
+        let relocated = Config {
+            memory: Some(std::path::PathBuf::from("/tmp/x.db")),
+            ..Config::default()
+        };
         assert_eq!(
-            memory_path(&relocated, &config),
+            memory_path(&plain, &relocated),
             Some(std::path::PathBuf::from("/tmp/x.db"))
         );
 
-        let off = Cli::parse_from(["ai", "-s", "--no-memory"]);
+        let off = Cli::parse_from(["ai", "--no-memory"]);
         assert_eq!(memory_path(&off, &config), None);
     }
 }

@@ -183,7 +183,7 @@ pub struct Config {
     pub policy: Option<PathBuf>,
     /// Path to the persistent memory SQLite database.
     pub memory: Option<PathBuf>,
-    /// Number of parallel requests used by `--dream` (default 4).
+    /// Number of parallel requests used by `ai dream` (default 4).
     pub dream_jobs: Option<usize>,
     /// Context window in tokens, used for the interactive usage indicator.
     pub context_window: Option<usize>,
