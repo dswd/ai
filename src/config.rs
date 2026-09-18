@@ -141,6 +141,16 @@ pub fn resolve_secret(value: &str) -> Option<String> {
     }
 }
 
+/// Memory maintenance (`ai dream`) behavior.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(default)]
+pub struct DreamConfig {
+    /// Run memory maintenance automatically at the end of an interactive session.
+    pub auto: bool,
+    /// Parallel requests used by dream maintenance (default 4).
+    pub jobs: Option<usize>,
+}
+
 /// Container isolation for external commands. When `default_image` is set, all
 /// external commands run inside that image; `--container`
 /// overrides per run and `--no-container` forces host execution.
@@ -183,8 +193,8 @@ pub struct Config {
     pub policy: Option<PathBuf>,
     /// Path to the persistent memory SQLite database.
     pub memory: Option<PathBuf>,
-    /// Number of parallel requests used by `ai dream` (default 4).
-    pub dream_jobs: Option<usize>,
+    /// Memory maintenance (`ai dream`) settings.
+    pub dream: DreamConfig,
     /// Local embedding model used for semantic memory (default multilingual-e5-small).
     pub embedding_model: Option<String>,
     /// Cosine distance above which a memory hit is dropped (default 0.20 for E5 models).
@@ -217,7 +227,7 @@ impl Default for Config {
             skills_dir: None,
             policy: None,
             memory: None,
-            dream_jobs: None,
+            dream: DreamConfig::default(),
             embedding_model: None,
             memory_max_distance: None,
             context_window: None,
@@ -645,5 +655,24 @@ mod tests {
         assert_eq!(edited.flavor, Some(ProviderFlavor::Anthropic));
         assert_eq!(edited.system_prompt.as_deref(), Some("be terse"));
         assert_eq!(edited.proxy.as_deref(), Some("socks5h://127.0.0.1:1080"));
+    }
+
+    #[test]
+    fn test_dream_defaults() {
+        let c = Config::default();
+        assert!(!c.dream.auto);
+        assert!(c.dream.jobs.is_none());
+    }
+
+    #[test]
+    fn test_dream_parse() {
+        let c: Config = serde_yaml_ng::from_str("dream:\n  auto: true\n  jobs: 2\n").unwrap();
+        assert!(c.dream.auto);
+        assert_eq!(c.dream.jobs, Some(2));
+    }
+
+    #[test]
+    fn test_legacy_dream_jobs_rejected_strict() {
+        assert!(Config::parse_strict("provider: openai\ndream_jobs: 4\n").is_err());
     }
 }

@@ -518,6 +518,30 @@ impl Memory {
             .unwrap_or(0)
     }
 
+    /// Open maintenance work: (unprocessed transcript tuples, entries unused and
+    /// unjudged past [`JUDGE_DAYS`]).
+    pub fn pending_tasks(&self) -> (usize, usize) {
+        let conn = self.store.conn.lock().unwrap();
+        let tuples = conn
+            .query_row(
+                "SELECT COUNT(*) FROM transcripts WHERE processed=0",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|n| n as usize)
+            .unwrap_or(0);
+        let judge = conn
+            .query_row(
+                "SELECT COUNT(*) FROM memory
+                 WHERE COALESCE(last_judged, created) < ?1 AND last_used < ?1",
+                params![iso_days_ago(JUDGE_DAYS)],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|n| n as usize)
+            .unwrap_or(0);
+        (tuples, judge)
+    }
+
     pub fn count_transcripts(&self) -> usize {
         let conn = self.store.conn.lock().unwrap();
         conn.query_row("SELECT COUNT(*) FROM transcripts", [], |r| {
@@ -1325,6 +1349,35 @@ mod tests {
         }
         mem.prune_transcripts(RETENTION_DAYS).unwrap();
         assert_eq!(mem.count_transcripts(), 0);
+        cleanup(dir);
+    }
+
+    #[test]
+    fn test_pending_tasks_counts() {
+        let (dir, mem) = temp_memory("pending");
+        assert_eq!(mem.pending_tasks(), (0, 0));
+
+        mem.index_session("s1", &[tuple(1, "u1", "a1"), tuple(2, "u2", "a2")])
+            .unwrap();
+        let key = mem.add("stale fact".to_string(), vec![], None).unwrap().0;
+        assert_eq!(mem.pending_tasks(), (2, 0));
+
+        {
+            let conn = mem.store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE memory SET created=?1, last_used=?1 WHERE id=?2",
+                params![iso_days_ago(JUDGE_DAYS + 1), key],
+            )
+            .unwrap();
+        }
+        assert_eq!(mem.pending_tasks(), (2, 1));
+
+        let rowid = {
+            let conn = mem.store.conn.lock().unwrap();
+            load_transcripts(&conn, false).unwrap()[0].rowid
+        };
+        mem.mark_processed(&[rowid]).unwrap();
+        assert_eq!(mem.pending_tasks().0, 1);
         cleanup(dir);
     }
 

@@ -54,8 +54,14 @@ system_prompt: "You are a concise, helpful CLI assistant."
 # Maximum cosine distance for a memory hit (default 0.175 for E5 models, 0.45 otherwise).
 # Lower is stricter; raise it if relevant memories are being missed.
 # memory_max_distance: 0.175
-# Parallel requests used by `ai dream` (default 4).
-# dream_jobs: 4
+# Memory maintenance (`ai dream`) settings.
+# auto: run maintenance automatically at the end of every interactive session
+#       (default false). When false, the session asks before running it if more
+#       than 50 maintenance tasks are pending.
+# jobs: parallel requests used by maintenance (default 4).
+# dream:
+#   auto: false
+#   jobs: 4
 
 # Optional proxy for web tools (HTTP, HTTPS, or SOCKS5).
 # Falls back to HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY environment variables.

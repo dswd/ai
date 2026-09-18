@@ -11,7 +11,6 @@ use crate::tools::{MemoryAddTool, MemoryDeleteTool, MemoryGetTool, MemorySearchT
 
 const PREAMBLE: &str = "You are a maintenance agent for a personal AI assistant's long-term memory. \
      Follow the instructions exactly and use the provided memory tools.";
-
 const EXTRACT_TASK: &str = "Below are completed exchanges from a past conversation session. Extract \
      durable facts that a long-term memory should keep: user preferences, personal details, \
      decisions, and commitments. Ignore transient requests, greetings, and task-specific \
@@ -25,6 +24,20 @@ const JUDGE_TASK: &str = "Below are memory entries that have not been used or re
      newer similar entry, contradicted by it, or otherwise clearly no longer relevant, call the \
      memory_delete tool with its key. Only delete entries that are clearly obsolete; when in \
      doubt, keep them. Reply with a short summary of what you deleted.";
+
+/// Combined backlog above which an interactive session offers to run maintenance.
+pub const PROMPT_THRESHOLD: usize = 50;
+
+/// True when the combined backlog (tuples + stale entries) exceeds [`PROMPT_THRESHOLD`].
+pub fn should_prompt(tuples: usize, judge: usize) -> bool {
+    tuples + judge > PROMPT_THRESHOLD
+}
+
+/// Whether a confirmation answer is an affirmative `y`/`yes`, trimmed and
+/// case-insensitive.
+pub fn is_affirmative(answer: &str) -> bool {
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
 
 /// Run the three maintenance steps: extract, prune, judge.
 pub async fn run<M: CompletionModel + Clone + 'static>(
@@ -194,4 +207,28 @@ fn build_agent<M: CompletionModel + Clone + 'static>(
         .default_max_turns(max_turns)
         .tool_server_handle(handle)
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_prompt_threshold() {
+        assert!(!should_prompt(50, 0));
+        assert!(!should_prompt(0, 50));
+        assert!(should_prompt(51, 0));
+        assert!(should_prompt(25, 26));
+        assert!(should_prompt(0, 51));
+    }
+
+    #[test]
+    fn test_is_affirmative() {
+        for yes in ["y", "Y", "yes", " YES ", "Yes"] {
+            assert!(is_affirmative(yes), "{yes}");
+        }
+        for no in ["n", "", "maybe", "/exit", "no"] {
+            assert!(!is_affirmative(no), "{no}");
+        }
+    }
 }

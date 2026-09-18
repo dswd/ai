@@ -27,6 +27,7 @@ mod tools;
 mod util;
 
 use agent::{AgentContext, run_agent};
+use ansi_color_constants::{GREY, RESET};
 use clap::{CommandFactory, Parser};
 use cli::{AgentArgs, Cli, Command, MemoryCommand, SessionCommand};
 use clients::{anthropic_client, openai_client};
@@ -109,37 +110,12 @@ fn main() -> anyhow::Result<()> {
             let Some(mem) = prompt::open_memory(&cli, &config)? else {
                 anyhow::bail!("memory is disabled by --no-memory");
             };
-            let resolved = resolve_provider(&config)?;
-            let jobs = jobs.or(config.dream_jobs).unwrap_or(4).max(1);
+            let jobs = jobs.or(config.dream.jobs).unwrap_or(4).max(1);
             let max_turns = cli.max_turns;
-            let model_name = config.model.clone();
             return tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
-                .block_on(async {
-                    match resolved.flavor {
-                        providers::Flavor::OpenAi => {
-                            let model = openai_client(
-                                &config,
-                                &resolved.base_url,
-                                "dream",
-                                resolved.env_var,
-                            )?
-                            .completion_model(&model_name);
-                            dream::run(model, mem, jobs, max_turns).await
-                        }
-                        providers::Flavor::Anthropic => {
-                            let model = anthropic_client(
-                                &config,
-                                &resolved.base_url,
-                                "dream",
-                                resolved.env_var,
-                            )?
-                            .completion_model(&model_name);
-                            dream::run(model, mem, jobs, max_turns).await
-                        }
-                    }
-                });
+                .block_on(run_dream(&config, mem, jobs, max_turns));
         }
         None => {}
         Some(Command::Run { .. })
@@ -271,7 +247,86 @@ async fn run(
         }
     }
 
+    maybe_dream_at_exit(&cli, &config, &session, memory, max_turns).await;
+
     Ok(())
+}
+
+/// Build a dream-maintenance client from `config` and run the three maintenance
+/// steps. Shared by `ai dream` and the end-of-session hook.
+async fn run_dream(
+    config: &Config,
+    memory: Arc<memory::Memory>,
+    jobs: usize,
+    max_turns: usize,
+) -> anyhow::Result<()> {
+    let resolved = resolve_provider(config)?;
+    let model_name = config.model.clone();
+    match resolved.flavor {
+        providers::Flavor::OpenAi => {
+            let model = openai_client(config, &resolved.base_url, "dream", resolved.env_var)?
+                .completion_model(&model_name);
+            dream::run(model, memory, jobs, max_turns).await
+        }
+        providers::Flavor::Anthropic => {
+            let model = anthropic_client(config, &resolved.base_url, "dream", resolved.env_var)?
+                .completion_model(&model_name);
+            dream::run(model, memory, jobs, max_turns).await
+        }
+    }
+}
+
+/// Offer or run memory maintenance at the end of an interactive session. Only a
+/// saved, non-empty REPL session with a TTY qualifies; `dream.auto` runs
+/// unconditionally, otherwise the user is asked when the backlog is large.
+async fn maybe_dream_at_exit(
+    cli: &Cli,
+    config: &Config,
+    session: &session::Session,
+    memory: Option<Arc<memory::Memory>>,
+    max_turns: usize,
+) {
+    if !cli.is_interactive()
+        || cli.no_session
+        || session.log.is_empty()
+        || !std::io::IsTerminal::is_terminal(&std::io::stdin())
+    {
+        return;
+    }
+    let Some(mem) = memory else {
+        return;
+    };
+
+    let quiet = logging::is_quiet();
+    let (tuples, judge) = mem.pending_tasks();
+    let mut run = config.dream.auto;
+    if !run && dream::should_prompt(tuples, judge) {
+        output::stderr_line(&format!(
+            "{GREY}🧠 {} pending memory task(s) ({tuples} tuple(s) to extract, \
+             {judge} to judge) — run `ai dream` now?{RESET}",
+            tuples + judge
+        ));
+        run = io::read_user_input("[y/N] ").is_some_and(|a| dream::is_affirmative(&a));
+        if !run && !quiet {
+            output::stderr_line(&format!(
+                "{GREY}🧠 skipped — run `ai dream` when ready.{RESET}"
+            ));
+        }
+    }
+    if !run {
+        return;
+    }
+
+    if !quiet {
+        output::stderr_line(&format!("{GREY}🧠 running memory maintenance…{RESET}"));
+    }
+    let jobs = config.dream.jobs.unwrap_or(4).max(1);
+    if let Err(e) = run_dream(config, mem, jobs, max_turns).await {
+        log::warn!("end-of-session dream failed: {e}");
+        if !quiet {
+            output::stderr_line(&format!("{GREY}🧠 memory maintenance failed: {e}{RESET}"));
+        }
+    }
 }
 
 fn print_completions(shell: clap_complete::Shell) {

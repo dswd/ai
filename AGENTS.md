@@ -23,9 +23,9 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 
 | File | Purpose |
 | --- | --- |
-| `main.rs` | Entry point; subcommand dispatch (default = interactive session, `run`, `session`, `setup`, `dream`, `memory`, `completions`, `probe-web`), then wires config, policy, agent, streaming loops |
+| `main.rs` | Entry point; subcommand dispatch (default = interactive session, `run`, `session`, `setup`, `dream`, `memory`, `completions`, `probe-web`), then wires config, policy, agent, streaming loops. Also runs the end-of-session dream prompt/auto-dream (`maybe_dream_at_exit`, shared `run_dream`). |
 | `cli.rs` | clap definitions: `Cli` (globals + `command`) flattens `AgentArgs` (agent options, also flattened into `run`); value args accept space or `=`; subcommand enums `Command`/`SessionCommand`/`MemoryCommand`. Interactive is the no-subcommand default; `-s/--session-name NAME` only names the session |
-| `config.rs` | YAML config, path resolution |
+| `config.rs` | YAML config, path resolution (incl. the `dream:` section: `auto`, `jobs`) |
 | `providers.rs` | Provider registry: two flavors (OpenAi, Anthropic) + OpenAI-compatible endpoints |
 | `policy.rs` | Allow/deny rules, first-match-wins, glob matching, CLI overrides, ask mode, session approvals |
 | `sandbox.rs` | The single checked filesystem layer: resolve-then-authorize-then-operate for every tool path |
@@ -35,7 +35,7 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `session.rs` | Session persistence (JSON, schema v2: full chat log + provider/model binding); newest-session selection, the 60-minute resume window, and date-aware name lookup (`NAME` matches `YYYY-MM-DD_NAME`) used to continue one-off runs, an unnamed `ai` session, and explicit names; `tuples()` extracts completed user/agent exchanges for the transcript index |
 | `memory.rs` | SQLite store (`memory.db`): `memory` (facts + tags + provenance) and `transcripts` (derived user+agent tuples) tables, one-time migration from `memory.json`, session backfill, and semantic retrieval over sqlite-vec KNN with `last_used` tracking |
 | `embed.rs` | Local embedding (`fastembed`/ONNX): `Embedder` trait, `FastembedEmbedder` (lazy model load, E5 query/passage prefixes), model-id resolution, and vector serialization |
-| `dream.rs` | `ai dream` maintenance over a parallel work pool: extract memories from unprocessed transcripts, prune processed transcripts, judge stale entries |
+| `dream.rs` | `ai dream` maintenance over a parallel work pool: extract memories from unprocessed transcripts, prune processed transcripts, judge stale entries. Also holds `PROMPT_THRESHOLD`/`should_prompt`/`is_affirmative` for the end-of-session prompt. |
 | `tools/` | One file per tool (see below) |
 | `format.rs` | Streaming markdown-to-ANSI console formatting for assistant output |
 | `output.rs` | stdout/stderr stream routing (TTY-aware, `NO_COLOR`-aware) |
