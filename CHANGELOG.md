@@ -48,6 +48,7 @@
 - **Breaking: memory retrieval is vector-only** — the FTS5 keyword index and its incremental-maintenance triggers are gone; retrieval is KNN over locally generated embeddings. Existing databases drop the FTS tables on first open and are re-embedded lazily; changing `embedding_model` rebuilds the vector tables and re-embeds rows.
 - **Fewer memory injections** — at most three hits are injected per message (was five) and the cosine-distance cutoff is tightened to `0.175`, so marginally-related entries no longer reach the prompt.
 - **Breaking: `dream_jobs` moved under `dream`** — the top-level `dream_jobs` key is replaced by `dream.jobs` (and the new `dream.auto`, default false). Configs still using `dream_jobs` get an unknown-key warning, and `ai setup` strict parsing rejects it; migrate by nesting the value under `dream:`.
+- **Dependency refresh** — the lockfile is updated to the latest compatible releases, including `clap` 4.6.7, `bashkit` 0.18.1, `rustls` 0.23.45, `pdf-inspector` 1.20.0, `lopdf` 0.45.0, and the refreshed `obscura` revision. `fastembed` stays at 4.9.1 and `rmcp` at 2.x: `rig` 0.42 pulls optional `rig-fastembed`, which pins `ort 2.0.0-rc.9` (incompatible with fastembed 5+) and targets `rmcp` 2.x.
 
 ### Removed
 
