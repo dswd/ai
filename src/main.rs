@@ -165,15 +165,21 @@ async fn run(
         }
         None => None,
     };
-    let (system_prompt, memory) =
-        assemble_system_prompt(&cli, &config, &policy, &skills, container_session.is_some())?;
+    let resolved = resolve_provider(&config)?;
+    let (system_prompt, memory) = assemble_system_prompt(
+        &cli,
+        &config,
+        &policy,
+        &skills,
+        container_session.is_some(),
+        resolved.supports_tools,
+    )?;
     log::debug!("system prompt:\n{system_prompt}");
 
     let model_name = config.model.clone();
     let max_tokens = cli.max_tokens.or(config.max_tokens);
     let max_turns = cli.max_turns;
 
-    let resolved = resolve_provider(&config)?;
     let prompt_text = resolve_prompt_text(prompt_arg).await;
     let auto_session = !cli.is_interactive() && !cli.no_session && prompt_text.is_some();
     let mut session = resolve_session(

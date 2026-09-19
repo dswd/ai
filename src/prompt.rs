@@ -109,6 +109,7 @@ pub(crate) fn assemble_system_prompt(
     policy: &Policy,
     skills: &[skills::Skill],
     containerized: bool,
+    supports_tools: bool,
 ) -> anyhow::Result<(String, Option<Arc<memory::Memory>>)> {
     let mut system_prompt = cli
         .system
@@ -137,6 +138,13 @@ pub(crate) fn assemble_system_prompt(
 
     if !skills.is_empty() {
         system_prompt = format!("{system_prompt}\n\n{}", skills::summary(skills));
+    }
+
+    if supports_tools {
+        system_prompt.push_str(
+            "\n\nFor questions about `ai` itself — commands, flags, configuration, or behavior — \
+             call the `manual` tool and answer from its contents instead of guessing.",
+        );
     }
 
     Ok((system_prompt, memory))
@@ -226,15 +234,35 @@ mod tests {
             &Policy::default(),
             &[],
             false,
+            true,
         )
         .unwrap();
         assert!(prompt.contains("exit_program"));
+        assert!(prompt.contains("manual"));
 
         let oneshot = Cli::parse_from(["ai", "run", "hi", "--no-memory"]);
-        let (prompt, _) =
-            assemble_system_prompt(&oneshot, &Config::default(), &Policy::default(), &[], false)
-                .unwrap();
+        let (prompt, _) = assemble_system_prompt(
+            &oneshot,
+            &Config::default(),
+            &Policy::default(),
+            &[],
+            false,
+            true,
+        )
+        .unwrap();
         assert!(!prompt.contains("exit_program"));
+
+        // Without tool support the manual steer is omitted.
+        let (prompt, _) = assemble_system_prompt(
+            &oneshot,
+            &Config::default(),
+            &Policy::default(),
+            &[],
+            false,
+            false,
+        )
+        .unwrap();
+        assert!(!prompt.contains("call the `manual` tool"));
     }
 
     #[test]

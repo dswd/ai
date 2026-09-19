@@ -156,7 +156,10 @@ pub(crate) async fn run_interactive(
                 }
 
                 if trimmed == "/help" {
-                    io::stderr_line("Commands: /exit, /quit, /clear, /compact, /session, /help");
+                    io::stderr_line(
+                        "Commands: /exit, /quit, /clear, /compact, /session, /help\n\
+                         For anything else about ai, just ask the AI.",
+                    );
                     continue;
                 }
 

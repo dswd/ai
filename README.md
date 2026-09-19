@@ -2,7 +2,7 @@
 
 A CLI agent for interacting with AI models, with tool use, filesystem and command-execution capabilities.
 
-`ai` is a single-binary Rust CLI that talks to LLM providers (OpenAI, Anthropic, Ollama, Groq, DeepSeek, Google, Mistral, OpenRouter, xAI) and lets the model use tools: read/write files, search code, run shell commands, browse the web, and more — all gated by a configurable policy engine.
+`ai` is a single-binary Rust CLI that talks to LLM providers (OpenAI, Anthropic, Ollama, Groq, DeepSeek, Google, Mistral, OpenRouter, xAI) and lets the model use tools: read/write files, search code, run shell commands, browse the web, and more — all gated by a configurable policy engine. Source: <https://github.com/dswd/ai>.
 
 ## Features
 
@@ -17,6 +17,7 @@ A CLI agent for interacting with AI models, with tool use, filesystem and comman
 - **Extended thinking** — Optional reasoning budgets for models that support it.
 - **Headless browser** — Optional stealth-mode browser (Obscura) for web tools.
 - **MCP tool servers** — Connect to external MCP servers with `--tool URL` or the `mcp.servers` config list; config servers that fail to connect are skipped with a warning.
+- **Self-documenting** — ask the agent questions about `ai` itself (commands, flags, configuration, behavior) and it answers from a built-in manual via the `manual` tool. In a session, `/help` lists the slash commands and reminds you to just ask.
 
 ## Installation
 
@@ -222,7 +223,8 @@ search:
 
 - **Keyed APIs** — `brave`, `tavily`, `exa`, `serper`. An omitted `api_key` falls
   back to `BRAVE_API_KEY` / `TAVILY_API_KEY` / `EXA_API_KEY` / `SERPER_API_KEY`.
-  A literal key or `env:VAR` both work; `env:` is preferred.
+  A literal key or `env:VAR` both work; `env:` is preferred. Brave has a free
+  tier: create a key at <https://brave.com/search/api/> and set `BRAVE_API_KEY`.
 - **SearXNG** — a normal entry that needs `url`. It queries the instance's JSON
   API and falls back to HTML scraping if JSON is disabled.
 - **Keyless scrapers** — `duckduckgo`, `google`, `bing` (`google`/`bing` need the

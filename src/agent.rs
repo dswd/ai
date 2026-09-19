@@ -102,6 +102,8 @@ fn build_agent<M: CompletionModel + 'static>(
     let mut server = ToolServer::new();
 
     if ctx.supports_tools {
+        server = server.tool(tools::ManualTool::new());
+
         if can_read {
             server = server
                 .tool(tools::ReadFileTool::new(ctx.policy.clone()))

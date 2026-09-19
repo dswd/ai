@@ -88,6 +88,10 @@ and not registered for one-off runs.
 (`skills.auto_create`). They take no path, write only through `skills::SkillStore` under the
 skills directory, and refuse to touch skills without an `origin: ai` marker (accident prevention,
 not a security boundary). The store's mutex serializes concurrent reviews.
+- `manual.rs` — `manual(topic?)` help tool available to the main and setup agents (inside the
+`supports_tools` gate). It serves embedded `README.md`, `config.example.yaml`, and `docs/manual.md`
+as topic-indexed `##` sections, plus clap-generated help for the root and each subcommand. Keep
+`docs/manual.md` in sync with behavior changes; the prose is embedded at build time.
 
 ## Conventions
 
@@ -95,6 +99,8 @@ not a security boundary). The store's mutex serializes concurrent reviews.
 - Always run `cargo fmt` (rustfmt) after any code change and before committing.
 - Track all changes in `CHANGELOG.md` — add/update an entry for every feature, fix, or
   behavioral change, grouped under the current or next version.
+- Keep `docs/manual.md` up to date — update it whenever behavior, commands, flags, or config keys
+  change; it is embedded into the `manual` tool at build time, so stale prose misleads the agent.
 - Add `Action`-gated tools to `build_agent` in `agent.rs`, following existing registration order.
 - Tool output must respect the hard caps in `tools/mod.rs`: `MAX_OUTPUT_LINES` (200) and
 `MAX_OUTPUT_CHARS` (~100 KB); use `process_output`/`truncate` for offset/limit handling.

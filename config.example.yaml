@@ -76,6 +76,8 @@ system_prompt: "You are a concise, helpful CLI assistant."
 # Web-search settings. `providers` is an ordered ladder: the first backend that
 # returns results wins. Keyed APIs need an api_key; SearXNG needs a url; the rest
 # are name-only. When unset, the default is DuckDuckGo, Google, then Bing.
+# Brave has a free tier: create a key at https://brave.com/search/api/ and set
+# BRAVE_API_KEY (or use api_key: env:BRAVE_API_KEY below).
 # search:
 #   providers:
 #     - name: brave                 # api_key defaults to env BRAVE_API_KEY
