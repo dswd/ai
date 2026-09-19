@@ -17,22 +17,8 @@ pub struct Skill {
     pub path: PathBuf,
 }
 
-pub fn discover(skill_args: &[String], skills_dir: &Path) -> Vec<Skill> {
+pub fn discover(skills_dir: &Path) -> Vec<Skill> {
     let mut skills: Vec<Skill> = Vec::new();
-
-    for arg in skill_args {
-        let path = crate::util::expand_tilde(arg);
-        if path.is_file() {
-            if let Some(skill) = parse_skill_file(&path) {
-                skills.push(skill);
-            }
-        } else if path.is_dir() {
-            find_skills_in_dir(&path, &mut skills);
-        } else {
-            warn!("skill path not found: {arg}");
-        }
-    }
-
     find_skills_in_dir(skills_dir, &mut skills);
 
     let mut seen = std::collections::HashSet::new();
@@ -70,6 +56,43 @@ pub fn summary(skills: &[Skill]) -> String {
 
 pub fn load(skill: &Skill) -> std::io::Result<String> {
     std::fs::read_to_string(&skill.path)
+}
+
+/// Cap on the number of bundled files reported by `load_skill`.
+pub const MAX_ADDITIONAL_FILES: usize = 200;
+
+/// Other files in the skill's folder, as absolute paths (the skill's own
+/// `SKILL.md` excluded). Hidden entries and build directories are skipped.
+pub fn additional_files(skill: &Skill) -> Vec<PathBuf> {
+    let Some(dir) = skill.path.parent() else {
+        return Vec::new();
+    };
+    let root = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let skill_file = std::fs::canonicalize(&skill.path).ok();
+    let mut out = Vec::new();
+    collect_files(&root, skill_file.as_deref(), &mut out);
+    out.sort();
+    out
+}
+
+fn collect_files(dir: &Path, exclude: Option<&Path>, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if should_skip_walk_entry(&name) {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            collect_files(&path, exclude, out);
+        } else if path.is_file() && exclude != std::fs::canonicalize(&path).ok().as_deref() {
+            out.push(path);
+        }
+    }
 }
 
 fn find_skills_in_dir(dir: &Path, out: &mut Vec<Skill>) {
@@ -243,7 +266,7 @@ mod tests {
             "---\nname: with-desc\ndescription: Has one\n---\nBody",
         )
         .unwrap();
-        let skills = discover(&[], &dir);
+        let skills = discover(&dir);
         let s = summary(&skills);
         let lines: Vec<&str> = s.lines().collect();
         assert!(lines.contains(&"- **no-desc**"));
@@ -268,30 +291,11 @@ mod tests {
         )
         .unwrap();
 
-        let skills = discover(&[], &dir);
+        let skills = discover(&dir);
         assert_eq!(skills.len(), 2);
         let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"foo-skill"));
         assert!(names.contains(&"bar-skill"));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn test_discover_direct_file_arg() {
-        let dir = temp_dir("filearg");
-        let file = dir.join("SKILL.md");
-        std::fs::write(
-            &file,
-            "---\nname: direct\ndescription: From direct file\n---\nBody",
-        )
-        .unwrap();
-
-        let skills = discover(
-            &[file.to_string_lossy().to_string()],
-            &dir.join("nonexistent"),
-        );
-        assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].name, "direct");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -311,7 +315,7 @@ mod tests {
         )
         .unwrap();
 
-        let skills = discover(&[], &dir);
+        let skills = discover(&dir);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].description, "first");
         let _ = std::fs::remove_dir_all(&dir);
@@ -326,7 +330,7 @@ mod tests {
             "---\nname: foo\ndescription: Bar baz\n---\nBody",
         )
         .unwrap();
-        let skills = discover(&[], &dir);
+        let skills = discover(&dir);
         let s = summary(&skills);
         assert!(s.contains("## Skills"));
         assert!(s.contains("**foo**: Bar baz"));
@@ -339,8 +343,53 @@ mod tests {
         std::fs::create_dir_all(dir.join("foo")).unwrap();
         let content = "---\nname: foo\n---\n\nBody instructions\n";
         std::fs::write(dir.join("foo").join("SKILL.md"), content).unwrap();
-        let skills = discover(&[], &dir);
+        let skills = discover(&dir);
         assert_eq!(load(&skills[0]).unwrap(), content);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_additional_files_absolute_sorted_and_filtered() {
+        let dir = temp_dir("files");
+        let skill_dir = dir.join("foo");
+        std::fs::create_dir_all(skill_dir.join("scripts")).unwrap();
+        std::fs::create_dir_all(skill_dir.join("reference")).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: foo\ndescription: Foo\n---\nBody",
+        )
+        .unwrap();
+        std::fs::write(skill_dir.join("scripts").join("run.sh"), "echo hi\n").unwrap();
+        std::fs::write(skill_dir.join("reference").join("notes.md"), "notes\n").unwrap();
+        std::fs::write(skill_dir.join(".hidden"), "secret\n").unwrap();
+        std::fs::create_dir_all(skill_dir.join("node_modules")).unwrap();
+        std::fs::write(skill_dir.join("node_modules").join("junk.js"), "junk\n").unwrap();
+
+        let skills = discover(&dir);
+        let files = additional_files(&skills[0]);
+        let names: Vec<String> = files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names, vec!["notes.md", "run.sh"]);
+        assert!(
+            files.iter().all(|p| p.is_absolute()),
+            "paths must be absolute: {files:?}"
+        );
+        let mut sorted = files.clone();
+        sorted.sort();
+        assert_eq!(files, sorted);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_additional_files_empty_when_only_skill() {
+        let dir = temp_dir("nofiles");
+        let skill_dir = dir.join("foo");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "---\nname: foo\n---\nBody").unwrap();
+        let skills = discover(&dir);
+        assert!(additional_files(&skills[0]).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -121,6 +121,12 @@ impl Policy {
         self.cli_rules.push(rule);
     }
 
+    /// Append an implicit default rule, evaluated after the policy file's own
+    /// rules so an explicit `deny` still wins.
+    pub fn add_default_rule(&mut self, rule: PolicyRule) {
+        self.rules.push(rule);
+    }
+
     pub fn is_allowed(&self, action: &Action, target: &str) -> bool {
         let target_norm = normalize_path_separators(target);
         let combined: Vec<&PolicyRule> = self.cli_rules.iter().chain(self.rules.iter()).collect();
@@ -466,6 +472,22 @@ mod tests {
         assert!(policy.is_allowed(&Action::Read, "/tmp/sub/file.txt"));
         assert!(!policy.is_allowed(&Action::Read, "/etc/passwd"));
         assert!(!policy.is_allowed(&Action::Write, "/tmp/test.txt"));
+    }
+
+    #[test]
+    fn test_default_rule_allows_when_no_file_rule() {
+        let mut policy = Policy::parse("");
+        policy.add_default_rule(PolicyRule::Allow(Action::Read, "/skills".to_string()));
+        assert!(policy.is_allowed(&Action::Read, "/skills/a/SKILL.md"));
+        assert!(!policy.is_allowed(&Action::Read, "/etc/passwd"));
+        assert!(policy.has_any_allow(&Action::Read));
+    }
+
+    #[test]
+    fn test_explicit_deny_overrides_default_rule() {
+        let mut policy = Policy::parse("deny read /skills");
+        policy.add_default_rule(PolicyRule::Allow(Action::Read, "/skills".to_string()));
+        assert!(!policy.is_allowed(&Action::Read, "/skills/a/SKILL.md"));
     }
 
     #[test]

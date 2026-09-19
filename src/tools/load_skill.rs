@@ -32,7 +32,10 @@ impl PortableTool for LoadSkillTool {
     type Error = ToolError;
 
     fn description(&self) -> String {
-        "Load the full definition and instructions of a skill by its name. Available skills are listed in the system prompt.".to_string()
+        "Load the full definition and instructions of a skill by its name, plus the absolute paths \
+         of the other files bundled in the skill's folder. Available skills are listed in the \
+         system prompt."
+            .to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -54,8 +57,26 @@ impl PortableTool for LoadSkillTool {
                 };
                 ToolError::Message(format!("skill '{}' not found ({hint})", args.name))
             })?;
-        crate::skills::load(skill)
-            .map_err(|e| ToolError::Message(format!("failed to read skill '{}': {e}", skill.name)))
+        let body = crate::skills::load(skill).map_err(|e| {
+            ToolError::Message(format!("failed to read skill '{}': {e}", skill.name))
+        })?;
+        let files = crate::skills::additional_files(skill);
+        if files.is_empty() {
+            return Ok(body);
+        }
+        let mut out = body;
+        out.push_str("\n\nAdditional files in this skill's folder (absolute paths):\n");
+        for path in files.iter().take(crate::skills::MAX_ADDITIONAL_FILES) {
+            out.push_str(&format!("- {}\n", path.display()));
+        }
+        if files.len() > crate::skills::MAX_ADDITIONAL_FILES {
+            out.push_str(&format!(
+                "- … and {} more\n",
+                files.len() - crate::skills::MAX_ADDITIONAL_FILES
+            ));
+        }
+        out.push_str("\nRead any of them with the `read_file` tool.");
+        Ok(out)
     }
 }
 
@@ -73,6 +94,8 @@ mod tests {
             "---\nname: test-skill\ndescription: Test\n---\n\nInstructions body\n",
         )
         .unwrap();
+        std::fs::create_dir_all(dir.join("scripts")).unwrap();
+        std::fs::write(dir.join("scripts").join("run.sh"), "echo hi\n").unwrap();
 
         let skill = Skill {
             name: "test-skill".to_string(),
@@ -87,6 +110,12 @@ mod tests {
             .await
             .unwrap();
         assert!(out.contains("Instructions body"));
+        assert!(out.contains("Additional files in this skill's folder"));
+        assert!(
+            out.contains("scripts/run.sh") && out.contains("/scripts/run.sh"),
+            "should list the absolute bundled file path: {out}"
+        );
+        assert!(!out.contains("SKILL.md"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

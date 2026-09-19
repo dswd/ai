@@ -34,7 +34,7 @@ use clients::{anthropic_client, openai_client};
 use commands::{cmd_delete_session, cmd_list_sessions, cmd_probe_web};
 use config::Config;
 use logging::setup_logging;
-use policy::Policy;
+use policy::{Action, Policy, PolicyRule};
 use prompt::assemble_system_prompt;
 use rig::client::CompletionClient;
 use setup::{
@@ -135,9 +135,18 @@ async fn run(
     cli: Cli,
     config: Config,
     session_dir: PathBuf,
-    policy: Policy,
+    mut policy: Policy,
     prompt_arg: Option<String>,
 ) -> anyhow::Result<()> {
+    let skills_dir = config.skills_dir_resolved();
+    let skills = Arc::new(skills::discover(&skills_dir));
+    if !skills.is_empty() {
+        let resolved = std::fs::canonicalize(&skills_dir).unwrap_or(skills_dir);
+        policy.add_default_rule(PolicyRule::Allow(
+            Action::Read,
+            resolved.to_string_lossy().to_string(),
+        ));
+    }
     let container = setup::resolve_container(&cli, &config, &policy)?;
     let container_session = match &container {
         Some(rt) => {
@@ -150,7 +159,6 @@ async fn run(
         }
         None => None,
     };
-    let skills = Arc::new(skills::discover(&cli.skill, &config.skills_dir_resolved()));
     let (system_prompt, memory) =
         assemble_system_prompt(&cli, &config, &policy, &skills, container_session.is_some())?;
     log::debug!("system prompt:\n{system_prompt}");

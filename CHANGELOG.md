@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`load_skill` lists bundled files** — loading a skill now also returns the absolute paths of the other files in the skill's folder (recursive, hidden/build entries skipped, capped at 200) so the agent can open them with `read_file`.
+
+### Changed
+
+- **Breaking: `--skill` removed** — skills are discovered only from the configured `skills_dir` (default `<data-dir>/ai/skills`). When at least one skill is found, that folder is granted a default read permission, overridable by an explicit `deny read` in the policy file, so the agent can read skill files and their references with the standard read tools.
+
 ## v0.5.0 – Local Embeddings, Setup Wizard & CLI Overhaul
 
 This release overhauls the CLI into subcommands, replaces keyword memory with local semantic search (ONNX embeddings + `sqlite-vec`), adds a guided `ai setup` wizard, and reworks session handling and maintenance.

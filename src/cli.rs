@@ -166,13 +166,6 @@ pub struct AgentArgs {
     pub policy: Option<PathBuf>,
 
     #[arg(
-        long = "skill",
-        help = "Load a skill from PATH (SKILL.md file or folder containing SKILL.md); can be given multiple times",
-        value_name = "PATH"
-    )]
-    pub skill: Vec<String>,
-
-    #[arg(
         short = 'i',
         long = "ask",
         help = "Ask the user for confirmation instead of denying policy checks"
@@ -366,10 +359,6 @@ mod tests {
                 .proxy
                 .as_deref(),
             Some("socks5h://127.0.0.1:1080")
-        );
-        assert_eq!(
-            parse(&["--skill", "/tmp/s"]).skill,
-            vec!["/tmp/s".to_string()]
         );
     }
 

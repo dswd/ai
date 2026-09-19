@@ -13,7 +13,7 @@ A CLI agent for interacting with AI models, with tool use, filesystem and comman
 - **Sandboxed command execution** — The `execute` tool runs through a virtual bash interpreter (bashkit) with ~150 in-process builtins; external commands require explicit policy approval and, when a container image is configured (`-X`/`--container`), the whole command runs in a session container with only the policy-granted paths bind-mounted.
 - **Policy engine** — Granular allow/deny rules for read, write, execute, web fetch, and web search. Supports policy files, CLI overrides, interactive approval (`--ask`), and `--yolo` mode.
 - **Persistent memory** — Agent memory stored to disk (path configurable via `memory:` in the config) and injected into the system prompt; `--no-memory` disables it. Retrieval is semantic: facts and past exchanges are embedded locally (ONNX, via fastembed — configurable `embedding_model`, default `multilingual-e5-small`) and searched with sqlite-vec. Search results and injected references are capped to a 100-character fragment. Run maintenance with `ai dream`; set `dream.auto: true` to run it automatically at the end of each interactive session, or the session offers it once more than 50 maintenance tasks are pending.
-- **Skills** — Load reusable skill definitions from `SKILL.md` files (via `--skill=PATH` or the skills folder), listed in the system prompt and loadable on demand with the `load_skill` tool.
+- **Skills** — Load reusable skill definitions from `SKILL.md` files in the skills folder (`skills_dir`, default `<data-dir>/ai/skills`), listed in the system prompt and loadable on demand with the `load_skill` tool. The skills folder is granted read access automatically.
 - **Extended thinking** — Optional reasoning budgets for models that support it.
 - **Headless browser** — Optional stealth-mode browser (Obscura) for web tools.
 - **MCP tool servers** — Connect to external MCP servers with `--tool URL`.
@@ -310,7 +310,6 @@ Options:
       --web-search <PATTERN> Allow web search with matching query pattern
       --proxy <URL>          Route web requests through a proxy (http://… or socks5h://…)
   -p, --policy <FILE>        Load policy from FILE
-      --skill <PATH>         Load a skill (SKILL.md file or folder; repeatable)
   -i, --ask                  Ask for approval instead of denying
   -t, --tool <URL>           Connect to an MCP tool server (repeatable)
   -y, --yolo                 Allow everything without asking (overrides all policy, dangerous)
