@@ -27,10 +27,20 @@ pub(crate) fn open_memory(
     let Some(path) = memory_path(cli, config) else {
         return Ok(None);
     };
-    let embedder = Arc::new(crate::embed::FastembedEmbedder::new(
-        &config.embedding_model_resolved(),
-        config.memory_max_distance,
-    ));
+    let embedder: Arc<dyn crate::embed::Embedder> = {
+        #[cfg(feature = "embed")]
+        {
+            Arc::new(crate::embed::FastembedEmbedder::new(
+                &config.embedding_model_resolved(),
+                config.memory_max_distance,
+            ))
+        }
+        #[cfg(not(feature = "embed"))]
+        {
+            log::info!("semantic memory is unavailable in this build (no embedding support)");
+            Arc::new(crate::embed::DisabledEmbedder)
+        }
+    };
     let memory = memory::Memory::open(&path, embedder)?;
     if let Err(e) = memory.backfill_sessions(&config.session_dir_resolved()) {
         log::warn!("transcript backfill failed: {e}");

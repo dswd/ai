@@ -31,6 +31,7 @@ This release overhauls the CLI into subcommands, replaces keyword memory with lo
 
 ### Fixed
 
+- **Linux arm64 and Windows release builds** — local embeddings now sit behind an `embed` cargo feature (default on), which the Windows release build disables because ONNX Runtime has no `x86_64-pc-windows-gnu` build; on Windows facts still store but semantic retrieval is unavailable. The arm64 cross build now installs the C++ toolchain needed to link the ONNX Runtime static library.
 - **Interactive prompt colors were never shown** — rustyline only emits `Prompt::styled()` with a `Highlighter` installed; the editor now installs the identity helper.
 - **`container.runtime: auto` no longer reports a missing runtime**, and unknown or unavailable runtime values get an accurate message.
 - **`command`/`type`/`which` no longer request a Read grant per `PATH` entry** — metadata-only `stat`/`exists` are not policy-gated; file contents and directory listings still are.

@@ -23,8 +23,8 @@ jobs:
             os: ubuntu-latest
             binary: ai-linux-arm64
             native: false
-            cross-packages: gcc-aarch64-linux-gnu
-            linker: aarch64-linux-gnu-gcc
+            cross-packages: g++-aarch64-linux-gnu
+            linker: aarch64-linux-gnu-g++
 
           - target: x86_64-pc-windows-gnu
             os: ubuntu-latest

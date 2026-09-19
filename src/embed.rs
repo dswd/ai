@@ -1,19 +1,26 @@
+#[cfg(feature = "embed")]
 use std::path::PathBuf;
+#[cfg(feature = "embed")]
 use std::sync::OnceLock;
 
+#[cfg(feature = "embed")]
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
 /// Default local embedding model (multilingual, 384 dims).
+#[cfg(feature = "embed")]
 pub const DEFAULT_MODEL: &str = "multilingual-e5-small";
 
 /// Maximum cosine distance for a retrieved hit, per model family. E5 models
 /// score related text very close (roughly 0.1–0.2) and unrelated text around
 /// 0.25–0.3, so they need a tighter cutoff than the contrastive MiniLM family.
+#[cfg(feature = "embed")]
 const E5_MAX_DISTANCE: f32 = 0.175;
+#[cfg(feature = "embed")]
 const DEFAULT_MAX_DISTANCE: f32 = 0.45;
 
 /// A resolved embedding model: the fastembed handle, its vector size, and
 /// whether it needs the E5 `query:`/`passage:` instruction prefixes.
+#[cfg(feature = "embed")]
 pub struct ModelSpec {
     pub model: EmbeddingModel,
     pub dims: usize,
@@ -22,6 +29,7 @@ pub struct ModelSpec {
 
 /// Resolve a config model id. Unknown ids log a warning and fall back to the
 /// default so a typo cannot make memory unusable.
+#[cfg(feature = "embed")]
 pub fn resolve_model(id: &str) -> ModelSpec {
     let spec = match id {
         "multilingual-e5-small" => (EmbeddingModel::MultilingualE5Small, true),
@@ -47,7 +55,7 @@ pub fn resolve_model(id: &str) -> ModelSpec {
 }
 
 /// The vector size for a configured model id, without loading the model.
-#[cfg(test)]
+#[cfg(all(test, feature = "embed"))]
 pub fn dims_for(id: &str) -> usize {
     resolve_model(id).dims
 }
@@ -62,8 +70,37 @@ pub trait Embedder: Send + Sync {
     fn embed_query(&self, text: &str) -> anyhow::Result<Vec<f32>>;
 }
 
+/// Placeholder used when the crate is built without the `embed` feature; memory
+/// facts still store, but semantic retrieval is unavailable.
+#[cfg(not(feature = "embed"))]
+pub struct DisabledEmbedder;
+
+#[cfg(not(feature = "embed"))]
+impl Embedder for DisabledEmbedder {
+    fn dims(&self) -> usize {
+        0
+    }
+
+    fn model_id(&self) -> String {
+        "disabled".to_string()
+    }
+
+    fn max_distance(&self) -> f32 {
+        0.0
+    }
+
+    fn embed_passages(&self, _texts: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
+        anyhow::bail!("this build has no embedding support")
+    }
+
+    fn embed_query(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
+        anyhow::bail!("this build has no embedding support")
+    }
+}
+
 /// Local ONNX embedder. The model is downloaded (once) and loaded lazily on the
 /// first embedding call, so commands that never embed stay offline and fast.
+#[cfg(feature = "embed")]
 pub struct FastembedEmbedder {
     id: String,
     spec: ModelSpec,
@@ -71,6 +108,7 @@ pub struct FastembedEmbedder {
     engine: OnceLock<Result<TextEmbedding, String>>,
 }
 
+#[cfg(feature = "embed")]
 impl FastembedEmbedder {
     /// `max_distance` overrides the model family's default cutoff when set
     /// (config `memory_max_distance`).
@@ -109,6 +147,7 @@ impl FastembedEmbedder {
     }
 }
 
+#[cfg(feature = "embed")]
 impl Embedder for FastembedEmbedder {
     fn dims(&self) -> usize {
         self.spec.dims
@@ -141,6 +180,7 @@ impl Embedder for FastembedEmbedder {
 }
 
 /// Where fastembed caches downloaded model files (avoids its CWD-relative default).
+#[cfg(feature = "embed")]
 fn cache_dir() -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -231,6 +271,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(feature = "embed")]
     fn test_resolve_known_and_unknown() {
         let e5 = resolve_model("multilingual-e5-small");
         assert_eq!(e5.dims, 384);

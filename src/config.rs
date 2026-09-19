@@ -364,6 +364,7 @@ impl Config {
     }
 
     /// The embedding model id used for semantic memory.
+    #[cfg(feature = "embed")]
     pub fn embedding_model_resolved(&self) -> String {
         self.embedding_model
             .clone()

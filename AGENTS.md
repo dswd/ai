@@ -6,12 +6,11 @@ Guidance for AI agents working in this repository.
 
 `ai` is a single-binary Rust CLI agent: it talks to LLM providers and lets the model
 use tools (filesystem, shell, web, memory) gated by a policy engine. Rust edition
-2024, async via Tokio, LLM layer via the `rig` facade (`rig-core` + `rig-agent`). Default build enables the `browser`
-feature (Obscura headless browser for web tools); `--no-default-features` drops it.
+2024, async via Tokio, LLM layer via the `rig` facade (`rig-core` + `rig-agent`). Default features are `browser` (Obscura headless browser for web tools) and `embed` (local `fastembed`/ONNX embeddings for semantic memory, which downloads and links ONNX Runtime at build time). `--no-default-features` drops both, which is how the Windows release is built (ONNX Runtime has no `x86_64-pc-windows-gnu` build); without `embed`, facts still store but retrieval returns nothing.
 
 ## Commands
 
-- Build: `cargo build` (add `--no-default-features` to skip the browser)
+- Build: `cargo build` (add `--no-default-features` to skip the browser and embeddings)
 - Test: `cargo test`
 - Lint: `cargo clippy --all-targets -- -D warnings`
 - Format: always run `cargo fmt` after every edit; verify with `cargo fmt --all --check`

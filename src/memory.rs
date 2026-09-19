@@ -369,7 +369,9 @@ impl Memory {
         conn.execute_batch(SCHEMA)
             .with_context(|| format!("initializing memory database: {}", db.display()))?;
         migrate_from_fts(&conn)?;
-        ensure_vec_tables(&conn, embedder.dims(), &embedder.model_id())?;
+        if embedder.dims() > 0 {
+            ensure_vec_tables(&conn, embedder.dims(), &embedder.model_id())?;
+        }
         Ok(Self {
             store: Arc::new(Store {
                 conn: Mutex::new(conn),
@@ -461,6 +463,9 @@ impl Memory {
 
     /// Best-effort rewrite of a memory entry's vector row.
     fn reindex_memory(&self, conn: &Connection, id: &str, text: &str, tags: &[String]) {
+        if self.store.embedder.dims() == 0 {
+            return;
+        }
         let Ok(rowid) = conn.query_row("SELECT rowid FROM memory WHERE id=?1", params![id], |r| {
             r.get::<_, i64>(0)
         }) else {
@@ -770,7 +775,7 @@ impl Memory {
                 None => true,
             })
             .collect();
-        let vectors: Vec<Vec<f32>> = if changed.is_empty() {
+        let vectors: Vec<Vec<f32>> = if changed.is_empty() || self.store.embedder.dims() == 0 {
             Vec::new()
         } else {
             let passages: Vec<String> = changed
@@ -1564,6 +1569,26 @@ mod tests {
             Some("16")
         );
         assert_eq!(mem.retrieve("berlin", 5).len(), 1);
+        cleanup(dir);
+    }
+
+    #[cfg(not(feature = "embed"))]
+    #[test]
+    fn test_disabled_embedder_skips_vectors() {
+        let (dir, mem) = temp_memory_with("disabled", Arc::new(crate::embed::DisabledEmbedder));
+        mem.add("user lives in berlin".to_string(), vec![], None)
+            .unwrap();
+        assert_eq!(mem.retrieve("berlin", 5).len(), 0);
+        let conn = mem.store.conn.lock().unwrap();
+        let tables: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name IN ('memory_vec','transcript_vec')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 0, "no vector tables without an embedder");
+        drop(conn);
         cleanup(dir);
     }
 

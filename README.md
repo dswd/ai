@@ -25,15 +25,15 @@ A CLI agent for interacting with AI models, with tool use, filesystem and comman
 Download the latest release for your platform from the [Releases](https://github.com/dswd/ai/releases) page:
 
 - `ai-linux-amd64` / `ai-linux-arm64`
-- `ai-windows-amd64.exe`
+- `ai-windows-amd64.exe` (built without the `browser` and `embed` features, so it has no semantic memory search)
 
 ### Build from source
 
-Requires Rust (edition 2024) and, for the default `browser` feature, `cmake`, `clang`, `llvm-dev`, and `libssl-dev`.
+Requires Rust (edition 2024). The default features also need `cmake`, `clang`, `llvm-dev`, and `libssl-dev` for the `browser` feature, plus a C++ toolchain and network access for the `embed` feature (ONNX Runtime is downloaded and linked at build time).
 
 ```sh
 cargo build --release
-# Optionally disable the headless browser (smaller build, no system deps):
+# Disable the headless browser and local embeddings (smaller build, no system deps):
 cargo build --release --no-default-features
 ```
 
