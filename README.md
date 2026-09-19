@@ -16,7 +16,7 @@ A CLI agent for interacting with AI models, with tool use, filesystem and comman
 - **Skills** — Load reusable skill definitions from `SKILL.md` files in the skills folder (`skills_dir`, default `<data-dir>/ai/skills`), listed in the system prompt and loadable on demand with the `load_skill` tool. The skills folder is granted read access automatically.
 - **Extended thinking** — Optional reasoning budgets for models that support it.
 - **Headless browser** — Optional stealth-mode browser (Obscura) for web tools.
-- **MCP tool servers** — Connect to external MCP servers with `--tool URL`.
+- **MCP tool servers** — Connect to external MCP servers with `--tool URL` or the `mcp.servers` config list; config servers that fail to connect are skipped with a warning.
 
 ## Installation
 

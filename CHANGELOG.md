@@ -4,6 +4,7 @@
 
 ### Added
 
+- **MCP servers in the config** — `mcp.servers` (`{ url, name? }`) declares external MCP servers alongside `--tool`; both sources are merged and deduplicated by URL. Config servers that fail to connect are skipped with a warning, while `--tool` failures still abort.
 - **`load_skill` lists bundled files** — loading a skill now also returns the absolute paths of the other files in the skill's folder (recursive, hidden/build entries skipped, capped at 200) so the agent can open them with `read_file`.
 
 ### Changed

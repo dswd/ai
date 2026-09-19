@@ -166,6 +166,23 @@ pub struct ContainerConfig {
     pub network: Option<String>,
 }
 
+/// External MCP tool servers to connect on startup, in addition to `--tool`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(default)]
+pub struct McpConfig {
+    pub servers: Vec<McpServerConfig>,
+}
+
+/// One MCP server reached over the streamable-HTTP transport.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct McpServerConfig {
+    /// Streamable-HTTP endpoint URL.
+    pub url: String,
+    /// Optional label used in log messages.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct Config {
@@ -211,6 +228,8 @@ pub struct Config {
     pub search: SearchConfig,
     #[serde(default)]
     pub container: ContainerConfig,
+    #[serde(default)]
+    pub mcp: McpConfig,
 }
 
 impl Default for Config {
@@ -235,6 +254,7 @@ impl Default for Config {
             flavor: None,
             search: SearchConfig::default(),
             container: ContainerConfig::default(),
+            mcp: McpConfig::default(),
         }
     }
 }
@@ -437,6 +457,17 @@ mod tests {
         assert!(c.api_key.is_none());
         assert!(c.system_prompt.is_none());
         assert!(c.search.providers.is_none());
+    }
+
+    #[test]
+    fn test_parse_mcp_servers() {
+        let yaml = "mcp:\n  servers:\n    - url: https://a.example/mcp\n      name: alpha\n    - url: https://b.example/mcp\n";
+        let c: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(c.mcp.servers.len(), 2);
+        assert_eq!(c.mcp.servers[0].url, "https://a.example/mcp");
+        assert_eq!(c.mcp.servers[0].name.as_deref(), Some("alpha"));
+        assert_eq!(c.mcp.servers[1].url, "https://b.example/mcp");
+        assert!(c.mcp.servers[1].name.is_none());
     }
 
     #[test]

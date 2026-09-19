@@ -181,10 +181,9 @@ async fn run(
     let memory = memory.map(|mem| Arc::new(mem.fork(Some(&session.name), "agent")));
     let thinking = resolve_thinking(cli.thinking.or(config.thinking), &resolved);
 
-    let tool_sets = if !cli.tool.is_empty() {
-        tool::connect_tool_servers(&cli.tool).await?
-    } else {
-        Vec::new()
+    let tool_sets = {
+        let specs = tool::merge_specs(&config.mcp.servers, &cli.tool);
+        tool::connect_tool_servers(&specs).await?
     };
 
     #[cfg(feature = "browser")]

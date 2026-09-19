@@ -783,6 +783,9 @@ const GUIDE: &str = "\
 - `container.runtime`: `auto` (default), `docker`, or `podman`.
 - `container.network`: `policy` (default; network only when web access is granted),
   `none`, or `host`.
+- `mcp.servers`: external MCP tool servers, each `{ url, name? }` (streamable HTTP),
+  connected at startup in addition to `--tool`. A server that fails to connect is skipped
+  with a warning.
 
 Prefer relative or `~` paths where a path is expected. Ask the user before enabling
 container execution or broad policies.";

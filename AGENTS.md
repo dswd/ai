@@ -47,7 +47,7 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `setup.rs` | Config/policy/session/provider resolution and CLI override application |
 | `clients.rs` | OpenAI/Anthropic client construction, `x-opencode-session` header |
 | `commands.rs` | Non-agent subcommands: `probe-web`, `session list`, `session delete` |
-| `tool.rs` | MCP tool-server connection (`--tool`) |
+| `tool.rs` | MCP tool-server connection (`--tool` and config `mcp.servers`; config failures warn+skip, `--tool` failures are fatal) |
 | `logging.rs` | Console logger, log-level setup |
 | `interactive.rs` | Interactive session loop, `/` commands, transcript indexing on save, usage reporting |
 

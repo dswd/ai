@@ -99,3 +99,11 @@ container:
 
 # Extra filesystem access for external commands comes from the policy grants
 # (-r/--read and -w/--write), which become bind mounts inside the container.
+
+# External MCP tool servers, connected at startup in addition to `--tool URL`.
+# Each entry is `{ url, name? }`; `name` is only used in log messages. A server
+# that fails to connect is skipped with a warning (unlike `--tool`, which aborts).
+# mcp:
+#   servers:
+#     - url: "https://example.com/mcp"
+#       name: example
