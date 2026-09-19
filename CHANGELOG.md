@@ -4,12 +4,15 @@
 
 ### Added
 
+- **AI-authored skills from dreaming** — with `skills.auto_create` (default false), `ai dream` reviews sessions that have at least `skills.min_tuples` (default 10) unprocessed exchanges and may create, update, or delete skills through new `skill_create`/`skill_update`/`skill_delete` tools. AI skills are tagged `origin: ai` in front matter, marked `(AI-created)` in the system prompt, and only those can be modified or deleted by the agent. Changes are logged with their absolute paths and summarized by `ai dream`.
+- **`ai skills list` / `ai skills delete NAME`** — inspect discovered skills with their origin and path, or remove a skill's folder (SKILL.md plus bundled files). A root-level `SKILL.md` deletes only that file.
 - **MCP servers in the config** — `mcp.servers` (`{ url, name? }`) declares external MCP servers alongside `--tool`; both sources are merged and deduplicated by URL. Config servers that fail to connect are skipped with a warning, while `--tool` failures still abort.
 - **`load_skill` lists bundled files** — loading a skill now also returns the absolute paths of the other files in the skill's folder (recursive, hidden/build entries skipped, capped at 200) so the agent can open them with `read_file`.
 
 ### Changed
 
-- **Breaking: `--skill` removed** — skills are discovered only from the configured `skills_dir` (default `<data-dir>/ai/skills`). When at least one skill is found, that folder is granted a default read permission, overridable by an explicit `deny read` in the policy file, so the agent can read skill files and their references with the standard read tools.
+- **Breaking: `skills_dir` moved under `skills`** — the config key is now `skills.dir`, alongside new `skills.auto_create` and `skills.min_tuples`. Existing configs get a warning pointing at the new key (and fail strict parsing during `ai setup`).
+- **Breaking: `--skill` removed** — skills are discovered only from the configured skills directory (default `<data-dir>/ai/skills`). When at least one skill is found, that folder is granted a default read permission, overridable by an explicit `deny read` in the policy file, so the agent can read skill files and their references with the standard read tools.
 
 ## v0.5.0 – Local Embeddings, Setup Wizard & CLI Overhaul
 

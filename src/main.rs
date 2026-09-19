@@ -29,7 +29,7 @@ mod util;
 use agent::{AgentContext, run_agent};
 use ansi_color_constants::{GREY, RESET};
 use clap::{CommandFactory, Parser};
-use cli::{AgentArgs, Cli, Command, MemoryCommand, SessionCommand};
+use cli::{AgentArgs, Cli, Command, MemoryCommand, SessionCommand, SkillsCommand};
 use clients::{anthropic_client, openai_client};
 use commands::{cmd_delete_session, cmd_list_sessions, cmd_probe_web};
 use config::Config;
@@ -104,6 +104,12 @@ fn main() -> anyhow::Result<()> {
             return match cmd {
                 MemoryCommand::List => commands::cmd_memory_list(&mem),
                 MemoryCommand::Search { query } => commands::cmd_memory_search(&mem, &query),
+            };
+        }
+        Some(Command::Skills(cmd)) => {
+            return match cmd {
+                SkillsCommand::List => commands::cmd_skills_list(&config),
+                SkillsCommand::Delete { name } => commands::cmd_skills_delete(&config, &name),
             };
         }
         Some(Command::Dream { jobs }) => {
@@ -269,16 +275,37 @@ async fn run_dream(
 ) -> anyhow::Result<()> {
     let resolved = resolve_provider(config)?;
     let model_name = config.model.clone();
+    let skills_dir = config.skills_dir_resolved();
+    let auto_create = config.skills.auto_create;
+    let min_tuples = config.skills_min_tuples();
     match resolved.flavor {
         providers::Flavor::OpenAi => {
             let model = openai_client(config, &resolved.base_url, "dream", resolved.env_var)?
                 .completion_model(&model_name);
-            dream::run(model, memory, jobs, max_turns).await
+            dream::run(
+                model,
+                memory,
+                jobs,
+                max_turns,
+                &skills_dir,
+                auto_create,
+                min_tuples,
+            )
+            .await
         }
         providers::Flavor::Anthropic => {
             let model = anthropic_client(config, &resolved.base_url, "dream", resolved.env_var)?
                 .completion_model(&model_name);
-            dream::run(model, memory, jobs, max_turns).await
+            dream::run(
+                model,
+                memory,
+                jobs,
+                max_turns,
+                &skills_dir,
+                auto_create,
+                min_tuples,
+            )
+            .await
         }
     }
 }

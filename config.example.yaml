@@ -38,8 +38,13 @@ system_prompt: "You are a concise, helpful CLI assistant."
 # Where sessions are stored (default: <data-dir>/ai/sessions).
 # session_dir: "~/.local/share/ai/sessions"
 
-# Where skills are discovered from (default: <data-dir>/ai/skills).
-# skills_dir: "~/.local/share/ai/skills"
+# Skills. `dir` is where SKILL.md files are discovered (default: <data-dir>/ai/skills).
+# `auto_create` lets `ai dream` author skills from past sessions (default false);
+# `min_tuples` is how many unreviewed exchanges a session needs first (default 10).
+# skills:
+#   dir: "~/.local/share/ai/skills"
+#   auto_create: false
+#   min_tuples: 10
 
 # Policy file with allow/deny rules (default: no rules — deny everything).
 # policy: "~/.config/ai/policy.txt"

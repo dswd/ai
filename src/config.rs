@@ -183,6 +183,19 @@ pub struct McpServerConfig {
     pub name: Option<String>,
 }
 
+/// Skills settings. `auto_create` lets the dream pass author skills; it is an
+/// authoring gate only (existing AI skills stay discoverable when off).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(default)]
+pub struct SkillsConfig {
+    /// Directory scanned for skills (`SKILL.md` files).
+    pub dir: Option<PathBuf>,
+    /// Allow `ai dream` to create/update/delete AI-authored skills.
+    pub auto_create: bool,
+    /// Minimum unprocessed tuples in a session before it is reviewed (default 10).
+    pub min_tuples: Option<usize>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct Config {
@@ -204,8 +217,8 @@ pub struct Config {
     pub thinking: Option<usize>,
     /// Directory where sessions are stored.
     pub session_dir: Option<PathBuf>,
-    /// Directory scanned for skills (SKILL.md files).
-    pub skills_dir: Option<PathBuf>,
+    /// Skills settings.
+    pub skills: SkillsConfig,
     /// Path to the policy file (allow/deny rules).
     pub policy: Option<PathBuf>,
     /// Path to the persistent memory SQLite database.
@@ -243,7 +256,7 @@ impl Default for Config {
             max_tokens: None,
             thinking: None,
             session_dir: None,
-            skills_dir: None,
+            skills: SkillsConfig::default(),
             policy: None,
             memory: None,
             dream: DreamConfig::default(),
@@ -269,7 +282,14 @@ impl Config {
             serde_ignored::deserialize(deserializer, |key| unknown.push(key.to_string()))
                 .with_context(|| format!("parsing config: {}", path.display()))?;
         for key in unknown {
-            log::warn!("unknown config key '{key}' in {}", path.display());
+            if key == "skills_dir" {
+                log::warn!(
+                    "'skills_dir' in {} moved to 'skills.dir' (the direct key is ignored)",
+                    path.display()
+                );
+            } else {
+                log::warn!("unknown config key '{key}' in {}", path.display());
+            }
         }
         Ok(config)
     }
@@ -392,7 +412,8 @@ impl Config {
     }
 
     pub fn skills_dir_resolved(&self) -> PathBuf {
-        self.skills_dir
+        self.skills
+            .dir
             .clone()
             .map(|p| crate::util::expand_tilde(&p.to_string_lossy()))
             .unwrap_or_else(|| {
@@ -401,6 +422,11 @@ impl Config {
                     .join("ai")
                     .join("skills")
             })
+    }
+
+    /// Minimum unprocessed tuples in a session before the skill review runs.
+    pub fn skills_min_tuples(&self) -> usize {
+        self.skills.min_tuples.unwrap_or(10).max(1)
     }
 
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
@@ -591,7 +617,10 @@ mod tests {
     fn test_resolved_paths_override() {
         let c = Config {
             session_dir: Some(PathBuf::from("/custom/sessions")),
-            skills_dir: Some(PathBuf::from("/custom/skills")),
+            skills: SkillsConfig {
+                dir: Some(PathBuf::from("/custom/skills")),
+                ..SkillsConfig::default()
+            },
             memory: Some(PathBuf::from("/custom/memory.json")),
             ..Config::default()
         };

@@ -30,11 +30,11 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `sandbox.rs` | The single checked filesystem layer: resolve-then-authorize-then-operate for every tool path |
 | `container.rs` | Session-scoped container for external commands (Docker/Podman): policy→bind mounts, network none unless web |
 | `context.rs` | Deterministic context editing: prune stale tool outputs from the history sent to the model |
-| `skills.rs` | Skill discovery/loading (markdown front-matter files) |
+| `skills.rs` | Skill discovery/loading (markdown front-matter files, `origin: ai` marked) plus the authoring helpers (`validate_slug`/`create`/`update`/`delete`) and `SkillStore` writing lock |
 | `session.rs` | Session persistence (JSON, schema v2: full chat log + provider/model binding); newest-session selection, the 60-minute resume window, and date-aware name lookup (`NAME` matches `YYYY-MM-DD_NAME`) used to continue one-off runs, an unnamed `ai` session, and explicit names; `tuples()` extracts completed user/agent exchanges for the transcript index |
 | `memory.rs` | SQLite store (`memory.db`): `memory` (facts + tags + provenance) and `transcripts` (derived user+agent tuples) tables, one-time migration from `memory.json`, session backfill, and semantic retrieval over sqlite-vec KNN with `last_used` tracking |
 | `embed.rs` | Local embedding (`fastembed`/ONNX): `Embedder` trait, `FastembedEmbedder` (lazy model load, E5 query/passage prefixes), model-id resolution, and vector serialization |
-| `dream.rs` | `ai dream` maintenance over a parallel work pool: extract memories from unprocessed transcripts, prune processed transcripts, judge stale entries. Also holds `PROMPT_THRESHOLD`/`should_prompt`/`is_affirmative` for the end-of-session prompt. |
+| `dream.rs` | `ai dream` maintenance over a parallel work pool: extract memories from unprocessed transcripts, review sessions for AI-authored skills (when `skills.auto_create`), prune processed transcripts, judge stale entries. Also holds `PROMPT_THRESHOLD`/`should_prompt`/`is_affirmative` for the end-of-session prompt. |
 | `tools/` | One file per tool (see below) |
 | `format.rs` | Streaming markdown-to-ANSI console formatting for assistant output |
 | `output.rs` | stdout/stderr stream routing (TTY-aware, `NO_COLOR`-aware) |
@@ -46,7 +46,7 @@ Never commit unformatted code — run `cargo fmt` before finishing any change.
 | `prompt.rs` | System prompt assembly, permission availability, missing-permission guidance |
 | `setup.rs` | Config/policy/session/provider resolution and CLI override application |
 | `clients.rs` | OpenAI/Anthropic client construction, `x-opencode-session` header |
-| `commands.rs` | Non-agent subcommands: `probe-web`, `session list`, `session delete` |
+| `commands.rs` | Non-agent subcommands: `probe-web`, `session list`, `session delete`, `skills list`, `skills delete` |
 | `tool.rs` | MCP tool-server connection (`--tool` and config `mcp.servers`; config failures warn+skip, `--tool` failures are fatal) |
 | `logging.rs` | Console logger, log-level setup |
 | `interactive.rs` | Interactive session loop, `/` commands, transcript indexing on save, usage reporting |
@@ -84,6 +84,10 @@ approval). It never takes or reports the config path, so the setup AI cannot rea
 user asks; signals the loop via a shared `Arc<AtomicBool>` in `AgentContext`. `stream_response`
 checks the flag per stream item and aborts generation once it is set. Not `Action`-gated,
 and not registered for one-off runs.
+- `skill_create.rs` / `skill_update.rs` / `skill_delete.rs` — dream-only authoring tools
+(`skills.auto_create`). They take no path, write only through `skills::SkillStore` under the
+skills directory, and refuse to touch skills without an `origin: ai` marker (accident prevention,
+not a security boundary). The store's mutex serializes concurrent reviews.
 
 ## Conventions
 

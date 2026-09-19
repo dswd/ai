@@ -13,7 +13,7 @@ A CLI agent for interacting with AI models, with tool use, filesystem and comman
 - **Sandboxed command execution** — The `execute` tool runs through a virtual bash interpreter (bashkit) with ~150 in-process builtins; external commands require explicit policy approval and, when a container image is configured (`-X`/`--container`), the whole command runs in a session container with only the policy-granted paths bind-mounted.
 - **Policy engine** — Granular allow/deny rules for read, write, execute, web fetch, and web search. Supports policy files, CLI overrides, interactive approval (`--ask`), and `--yolo` mode.
 - **Persistent memory** — Agent memory stored to disk (path configurable via `memory:` in the config) and injected into the system prompt; `--no-memory` disables it. Retrieval is semantic: facts and past exchanges are embedded locally (ONNX, via fastembed — configurable `embedding_model`, default `multilingual-e5-small`) and searched with sqlite-vec. Search results and injected references are capped to a 100-character fragment. Run maintenance with `ai dream`; set `dream.auto: true` to run it automatically at the end of each interactive session, or the session offers it once more than 50 maintenance tasks are pending.
-- **Skills** — Load reusable skill definitions from `SKILL.md` files in the skills folder (`skills_dir`, default `<data-dir>/ai/skills`), listed in the system prompt and loadable on demand with the `load_skill` tool. The skills folder is granted read access automatically.
+- **Skills** — Reusable `SKILL.md` definitions in the skills folder (config `skills.dir`, default `<data-dir>/ai/skills`), listed in the system prompt and loadable on demand with the `load_skill` tool; the folder is granted read access automatically. With `skills.auto_create: true`, `ai dream` can author skills from past sessions (tagged `origin: ai`, only those are agent-editable). Inspect or remove them with `ai skills list` / `ai skills delete NAME`.
 - **Extended thinking** — Optional reasoning budgets for models that support it.
 - **Headless browser** — Optional stealth-mode browser (Obscura) for web tools.
 - **MCP tool servers** — Connect to external MCP servers with `--tool URL` or the `mcp.servers` config list; config servers that fail to connect are skipped with a warning.
@@ -292,6 +292,7 @@ Commands:
   setup        Set up or reconfigure the AI interactively
   dream        Run memory maintenance
   memory       Inspect persistent memory (list, search)
+  skills       Inspect and manage skills (list, delete)
   completions  Generate a shell completion script and exit
 
 Options:

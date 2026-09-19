@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::memory::{self, Hit, HitKind, Memory, MemoryEntry};
 use crate::output;
 use crate::session::Session;
+use crate::skills;
 use crate::tools;
 use ansi_color_constants::*;
 #[cfg(feature = "browser")]
@@ -88,6 +89,57 @@ fn format_memory_hit(h: &Hit, query: &str, color: bool) -> String {
         "{badge}  {text}\n  {}",
         meta.join(&paint(color, GREY, " · "))
     )
+}
+
+/// Print every discovered skill with its origin and path.
+pub(crate) fn cmd_skills_list(config: &Config) -> anyhow::Result<()> {
+    let dir = config.skills_dir_resolved();
+    let skills = skills::discover(&dir);
+    let color = output::tty_enabled();
+    if skills.is_empty() {
+        println!(
+            "{}",
+            paint(color, GREY, &format!("No skills in {}.", dir.display()))
+        );
+        return Ok(());
+    }
+    println!(
+        "{}",
+        paint(color, BOLD, &format!("🧩  {} skill(s)", skills.len()))
+    );
+    for skill in &skills {
+        let origin = if skill.ai_created() {
+            paint(color, PURPLE, "ai")
+        } else {
+            paint(color, GREY, "user")
+        };
+        let meta = format!(
+            "  {} · origin {} · {}",
+            paint(color, GREY, "created by"),
+            origin,
+            paint(color, GREY, &skill.path.display().to_string())
+        );
+        println!();
+        if skill.description.trim().is_empty() {
+            println!("{}", paint(color, CYAN, &skill.name));
+        } else {
+            println!("{}  {}", paint(color, CYAN, &skill.name), skill.description);
+        }
+        println!("{meta}");
+    }
+    Ok(())
+}
+
+/// Delete a skill (its folder, including bundled files) by name.
+pub(crate) fn cmd_skills_delete(config: &Config, name: &str) -> anyhow::Result<()> {
+    let dir = config.skills_dir_resolved();
+    match skills::delete(&dir, name, false) {
+        Ok(path) => {
+            println!("Deleted skill '{name}' ({})", path.display());
+            Ok(())
+        }
+        Err(e) => anyhow::bail!("{e}"),
+    }
 }
 
 pub(crate) async fn cmd_probe_web(query: &str, config: &Config) -> anyhow::Result<()> {
@@ -415,5 +467,29 @@ mod tests {
         assert!(text_line.contains("needle"));
         assert!(text_line.contains('…'));
         assert!(text_line.chars().count() <= "memory  ".chars().count() + memory::FRAGMENT_CHARS);
+    }
+
+    #[test]
+    fn test_cmd_skills_delete_and_missing() {
+        let dir = std::env::temp_dir().join(format!("ai-cmd-skills-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("foo")).unwrap();
+        std::fs::write(
+            dir.join("foo").join("SKILL.md"),
+            "---\nname: foo\n---\nBody",
+        )
+        .unwrap();
+        let config = Config {
+            skills: crate::config::SkillsConfig {
+                dir: Some(dir.clone()),
+                ..Default::default()
+            },
+            ..Config::default()
+        };
+        assert!(cmd_skills_list(&config).is_ok());
+        assert!(cmd_skills_delete(&config, "foo").is_ok());
+        assert!(!dir.join("foo").exists());
+        assert!(cmd_skills_delete(&config, "foo").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

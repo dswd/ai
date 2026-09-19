@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS transcripts (
   agent_text TEXT NOT NULL,
   created    TEXT NOT NULL,
   processed  INTEGER NOT NULL DEFAULT 0,
+  skill_processed INTEGER NOT NULL DEFAULT 0,
   UNIQUE(session, seq)
 );
 "#;
@@ -269,6 +270,22 @@ fn migrate_from_fts(conn: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Add `transcripts.skill_processed` to databases created before the skill
+/// review pass existed.
+fn migrate_transcript_skill_column(conn: &Connection) -> anyhow::Result<()> {
+    let has_column: bool = conn
+        .prepare("PRAGMA table_info(transcripts)")?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .flatten()
+        .any(|name| name == "skill_processed");
+    if !has_column {
+        conn.execute_batch(
+            "ALTER TABLE transcripts ADD COLUMN skill_processed INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+    Ok(())
+}
+
 fn get_meta(conn: &Connection, key: &str) -> Option<String> {
     conn.query_row("SELECT value FROM meta WHERE key=?1", params![key], |r| {
         r.get(0)
@@ -369,6 +386,7 @@ impl Memory {
         conn.execute_batch(SCHEMA)
             .with_context(|| format!("initializing memory database: {}", db.display()))?;
         migrate_from_fts(&conn)?;
+        migrate_transcript_skill_column(&conn)?;
         if embedder.dims() > 0 {
             ensure_vec_tables(&conn, embedder.dims(), &embedder.model_id())?;
         }
@@ -802,7 +820,8 @@ impl Memory {
                  ON CONFLICT(session, seq) DO UPDATE SET
                    user_text = excluded.user_text,
                    agent_text = excluded.agent_text,
-                   processed = 0
+                   processed = 0,
+                   skill_processed = 0
                  WHERE transcripts.user_text IS NOT excluded.user_text
                     OR transcripts.agent_text IS NOT excluded.agent_text",
                 params![session, t.seq as i64, t.user, t.agent, now],
@@ -903,16 +922,93 @@ impl Memory {
         Ok(n)
     }
 
-    pub fn prune_transcripts(&self, days: i64) -> anyhow::Result<usize> {
+    /// Prune memory-processed transcripts older than `days`. When
+    /// `skill_min_tuples` is set, rows in sessions large enough to qualify for a
+    /// skill review are kept until reviewed (`skill_processed=1`); smaller
+    /// sessions are pruned normally so they are never stranded.
+    pub fn prune_transcripts(
+        &self,
+        days: i64,
+        skill_min_tuples: Option<usize>,
+    ) -> anyhow::Result<usize> {
         let conn = self.store.conn.lock().unwrap();
-        conn.execute(
-            "DELETE FROM transcript_vec WHERE rowid IN
-               (SELECT rowid FROM transcripts WHERE processed=1 AND created < ?1)",
-            params![iso_days_ago(days)],
-        )?;
+        let cutoff = iso_days_ago(days);
+        let n = if let Some(min) = skill_min_tuples {
+            let select = "SELECT rowid FROM transcripts
+                 WHERE processed=1 AND created < ?1
+                   AND (skill_processed=1
+                        OR (SELECT count(*) FROM transcripts t2
+                            WHERE t2.session = transcripts.session) < ?2)";
+            conn.execute(
+                &format!("DELETE FROM transcript_vec WHERE rowid IN ({select})"),
+                params![cutoff, min as i64],
+            )?;
+            conn.execute(
+                &format!("DELETE FROM transcripts WHERE rowid IN ({select})"),
+                params![cutoff, min as i64],
+            )?
+        } else {
+            conn.execute(
+                "DELETE FROM transcript_vec WHERE rowid IN
+                   (SELECT rowid FROM transcripts WHERE processed=1 AND created < ?1)",
+                params![cutoff],
+            )?;
+            conn.execute(
+                "DELETE FROM transcripts WHERE processed=1 AND created < ?1",
+                params![cutoff],
+            )?
+        };
+        Ok(n)
+    }
+
+    /// Minimum unprocessed tuples in a session before the skill review runs.
+    pub fn skill_review_batches(&self, min_tuples: usize, cap: usize) -> Vec<Vec<TranscriptRow>> {
+        let rows = {
+            let conn = self.store.conn.lock().unwrap();
+            let mut stmt = match conn.prepare(
+                "SELECT rowid, session, seq, user_text, agent_text FROM transcripts
+                 WHERE skill_processed = 0 ORDER BY session, seq",
+            ) {
+                Ok(stmt) => stmt,
+                Err(_) => return Vec::new(),
+            };
+            stmt.query_map([], |r| {
+                Ok(TranscriptRow {
+                    rowid: r.get(0)?,
+                    session: r.get(1)?,
+                    seq: r.get(2)?,
+                    user_text: r.get(3)?,
+                    agent_text: r.get(4)?,
+                })
+            })
+            .map(|rows| rows.flatten().collect::<Vec<_>>())
+            .unwrap_or_default()
+        };
+
+        let mut groups: Vec<(String, Vec<TranscriptRow>)> = Vec::new();
+        for row in rows {
+            match groups.last_mut() {
+                Some((session, batch)) if session == &row.session => batch.push(row),
+                _ => groups.push((row.session.clone(), vec![row])),
+            }
+        }
+        let cap = cap.max(1);
+        groups
+            .into_iter()
+            .filter(|(_, batch)| batch.len() >= min_tuples)
+            .map(|(_, batch)| batch.into_iter().take(cap).collect())
+            .collect()
+    }
+
+    pub fn mark_skill_processed(&self, rowids: &[i64]) -> anyhow::Result<usize> {
+        if rowids.is_empty() {
+            return Ok(0);
+        }
+        let placeholders = placeholders(rowids.len(), 1);
+        let conn = self.store.conn.lock().unwrap();
         let n = conn.execute(
-            "DELETE FROM transcripts WHERE processed=1 AND created < ?1",
-            params![iso_days_ago(days)],
+            &format!("UPDATE transcripts SET skill_processed=1 WHERE rowid IN ({placeholders})"),
+            params_from_iter(rowids.iter()),
         )?;
         Ok(n)
     }
@@ -1328,6 +1424,135 @@ mod tests {
     }
 
     #[test]
+    fn test_skill_review_batches_threshold_cap_and_mark() {
+        let (dir, mem) = temp_memory("skillbatches");
+        let many: Vec<TranscriptTuple> = (1..=12).map(|i| tuple(i, "u", "a")).collect();
+        mem.index_session("s1", &many).unwrap();
+        mem.index_session("s2", &[tuple(1, "u", "a"), tuple(2, "u", "a")])
+            .unwrap();
+
+        // s2 is below the threshold; s1 is capped at 5.
+        let batches = mem.skill_review_batches(10, 5);
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].len(), 5);
+        assert!(batches[0].iter().all(|r| r.session == "s1"));
+
+        // A full-cap review (50) sees all 12, and marking removes the session.
+        let batches = mem.skill_review_batches(10, 50);
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].len(), 12);
+        let rowids: Vec<i64> = batches[0].iter().map(|r| r.rowid).collect();
+        mem.mark_skill_processed(&rowids).unwrap();
+        assert!(mem.skill_review_batches(10, 50).is_empty());
+        cleanup(dir);
+    }
+
+    #[test]
+    fn test_changed_transcript_resets_skill_review() {
+        let (dir, mem) = temp_memory("skillreset");
+        let many: Vec<TranscriptTuple> = (1..=10).map(|i| tuple(i, "u", "a")).collect();
+        mem.index_session("s1", &many).unwrap();
+        let rowids: Vec<i64> = mem
+            .skill_review_batches(10, 50)
+            .into_iter()
+            .flatten()
+            .map(|r| r.rowid)
+            .collect();
+        mem.mark_skill_processed(&rowids).unwrap();
+        assert!(mem.skill_review_batches(10, 50).is_empty());
+
+        // Re-indexing with changed text must make that row reviewable again.
+        let mut changed = many.clone();
+        changed[0] = tuple(1, "u", "different reply");
+        mem.index_session("s1", &changed).unwrap();
+        let unprocessed: i64 = mem
+            .store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM transcripts WHERE skill_processed=0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(unprocessed, 1);
+
+        // Re-indexing the whole session changes all rows and re-queues it.
+        let all_changed: Vec<TranscriptTuple> =
+            (1..=10).map(|i| tuple(i, "u", "changed")).collect();
+        mem.index_session("s1", &all_changed).unwrap();
+        let batches = mem.skill_review_batches(10, 50);
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].len(), 10);
+        cleanup(dir);
+    }
+
+    #[test]
+    fn test_prune_holds_candidates_but_not_small_sessions() {
+        let (dir, mem) = temp_memory("skillprune");
+        // A small session (< min_tuples) is pruned normally even unreviewed.
+        mem.index_session("small", &[tuple(1, "old", "reply")])
+            .unwrap();
+        // A qualifying session (10 tuples) is held back until skill-reviewed.
+        let many: Vec<TranscriptTuple> = (1..=10).map(|i| tuple(i, "old", "reply")).collect();
+        mem.index_session("big", &many).unwrap();
+        let rowids: Vec<i64> = {
+            let conn = mem.store.conn.lock().unwrap();
+            load_transcripts(&conn, false)
+                .unwrap()
+                .into_iter()
+                .map(|r| r.rowid)
+                .collect()
+        };
+        mem.mark_processed(&rowids).unwrap();
+        {
+            let conn = mem.store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE transcripts SET created=?1",
+                params![iso_days_ago(RETENTION_DAYS + 1)],
+            )
+            .unwrap();
+        }
+        mem.prune_transcripts(RETENTION_DAYS, Some(10)).unwrap();
+        assert_eq!(mem.count_transcripts(), 10, "the big session is held back");
+        mem.mark_skill_processed(&rowids).unwrap();
+        mem.prune_transcripts(RETENTION_DAYS, Some(10)).unwrap();
+        assert_eq!(mem.count_transcripts(), 0);
+        cleanup(dir);
+    }
+
+    #[test]
+    fn test_skill_column_migration_adds_missing_column() {
+        let dir = std::env::temp_dir().join(format!("ai-memory-skillcol-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("memory.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE transcripts (
+                   rowid INTEGER PRIMARY KEY, session TEXT NOT NULL, seq INTEGER NOT NULL,
+                   user_text TEXT NOT NULL, agent_text TEXT NOT NULL, created TEXT NOT NULL,
+                   processed INTEGER NOT NULL DEFAULT 0, UNIQUE(session, seq));",
+            )
+            .unwrap();
+        }
+        let mem = Memory::open(&path, test_embedder()).unwrap();
+        let conn = mem.store.conn.lock().unwrap();
+        let has: bool = conn
+            .prepare("PRAGMA table_info(transcripts)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .flatten()
+            .any(|n| n == "skill_processed");
+        assert!(has, "migration should add skill_processed");
+        drop(conn);
+        cleanup(dir);
+    }
+
+    #[test]
     fn test_prune_only_processed_and_old() {
         let (dir, mem) = temp_memory("prune");
         mem.index_session("s1", &[tuple(1, "old", "reply")])
@@ -1337,11 +1562,11 @@ mod tests {
             load_transcripts(&conn, false).unwrap()[0].rowid
         };
         // Unprocessed rows survive regardless of age.
-        mem.prune_transcripts(0).unwrap();
+        mem.prune_transcripts(0, None).unwrap();
         assert_eq!(mem.count_transcripts(), 1);
         mem.mark_processed(&[rowid]).unwrap();
         // Processed but not older than the window survives.
-        mem.prune_transcripts(RETENTION_DAYS).unwrap();
+        mem.prune_transcripts(RETENTION_DAYS, None).unwrap();
         assert_eq!(mem.count_transcripts(), 1);
         // Processed and older than the window is removed.
         {
@@ -1352,7 +1577,7 @@ mod tests {
             )
             .unwrap();
         }
-        mem.prune_transcripts(RETENTION_DAYS).unwrap();
+        mem.prune_transcripts(RETENTION_DAYS, None).unwrap();
         assert_eq!(mem.count_transcripts(), 0);
         cleanup(dir);
     }

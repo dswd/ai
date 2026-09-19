@@ -266,6 +266,10 @@ pub enum Command {
     #[command(subcommand)]
     Memory(MemoryCommand),
 
+    /// Inspect and manage skills
+    #[command(subcommand)]
+    Skills(SkillsCommand),
+
     /// Generate a shell completion script for SHELL and exit
     Completions {
         #[arg(value_name = "SHELL", help = "bash, zsh, fish, …")]
@@ -301,6 +305,17 @@ pub enum MemoryCommand {
     Search {
         #[arg(value_name = "QUERY")]
         query: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SkillsCommand {
+    /// List discovered skills
+    List,
+    /// Delete a skill by NAME (its folder, including bundled files)
+    Delete {
+        #[arg(value_name = "NAME")]
+        name: String,
     },
 }
 
@@ -433,6 +448,14 @@ mod tests {
         assert!(matches!(
             parse(&["memory", "search", "berlin"]).command,
             Some(Command::Memory(MemoryCommand::Search { .. }))
+        ));
+        assert!(matches!(
+            parse(&["skills", "list"]).command,
+            Some(Command::Skills(SkillsCommand::List))
+        ));
+        assert!(matches!(
+            parse(&["skills", "delete", "foo"]).command,
+            Some(Command::Skills(SkillsCommand::Delete { .. }))
         ));
         assert!(matches!(
             parse(&["dream", "--jobs", "8"]).command,

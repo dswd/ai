@@ -1,13 +1,32 @@
 use log::warn;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use crate::tools::shared::should_skip_walk_entry;
+
+/// Origin tag written into the front matter of AI-authored skills.
+pub const AI_ORIGIN: &str = "ai";
+
+/// Maximum body/description sizes accepted from the authoring tools.
+pub const MAX_SKILL_BODY_CHARS: usize = 20_000;
+pub const MAX_SKILL_DESCRIPTION_CHARS: usize = 200;
 
 #[derive(Debug, Clone, Deserialize)]
 struct SkillFrontMatter {
     name: Option<String>,
     description: Option<String>,
+    #[serde(default)]
+    origin: Option<String>,
+}
+
+/// Front matter serialized by the authoring tools (field order is intentional).
+#[derive(Debug, Serialize)]
+struct SkillFrontMatterOut<'a> {
+    name: &'a str,
+    description: &'a str,
+    origin: &'a str,
+    updated: String,
 }
 
 #[derive(Debug, Clone)]
@@ -15,6 +34,14 @@ pub struct Skill {
     pub name: String,
     pub description: String,
     pub path: PathBuf,
+    /// `"ai"` for skills authored by the agent, otherwise `"user"`.
+    pub origin: String,
+}
+
+impl Skill {
+    pub fn ai_created(&self) -> bool {
+        self.origin == AI_ORIGIN
+    }
 }
 
 pub fn discover(skills_dir: &Path) -> Vec<Skill> {
@@ -45,10 +72,18 @@ pub fn summary(skills: &[Skill]) -> String {
         String::new(),
     ];
     for skill in skills {
-        if skill.description.trim().is_empty() {
-            lines.push(format!("- **{}**", skill.name));
+        let label = if skill.ai_created() {
+            " (AI-created)"
         } else {
-            lines.push(format!("- **{}**: {}", skill.name, skill.description));
+            ""
+        };
+        if skill.description.trim().is_empty() {
+            lines.push(format!("- **{}**{}", skill.name, label));
+        } else {
+            lines.push(format!(
+                "- **{}**{}: {}",
+                skill.name, label, skill.description
+            ));
         }
     }
     lines.join("\n")
@@ -56,6 +91,182 @@ pub fn summary(skills: &[Skill]) -> String {
 
 pub fn load(skill: &Skill) -> std::io::Result<String> {
     std::fs::read_to_string(&skill.path)
+}
+
+/// Validate a skill name as a filesystem-safe lowercase slug.
+pub fn validate_slug(name: &str) -> Result<(), String> {
+    let valid = !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "invalid skill name '{name}': use lowercase letters, digits and hyphens (max 64 chars)"
+        ))
+    }
+}
+
+/// Find a skill by name in `dir`.
+pub fn find(dir: &Path, name: &str) -> Option<Skill> {
+    discover(dir).into_iter().find(|s| s.name == name)
+}
+
+fn check_limits(description: &str, body: &str) -> Result<(), String> {
+    if description.chars().count() > MAX_SKILL_DESCRIPTION_CHARS {
+        return Err(format!(
+            "description is too long (max {MAX_SKILL_DESCRIPTION_CHARS} characters)"
+        ));
+    }
+    if body.chars().count() > MAX_SKILL_BODY_CHARS {
+        return Err(format!(
+            "skill body is too long (max {MAX_SKILL_BODY_CHARS} characters)"
+        ));
+    }
+    if body.trim().is_empty() {
+        return Err("skill body must not be empty".to_string());
+    }
+    Ok(())
+}
+
+fn render_skill_file(name: &str, description: &str, body: &str) -> Result<String, String> {
+    let front = SkillFrontMatterOut {
+        name,
+        description,
+        origin: AI_ORIGIN,
+        updated: crate::util::now_iso(),
+    };
+    let yaml = serde_yaml_ng::to_string(&front)
+        .map_err(|e| format!("failed to serialize skill metadata: {e}"))?;
+    Ok(format!("---\n{yaml}---\n\n{}\n", body.trim_end()))
+}
+
+/// Create a new AI-authored skill under `dir`. Refuses names that already exist.
+pub fn create(dir: &Path, name: &str, description: &str, body: &str) -> Result<PathBuf, String> {
+    validate_slug(name)?;
+    check_limits(description, body)?;
+    if find(dir, name).is_some() {
+        return Err(format!("a skill named '{name}' already exists"));
+    }
+    let path = dir.join(name).join("SKILL.md");
+    if path.exists() {
+        return Err(format!("a file already exists at {}", path.display()));
+    }
+    let content = render_skill_file(name, description, body)?;
+    std::fs::create_dir_all(path.parent().unwrap_or(dir))
+        .map_err(|e| format!("failed to create skill directory: {e}"))?;
+    std::fs::write(&path, content).map_err(|e| format!("failed to write skill: {e}"))?;
+    Ok(path)
+}
+
+/// Update an existing AI-authored skill. Refuses skills without the AI marker.
+pub fn update(
+    dir: &Path,
+    name: &str,
+    description: Option<&str>,
+    body: &str,
+) -> Result<PathBuf, String> {
+    validate_slug(name)?;
+    let skill = find(dir, name).ok_or_else(|| format!("no skill named '{name}'"))?;
+    if !skill.ai_created() {
+        return Err(format!("skill '{name}' was not created by the agent"));
+    }
+    let description = description.unwrap_or(&skill.description);
+    check_limits(description, body)?;
+    let content = render_skill_file(name, description, body)?;
+    std::fs::write(&skill.path, content).map_err(|e| format!("failed to write skill: {e}"))?;
+    Ok(skill.path)
+}
+
+/// Delete a skill. When `require_ai` is set, only AI-authored skills may be
+/// removed. Removes the skill's own directory, but only the `SKILL.md` when the
+/// skill sits directly in `dir` (so the whole skills tree is never wiped).
+pub fn delete(dir: &Path, name: &str, require_ai: bool) -> Result<PathBuf, String> {
+    let skill = find(dir, name).ok_or_else(|| format!("no skill named '{name}'"))?;
+    if require_ai && !skill.ai_created() {
+        return Err(format!("skill '{name}' was not created by the agent"));
+    }
+    let root = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let own = skill
+        .path
+        .parent()
+        .map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf()));
+    if own.as_deref() == Some(root.as_path()) {
+        std::fs::remove_file(&skill.path).map_err(|e| format!("failed to delete skill: {e}"))?;
+    } else if let Some(own) = own {
+        std::fs::remove_dir_all(&own).map_err(|e| format!("failed to delete skill: {e}"))?;
+    }
+    Ok(skill.path)
+}
+
+/// Write counters reported by the dream skill pass.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SkillWriteStats {
+    pub created: usize,
+    pub updated: usize,
+    pub deleted: usize,
+}
+
+/// Serialized, counter-tracking access to the skills directory for the authoring
+/// tools. The mutex prevents concurrent dream reviews from clobbering each other.
+#[derive(Debug)]
+pub struct SkillStore {
+    dir: PathBuf,
+    lock: Mutex<()>,
+    stats: Mutex<SkillWriteStats>,
+}
+
+impl SkillStore {
+    pub fn new(dir: PathBuf) -> Self {
+        Self {
+            dir,
+            lock: Mutex::new(()),
+            stats: Mutex::new(SkillWriteStats::default()),
+        }
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    pub fn stats(&self) -> SkillWriteStats {
+        *self.stats.lock().unwrap()
+    }
+
+    pub fn create(&self, name: &str, description: &str, body: &str) -> Result<PathBuf, String> {
+        let _guard = self.lock.lock().unwrap();
+        let path = create(&self.dir, name, description, body)?;
+        self.stats.lock().unwrap().created += 1;
+        log::info!("created skill '{name}' at {}", path.display());
+        Ok(path)
+    }
+
+    pub fn update(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        body: &str,
+    ) -> Result<PathBuf, String> {
+        let _guard = self.lock.lock().unwrap();
+        let path = update(&self.dir, name, description, body)?;
+        self.stats.lock().unwrap().updated += 1;
+        log::info!("updated skill '{name}' at {}", path.display());
+        Ok(path)
+    }
+
+    pub fn delete(&self, name: &str) -> Result<PathBuf, String> {
+        let _guard = self.lock.lock().unwrap();
+        let path = delete(&self.dir, name, true)?;
+        self.stats.lock().unwrap().deleted += 1;
+        log::info!("deleted skill '{name}' at {}", path.display());
+        Ok(path)
+    }
 }
 
 /// Cap on the number of bundled files reported by `load_skill`.
@@ -141,9 +352,9 @@ fn parse_skill_file(path: &Path) -> Option<Skill> {
         }
     };
 
-    let (front_name, front_desc) = match parse_front_matter(&content) {
-        Some(fm) => (fm.name, fm.description),
-        None => (None, None),
+    let (front_name, front_desc, front_origin) = match parse_front_matter(&content) {
+        Some(fm) => (fm.name, fm.description, fm.origin),
+        None => (None, None, None),
     };
 
     let name = front_name
@@ -172,6 +383,9 @@ fn parse_skill_file(path: &Path) -> Option<Skill> {
         name,
         description: front_desc.unwrap_or_default(),
         path: path.to_path_buf(),
+        origin: front_origin
+            .filter(|o| !o.trim().is_empty())
+            .unwrap_or_else(|| "user".to_string()),
     })
 }
 
@@ -391,5 +605,95 @@ mod tests {
         let skills = discover(&dir);
         assert!(additional_files(&skills[0]).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_origin_parsed_and_marked_in_summary() {
+        let dir = temp_dir("origin");
+        std::fs::create_dir_all(dir.join("hand")).unwrap();
+        std::fs::create_dir_all(dir.join("auto")).unwrap();
+        std::fs::write(
+            dir.join("hand").join("SKILL.md"),
+            "---\nname: hand\ndescription: By hand\n---\nBody",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("auto").join("SKILL.md"),
+            "---\nname: auto\ndescription: By agent\norigin: ai\n---\nBody",
+        )
+        .unwrap();
+        let skills = discover(&dir);
+        let auto = skills.iter().find(|s| s.name == "auto").unwrap();
+        assert!(auto.ai_created());
+        let hand = skills.iter().find(|s| s.name == "hand").unwrap();
+        assert!(!hand.ai_created());
+        let text = summary(&skills);
+        assert!(text.contains("**auto** (AI-created): By agent"));
+        assert!(text.contains("**hand**: By hand"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_create_update_delete_lifecycle() {
+        let dir = temp_dir("lifecycle");
+        let path = create(&dir, "my-skill", "Does things", "Step one\nStep two").unwrap();
+        assert!(path.exists());
+        assert_eq!(path.file_name().unwrap(), "SKILL.md");
+        let skill = find(&dir, "my-skill").unwrap();
+        assert!(skill.ai_created());
+        assert_eq!(skill.description, "Does things");
+
+        // create refuses a duplicate name.
+        assert!(create(&dir, "my-skill", "Again", "Body").is_err());
+
+        // update only touches AI skills.
+        std::fs::create_dir_all(dir.join("hand")).unwrap();
+        std::fs::write(
+            dir.join("hand").join("SKILL.md"),
+            "---\nname: hand\n---\nBody",
+        )
+        .unwrap();
+        assert!(update(&dir, "hand", None, "new").is_err());
+
+        update(&dir, "my-skill", Some("Updated"), "New body").unwrap();
+        let skill = find(&dir, "my-skill").unwrap();
+        assert_eq!(skill.description, "Updated");
+
+        delete(&dir, "my-skill", true).unwrap();
+        assert!(find(&dir, "my-skill").is_none());
+        // user skill survives an AI-scoped delete.
+        assert!(delete(&dir, "hand", true).is_err());
+        // and the whole tree is intact.
+        assert!(dir.join("hand").join("SKILL.md").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_delete_root_level_skill_keeps_tree() {
+        let dir = temp_dir("rootdelete");
+        std::fs::write(
+            dir.join("SKILL.md"),
+            "---\nname: rootish\ndescription: Root\n---\nBody",
+        )
+        .unwrap();
+        // A sibling skill directory must survive.
+        std::fs::create_dir_all(dir.join("other")).unwrap();
+        std::fs::write(
+            dir.join("other").join("SKILL.md"),
+            "---\nname: other\n---\nB",
+        )
+        .unwrap();
+        delete(&dir, "rootish", false).unwrap();
+        assert!(!dir.join("SKILL.md").exists());
+        assert!(dir.join("other").join("SKILL.md").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_validate_slug() {
+        assert!(validate_slug("good-name-1").is_ok());
+        for bad in ["", "UPPER", "../escape", "with space", "-leading", "a/b"] {
+            assert!(validate_slug(bad).is_err(), "{bad}");
+        }
     }
 }

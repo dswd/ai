@@ -160,8 +160,8 @@ fn print_config_summary(path: &Path, config: &Config) {
         value(path_value(config.session_dir.as_ref()))
     );
     println!(
-        "    skills_dir:          {}",
-        value(path_value(config.skills_dir.as_ref()))
+        "    skills.dir:          {}",
+        value(path_value(config.skills.dir.as_ref()))
     );
     println!(
         "    policy:              {}",
@@ -762,7 +762,10 @@ const GUIDE: &str = "\
 - `context_window`: context size in tokens, shown as a usage indicator in interactive
   sessions. Normally derived from the model; only override for unusual setups.
 - `session_dir`: directory for saved sessions. Default: the platform data dir under `ai/sessions`.
-- `skills_dir`: directory scanned for skills (`SKILL.md` files). Default: platform data dir under `ai/skills`.
+- `skills.dir`: directory scanned for skills (`SKILL.md` files). Default: platform data dir under `ai/skills`.
+- `skills.auto_create`: let `ai dream` author skills from past sessions (default false). AI skills
+  are tagged and only they can be modified by the agent.
+- `skills.min_tuples`: unprocessed exchanges a session needs before it is reviewed (default 10).
 - `memory`: path to the persistent memory SQLite database (memory is enabled by default; `--no-memory` disables it).
 - `embedding_model`: local model used to embed memories for semantic search (default
   `multilingual-e5-small`; options include `multilingual-e5-base`, `multilingual-e5-large`,

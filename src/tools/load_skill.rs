@@ -101,6 +101,7 @@ mod tests {
             name: "test-skill".to_string(),
             description: "Test".to_string(),
             path: dir.join("SKILL.md"),
+            origin: "user".to_string(),
         };
         let tool = LoadSkillTool::new(Arc::new(vec![skill]));
         let out = tool
