@@ -34,7 +34,7 @@
           <div class="demo-url">rename photos — ai</div>
         </div>
         <div class="demo-body">
-          <div class="demo-line"><span class="pr">$</span> <span class="in">ai -w=./** "rename all .jpeg photos to .jpg and make everything lowercase"</span></div>
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai run -w=./** "rename all .jpeg photos to .jpg and make everything lowercase"</span></div>
           <div class="demo-line"><span class="think">Scanning the project for .jpeg files...</span></div>
           <div class="demo-line"><span class="tool">🗂 list_dir ./</span></div>
           <div class="demo-line"><span class="tool">↗ move_file Vacation/IMG_001.JPEG → vacation/img_001.jpg <span class="dim">(x57)</span></span></div>
@@ -48,7 +48,7 @@
           <div class="demo-url">analyze document — ai</div>
         </div>
         <div class="demo-body">
-          <div class="demo-line"><span class="pr">$</span> <span class="in">ai -r=./ "summarize this 10-K filing for me"</span></div>
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai run -r=./ "summarize this 10-K filing for me"</span></div>
           <div class="demo-line"><span class="think">Extracting text from the SEC filing PDF...</span></div>
           <div class="demo-line"><span class="tool">👁 file_view sec-filings/10k-2025.pdf</span></div>
           <div class="demo-line"><span class="out">Apple Inc. fiscal year 2025 10-K filing:</span></div>
@@ -63,7 +63,7 @@
           <div class="demo-url">shell help — ai</div>
         </div>
         <div class="demo-body">
-          <div class="demo-line"><span class="pr">$</span> <span class="in">ai -r=./ "find all git repos in ~/projects that have unpushed commits over a week old"</span></div>
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai run -r=./ "find all git repos in ~/projects that have unpushed commits over a week old"</span></div>
           <div class="demo-line"><span class="think">I'll find every git working tree and check its status against the remote...</span></div>
           <div class="demo-line"><span class="tool">🚀 execute find ~/projects -name .git -type d -exec sh -c 'cd ...' _ {} \;</span></div>
           <div class="demo-line"><span class="out">Here's a one-liner that lists stale branches with unpushed commits in every repo under ~/projects, sorted by age:</span></div>
@@ -77,7 +77,7 @@
           <div class="demo-url">find a deal — ai</div>
         </div>
         <div class="demo-body">
-          <div class="demo-line"><span class="pr">$</span> <span class="in">ai --web "find the best price on a refurbished ThinkPad X1 Carbon Gen 11"</span></div>
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai run --web "find the best price on a refurbished ThinkPad X1 Carbon Gen 11"</span></div>
           <div class="demo-line"><span class="think">Searching across refurbished electronics marketplaces...</span></div>
           <div class="demo-line"><span class="tool">🌐 web_search "refurbished ThinkPad X1 Carbon Gen 11 price best deal"</span></div>
           <div class="demo-line"><span class="tool">🌐 web_fetch https://backmarket.com/thinkpad-x1-carbon...</span></div>
@@ -94,9 +94,9 @@
           <div class="demo-url">work recap — ai</div>
         </div>
         <div class="demo-body">
-          <div class="demo-line"><span class="pr">$</span> <span class="in">ai -x git "what did the team ship this week?"</span></div>
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai run -x git "what did the team ship this week?"</span></div>
           <div class="demo-line"><span class="think">Pulling commit history and diff stats for the last 7 days...</span></div>
-          <div class="demo-line"><span class="tool">📜 git_log -n50</span></div>
+          <div class="demo-line"><span class="tool">🚀 execute git log -n50 --pretty=short</span></div>
           <div class="demo-line"><span class="out">This week: 3 features landed, 11 bugs fixed across 5 repos.</span></div>
           <div class="demo-line"><span class="out">• Rate-limiter middleware (alex, 8 commits)</span></div>
           <div class="demo-line"><span class="out">• Dark mode in settings panel (jess, 12 commits)</span></div>
@@ -110,13 +110,40 @@
           <div class="demo-url">scrape product — ai</div>
         </div>
         <div class="demo-body">
-          <div class="demo-line"><span class="pr">$</span> <span class="in">ai --web "get the specs and price of the MacBook Pro on apple.com"</span></div>
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai run --web "get the specs and price of the MacBook Pro on apple.com"</span></div>
           <div class="demo-line"><span class="think">Launching headless browser to extract product details...</span></div>
           <div class="demo-line"><span class="tool">💻 browser_navigate https://www.apple.com/macbook-pro/</span></div>
           <div class="demo-line"><span class="tool">💻 browser_get_element #specs</span></div>
           <div class="demo-line"><span class="out">MacBook Pro 16\": M4 Max, up to 128GB unified memory, 36hr battery</span></div>
           <div class="demo-line"><span class="out">• Starting at $2,499 · 512GB SSD standard</span></div>
           <div class="demo-line"><span class="tool">📈 (600, 200, 300)</span></div>
+        </div>
+      </div>
+      <div class="demo-slide">
+        <div class="demo-bar">
+          <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+          <div class="demo-url">recall context — ai</div>
+        </div>
+        <div class="demo-body">
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai run "how does our API want request payloads formatted?"</span></div>
+          <div class="demo-line"><span class="tool">🧠 from memory (score 0.86): the API uses snake_case JSON bodies</span></div>
+          <div class="demo-line"><span class="tool">🧠 from transcript 2026-09-12_backend (score 0.81): pagination is page / per_page</span></div>
+          <div class="demo-line"><span class="out">Request bodies are JSON in snake_case, and pagination uses <code>page</code> and <code>per_page</code>.</span></div>
+          <div class="demo-line"><span class="tool">📈 (300, 120, 180)</span></div>
+        </div>
+      </div>
+      <div class="demo-slide">
+        <div class="demo-bar">
+          <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+          <div class="demo-url">release skill — ai</div>
+        </div>
+        <div class="demo-body">
+          <div class="demo-line"><span class="pr">$</span> <span class="in">ai run -r=./ -w=./ "cut a release"</span></div>
+          <div class="demo-line"><span class="tool">📖 load_skill release</span></div>
+          <div class="demo-line"><span class="dim">  bundled: scripts/bump.sh, docs/RELEASE.md</span></div>
+          <div class="demo-line"><span class="out">Following the release skill: bumped the version, updated the changelog, committed and tagged.</span></div>
+          <div class="demo-line"><span class="tool">🚀 execute git tag v0.5.1</span></div>
+          <div class="demo-line"><span class="tool">📈 (500, 250, 220)</span></div>
         </div>
       </div>
     </div>
@@ -134,52 +161,78 @@
 
   <div class="core-card">
     <h3>The model, your data, nothing else</h3>
-    <p>Work with any LLM like a normal shell command. Pass your prompt on the command line, pipe data in via stdin, and pipe the response out wherever you need it. The AI sees <strong>only what you give it</strong> — no filesystem, no network, no side effects. Every capability beyond that is an explicit choice, enabled by you and independently gated.</p>
+    <p>Work with any LLM like a normal shell command: <code>ai run "explain this"</code>, pipe data in via stdin, and pipe the response out wherever you need it. Bare <code>ai</code> starts an interactive session. The AI sees <strong>only what you give it</strong> — no filesystem, no network, no shell unless you grant it — and every capability beyond a plain answer is an explicit, independently gated choice. Local semantic memory is on by default and can be turned off with <code>--no-memory</code>.</p>
     <div class="core-badges">
       <span>File access: off</span>
       <span>Shell: off</span>
       <span>Web: off</span>
       <span>Declarative policy engine</span>
+      <span>Runs fully local for memory</span>
     </div>
   </div>
 
-  <div class="opt-connector">Optional capabilities</div>
+  <div class="opt-connector">Capabilities you opt into</div>
 
   <div class="opt-grid">
     <div class="opt-card">
       <div class="icon icon-green">&#x1f310;</div>
       <h3>Web Access</h3>
-      <p><strong>Search the web</strong> via DuckDuckGo, Google, or Bing using a stealth headless browser. <strong>Fetch any URL</strong> and convert HTML to readable text. Independently gated with <strong>URL allowlists</strong>.</p>
+      <p><strong>Search the web</strong> through a configurable provider ladder (Brave, Tavily, Exa, Serper, SearXNG, or keyless DuckDuckGo/Google/Bing). <strong>Fetch any URL</strong> and convert HTML to readable text, all gated with <strong>URL allowlists</strong>.</p>
     </div>
     <div class="opt-card">
       <div class="icon icon-green">&#x1f4bb;</div>
       <h3>Browser Automation</h3>
-      <p><strong>Navigate, click, extract</strong> — drive a real headless browser for JavaScript-heavy sites, login flows, and dynamic content. Requires <strong>web-fetch permission</strong>.</p>
+      <p><strong>Navigate, click, extract</strong> — drive a stealth headless browser for JavaScript-heavy sites, login flows, and dynamic content. Requires <strong>web-fetch permission</strong>.</p>
     </div>
     <div class="opt-card">
       <div class="icon icon-blue">&#x1f4c1;</div>
       <h3>Filesystem Access</h3>
-      <p><strong>Read-only or read-write</strong> with fine-grained permissions. <strong>Policy files</strong>, and <strong>interactive ask mode</strong>.</p>
+      <p><strong>Read-only or read-write</strong> with fine-grained permissions. Paths are resolved (symlinks included) before policy, so <strong>deny rules inside an allowed tree</strong> hold. Policy files and <strong>interactive ask mode</strong>.</p>
     </div>
     <div class="opt-card">
       <div class="icon icon-rose">$&gt;</div>
       <h3>Shell Commands</h3>
-      <p>164 built-in commands (grep, sed, awk, find, tar, curl, git, …) run <strong>in-process</strong> via bashkit. Only external commands need allowlisting. Filesystem access governed by <strong>read/write policy</strong>.</p>
+      <p>150+ built-in commands (grep, sed, awk, find, tar, curl, git, …) run <strong>in-process</strong> via bashkit. Only external commands need allowlisting, and read/write policy still governs the files they touch.</p>
+    </div>
+    <div class="opt-card">
+      <div class="icon icon-blue">&#x1f4e6;</div>
+      <h3>Container Isolation</h3>
+      <p>Run external commands inside a <strong>session container</strong> (<code>-X</code>). Only the policy-granted paths are bind-mounted, and it gets <strong>no network</strong> unless web access is granted.</p>
     </div>
     <div class="opt-card">
       <div class="icon icon-purple">&#x1f9e0;</div>
-      <h3>Memory</h3>
-      <p><strong>Persistent long-term store</strong> for facts and project context. The model <strong>adds and deletes entries</strong> itself.</p>
+      <h3>Semantic Memory</h3>
+      <p>Facts and past exchanges are embedded <strong>locally</strong> (ONNX) and searched with <strong>sqlite-vec</strong>. Relevant hits are injected per message with a <strong>match score</strong> — no API round-trips, no data leaving your machine.</p>
+    </div>
+    <div class="opt-card">
+      <div class="icon icon-purple">&#x1f319;</div>
+      <h3>Memory Maintenance</h3>
+      <p><code>ai dream</code> distills conversations into durable facts, prunes stale transcripts, and reviews old entries. Run it on demand, automatically at session end, or schedule it.</p>
+    </div>
+    <div class="opt-card">
+      <div class="icon icon-rose">&#x1f4dc;</div>
+      <h3>Skills</h3>
+      <p>Drop a <code>SKILL.md</code> into the skills folder and the model can load it on demand, along with any <strong>bundled scripts and docs</strong>. With <code>skills.auto_create</code>, <code>ai dream</code> can even author skills from your past sessions.</p>
     </div>
     <div class="opt-card">
       <div class="icon icon-rose">&#x1f4be;</div>
       <h3>Persistent Sessions</h3>
-      <p>Conversations <strong>auto-saved to disk</strong>. Resume sessions to continue where you left off.</p>
+      <p>Conversations <strong>auto-saved to disk</strong> with the full tool history. Continue the newest one automatically, resume by date-aware name, fork on a provider/model change, or run stateless.</p>
     </div>
     <div class="opt-card">
       <div class="icon icon-blue">&#x2699;&#xfe0f;</div>
       <h3>MCP Tool Servers</h3>
-      <p>Connect to external <strong>MCP</strong> servers. IDE integrations, database agents, API gateways — use any tool you want.</p>
+      <p>Connect external <strong>MCP</strong> servers via <code>--tool URL</code> or <code>mcp.servers</code> in the config. IDE integrations, database agents, API gateways — a bad config entry warns and is skipped.</p>
+    </div>
+    <div class="opt-card">
+      <div class="icon icon-green">&#x2728;</div>
+      <h3>Two-Phase Setup</h3>
+      <p><code>ai setup</code> walks you through a provider and model (browsing the <strong>models.dev</strong> catalog), proves the connection, then lets the AI finish the config through a sandboxed, approval-gated edit.</p>
+    </div>
+    <div class="opt-card">
+      <div class="icon icon-green">&#x1f4d6;</div>
+      <h3>Inline Help</h3>
+      <p>Ask the agent about <strong>ai itself</strong> — commands, flags, config keys, behavior — and it answers from a built-in manual instead of guessing. Shell completions included (<code>ai completions</code>).</p>
     </div>
   </div>
 </section>
@@ -202,11 +255,12 @@
       <div class="price-amount"><span class="currency">$</span>0<span class="period">/mo</span></div>
       <p class="price-desc">The AI, your data, nothing else. Perfect for questions, research, and content analysis.</p>
       <ul class="price-features">
-        <li>AI chat with any LLM</li>
+        <li>Chat with any LLM</li>
         <li>Pipe data in and out</li>
         <li>Declarative policy engine</li>
-        <li>Interactive config wizard</li>
-        <li>Quiet &amp; verbose modes</li>
+        <li>Two-phase <code>ai setup</code></li>
+        <li>Local semantic memory</li>
+        <li>Built-in manual &amp; shell completions</li>
       </ul>
       <a href="#install" class="price-btn">Get started</a>
     </div>
@@ -219,9 +273,9 @@
       <ul class="price-features">
         <li>Everything in Core</li>
         <li>Filesystem access (r/w)</li>
-        <li>Shell commands &amp; allowlists</li>
-        <li>Persistent sessions</li>
-        <li>Session resume &amp; compact</li>
+        <li>Shell commands &amp; bashkit</li>
+        <li>Container isolation</li>
+        <li>Persistent sessions &amp; resume</li>
       </ul>
       <a href="#install" class="price-btn primary">Get started</a>
     </div>
@@ -229,14 +283,14 @@
     <div class="price-card">
       <div class="price-name">Pro</div>
       <div class="price-amount"><span class="currency">$</span>0<span class="period">/mo</span></div>
-      <p class="price-desc">The full arsenal. Web access, memory, and external tool servers. Unlock everything.</p>
+      <p class="price-desc">The full arsenal. Web, skills, and maintenance. Unlock everything.</p>
       <ul class="price-features">
         <li>Everything in Plus</li>
         <li>Web search &amp; fetch</li>
         <li>Browser automation</li>
-        <li>Persistent memory store</li>
+        <li>Skills (incl. AI-authored)</li>
+        <li><code>ai dream</code> maintenance</li>
         <li>MCP tool server support</li>
-        <li>Long-term conversation memory</li>
       </ul>
       <a href="#install" class="price-btn">Get started</a>
     </div>
@@ -247,7 +301,7 @@
 
 <section class="providers" id="providers">
   <h2>Speaks any LLM</h2>
-  <p class="sub">One binary, any backend. Configure once, switch anytime.</p>
+  <p class="sub">One binary, any backend. Native OpenAI and Anthropic APIs, every OpenAI/Anthropic-compatible endpoint, and the full <a href="https://models.dev" target="_blank" rel="noopener">models.dev</a> catalog. Configure once, switch anytime.</p>
 
   <div class="prov-grid">
     <a href="https://platform.openai.com" class="prov-card" target="_blank" rel="noopener">
@@ -311,12 +365,12 @@
       <a href="https://github.com/dswd/ai/releases/latest/download/ai-linux-arm64" class="dl-link"><img src="logos/tux.svg" alt="" class="dl-icon"> Linux ARM64</a>
       <a href="https://github.com/dswd/ai/releases/latest/download/ai-windows-amd64.exe" class="dl-link"><img src="logos/windows.svg" alt="" class="dl-icon"> Windows x86_64</a>
     </div>
-    <p style="color:var(--dim);font-size:0.83rem;text-align:center;margin-top:0.5rem;">Prebuilt binaries. Extract and place in your <code>$PATH</code>.</p>
+    <p style="color:var(--dim);font-size:0.83rem;text-align:center;margin-top:0.5rem;">Prebuilt binaries for Linux and Windows. On macOS, build from source (<code>cargo build --release</code>).</p>
   </div>
 </section>
 
 <footer>
-  Built with Rust &middot; MIT License &middot; Windows, macOS, Linux
+  Built with Rust &middot; MIT License &middot; Windows, Linux &middot; build from source on macOS
 </footer>
 <script src="js/main.js"></script>
 </body>

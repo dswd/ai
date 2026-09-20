@@ -26,7 +26,13 @@ ARCH="$(uname -m)"
 
 case "${OS}" in
   Linux)  os="linux" ;;
-  Darwin) os="macos" ;;
+  Darwin)
+    err "$(bold 'No prebuilt macOS binary yet.')
+Build from source instead:
+  git clone https://github.com/dswd/ai && cd ai
+  cargo build --release
+See https://github.com/dswd/ai#build-from-source"
+    ;;
   *)
     err "$(bold 'Unsupported OS:' ${OS})
 Windows users: download the binary from
@@ -86,4 +92,4 @@ if ! ${GLOBAL}; then
 fi
 
 ok "ai installed to ${DEST}"
-ok "Run: ai --init"
+ok "Run: ai setup"
