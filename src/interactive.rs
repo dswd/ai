@@ -62,7 +62,7 @@ pub(crate) async fn run_interactive(
     if let Some(text) = initial_prompt {
         session.add_user(&text);
         let hist = chat_history.clone();
-        let sent = augment_prompt(&text, memory.as_deref()).unwrap_or(text);
+        let sent = augment_prompt(&text, memory.as_deref(), Some(&session.name)).unwrap_or(text);
         let result = async {
             let spinner = output::Spinner::start("waiting for model…");
             let mut stream = agent
@@ -166,7 +166,7 @@ pub(crate) async fn run_interactive(
                 session.add_user(trimmed);
 
                 let hist = chat_history.clone();
-                let sent = augment_prompt(trimmed, memory.as_deref())
+                let sent = augment_prompt(trimmed, memory.as_deref(), Some(&session.name))
                     .unwrap_or_else(|| trimmed.to_string());
                 let result = async {
                     let spinner = output::Spinner::start("waiting for model…");
@@ -252,9 +252,13 @@ fn exit_requested(flag: &Option<Arc<AtomicBool>>) -> bool {
     flag.as_ref().is_some_and(|f| f.load(Ordering::SeqCst))
 }
 
-pub(crate) fn augment_prompt(prompt: &str, memory: Option<&memory::Memory>) -> Option<String> {
+pub(crate) fn augment_prompt(
+    prompt: &str,
+    memory: Option<&memory::Memory>,
+    exclude_session: Option<&str>,
+) -> Option<String> {
     let mem = memory?;
-    let hits = mem.retrieve(prompt, memory::TOP_K);
+    let hits = mem.retrieve_excluding(prompt, memory::TOP_K, exclude_session);
     if hits.is_empty() {
         return None;
     }

@@ -19,6 +19,9 @@ const UPSERT_MIN_SHARED: usize = 2;
 const TRANSCRIPT_CAP: usize = 3;
 /// KNN candidates fetched per source before the distance cutoff and merging.
 const OVERFETCH: usize = 4;
+/// Extra over-fetch applied when transcript candidates from the current session
+/// are filtered out, so relevant other-session excerpts are not crowded out.
+const EXCLUDE_OVERFETCH: usize = 8;
 /// Transcripts are pruned once processed and older than this many days.
 pub const RETENTION_DAYS: i64 = 7;
 /// A memory is judged once it is unused and unjudged for this many days.
@@ -595,6 +598,19 @@ impl Memory {
     /// against the stored vectors, filtered by the embedder's distance cutoff. Memory hits are
     /// kept ahead of transcript excerpts, which are capped.
     pub fn retrieve(&self, query: &str, top_k: usize) -> Vec<Hit> {
+        self.retrieve_excluding(query, top_k, None)
+    }
+
+    /// Like [`retrieve`], but omits transcript excerpts belonging to
+    /// `exclude_session` so a session never re-injects its own conversation.
+    /// The over-fetch window is widened to compensate for the dropped
+    /// candidates.
+    pub fn retrieve_excluding(
+        &self,
+        query: &str,
+        top_k: usize,
+        exclude_session: Option<&str>,
+    ) -> Vec<Hit> {
         let vector = match self.store.embedder.embed_query(query) {
             Ok(vector) if !vector.is_empty() => vector,
             Ok(_) => return Vec::new(),
@@ -608,7 +624,12 @@ impl Memory {
         }
         let blob = embed::to_blob(&vector);
         let max_distance = self.store.embedder.max_distance();
-        let k = (top_k.max(1) * OVERFETCH) as i64;
+        let overfetch = if exclude_session.is_some() {
+            OVERFETCH * EXCLUDE_OVERFETCH
+        } else {
+            OVERFETCH
+        };
+        let k = (top_k.max(1) * overfetch) as i64;
         let conn = self.store.conn.lock().unwrap();
 
         let mut memory_hits: Vec<(f32, Hit)> = Vec::new();
@@ -678,6 +699,10 @@ impl Memory {
                 .into_iter()
                 .filter(|(d, _)| *d <= max_distance)
                 .collect();
+        }
+
+        if let Some(excluded) = exclude_session {
+            transcript_hits.retain(|(_, hit)| hit.session.as_deref() != Some(excluded));
         }
 
         memory_hits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -1410,6 +1435,45 @@ mod tests {
             "memory should outrank transcript"
         );
         assert_eq!(hits[1].kind, HitKind::Transcript);
+        cleanup(dir);
+    }
+
+    #[test]
+    fn test_retrieve_excludes_current_session_transcripts() {
+        let (dir, mem) = temp_memory("exclude");
+        mem.add("berlin is the capital".to_string(), vec![], None)
+            .unwrap();
+        mem.index_session(
+            "current",
+            &[tuple(1, "tell me about berlin", "berlin is nice")],
+        )
+        .unwrap();
+        mem.index_session(
+            "past",
+            &[tuple(1, "berlin trip plans", "visit berlin in may")],
+        )
+        .unwrap();
+
+        let all = mem.retrieve("berlin", 10);
+        assert!(
+            all.iter().any(|h| h.session.as_deref() == Some("current")),
+            "sanity: the current session's transcript is retrievable without exclusion"
+        );
+
+        let filtered = mem.retrieve_excluding("berlin", 10, Some("current"));
+        assert!(
+            filtered
+                .iter()
+                .all(|h| h.session.as_deref() != Some("current")),
+            "the current session's transcript must be excluded"
+        );
+        assert!(filtered.iter().any(|h| h.kind == HitKind::Memory));
+        assert!(
+            filtered
+                .iter()
+                .any(|h| h.session.as_deref() == Some("past")),
+            "other sessions stay retrievable"
+        );
         cleanup(dir);
     }
 

@@ -67,3 +67,26 @@ pub fn read_user_input<P: Prompt + ?Sized>(prompt: &P) -> Option<String> {
         Err(_) => None,
     }
 }
+
+/// Like [`read_user_input`], but pre-populates the buffer with `initial` so the
+/// user can edit it (cursor placed at the end). Used by the permission rule
+/// builder.
+pub fn read_user_input_with_initial<P: Prompt + ?Sized>(
+    prompt: &P,
+    initial: &str,
+) -> Option<String> {
+    let mut ed = editor().lock().unwrap();
+    match ed.readline_with_initial(prompt, (initial, "")) {
+        Ok(line) => {
+            let trimmed = line.trim().to_string();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let _ = ed.add_history_entry(&trimmed);
+            Some(trimmed)
+        }
+        Err(rustyline::error::ReadlineError::Interrupted)
+        | Err(rustyline::error::ReadlineError::Eof) => Some("/exit".to_string()),
+        Err(_) => None,
+    }
+}

@@ -207,7 +207,10 @@ fn build_agent<M: CompletionModel + 'static>(
             let handle = (**mem).clone();
             server = server
                 .tool(tools::MemoryAddTool::new(handle.clone()))
-                .tool(tools::MemorySearchTool::new(handle.clone()))
+                .tool(tools::MemorySearchTool::scoped(
+                    handle.clone(),
+                    ctx.session.name.clone(),
+                ))
                 .tool(tools::MemoryGetTool::new(handle.clone()))
                 .tool(tools::MemoryDeleteTool::new(handle));
         }
@@ -298,7 +301,8 @@ async fn run_oneshot(
     transient: bool,
 ) -> anyhow::Result<()> {
     let start = Instant::now();
-    let augmented = crate::interactive::augment_prompt(prompt, memory.as_deref());
+    let augmented =
+        crate::interactive::augment_prompt(prompt, memory.as_deref(), Some(&session.name));
     let sent = augmented.as_deref().unwrap_or(prompt);
 
     if transient {

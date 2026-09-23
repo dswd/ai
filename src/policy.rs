@@ -26,6 +26,19 @@ impl fmt::Display for Action {
     }
 }
 
+impl Action {
+    /// Spelling the policy-file parser accepts for this action.
+    pub fn policy_name(&self) -> &'static str {
+        match self {
+            Action::Read => "read",
+            Action::Write => "write",
+            Action::Execute => "execute",
+            Action::WebFetch => "web-fetch",
+            Action::WebSearch => "web-search",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum PolicyRule {
     Allow(Action, String),
@@ -34,16 +47,31 @@ pub enum PolicyRule {
 
 /// Session-scoped approval memory. Shared by every clone of a [`Policy`] (all
 /// tools hold clones), so a decision the user makes while one tool runs is
-/// visible to the next. Rules live only for the process/session and are never
-/// written to disk.
+/// visible to the next. Rules live only for the process/session unless the user
+/// chooses to persist them to the policy file.
 #[derive(Debug, Default)]
 pub struct ApprovalState {
     rules: Mutex<Vec<PolicyRule>>,
+    /// Effective policy file that persisted rules are appended to. `None`
+    /// disables the "create rule" option (e.g. `ai setup`).
+    persist_path: Option<PathBuf>,
 }
+
+/// Sentinel [`crate::io::read_user_input`] returns on Ctrl-C/Ctrl-D.
+const CANCEL_SENTINEL: &str = "/exit";
 
 impl ApprovalState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Approval state that can persist rules to `path` (the effective policy
+    /// file). Used by interactive sessions and one-off `--ask` runs.
+    pub fn with_policy_file(path: PathBuf) -> Self {
+        Self {
+            persist_path: Some(path),
+            ..Self::default()
+        }
     }
 
     fn rules(&self) -> Vec<PolicyRule> {
@@ -55,36 +83,155 @@ impl ApprovalState {
     }
 
     /// Ask the user to approve an unmatched action. Returns whether it is now
-    /// allowed. `y` allows once, `a` remembers the exact target for the
-    /// session, `r` remembers its directory, anything else denies.
+    /// allowed. `y` allows once; `r` opens the rule builder (allow/deny,
+    /// editable subject, optional persistence); anything else denies.
     fn request(&self, action: &Action, target: &str) -> bool {
-        let prompt =
-            format!("Allow {action} for {target}? [y=once, a=always, r=this dir, N=deny] ");
-        let answer = crate::io::read_user_input(&prompt)
+        self.request_with(action, target, &real_ask)
+    }
+
+    fn request_with(
+        &self,
+        action: &Action,
+        target: &str,
+        ask: &dyn Fn(&str, Option<&str>) -> Option<String>,
+    ) -> bool {
+        loop {
+            let prompt = if self.persist_path.is_some() {
+                format!("Allow {action} for {target}? [y=once, r=rule, N=deny] ")
+            } else {
+                format!("Allow {action} for {target}? [y=once, N=deny] ")
+            };
+            let answer = ask(&prompt, None).unwrap_or_default().to_lowercase();
+            match answer.as_str() {
+                "y" | "yes" => return true,
+                "r" | "rule" if self.persist_path.is_some() => {
+                    if let Some(allowed) = self.build_rule(action, target, ask) {
+                        return allowed;
+                    }
+                }
+                _ => return false,
+            }
+        }
+    }
+
+    /// Walk the rule builder: pick allow/deny, edit the pre-filled subject, then
+    /// decide whether to persist it. Returns `Some(allowed)` when a committed
+    /// rule covers `target`, or `None` to re-show the original prompt (the user
+    /// cancelled, or the rule does not match this request).
+    fn build_rule(
+        &self,
+        action: &Action,
+        target: &str,
+        ask: &dyn Fn(&str, Option<&str>) -> Option<String>,
+    ) -> Option<bool> {
+        let direction = ask("Create an allow or deny rule? [a=allow, d=deny] ", None)
             .unwrap_or_default()
             .to_lowercase();
-        match answer.as_str() {
-            "y" | "yes" => true,
-            "a" | "always" => {
-                self.add(PolicyRule::Allow(action.clone(), target.to_string()));
-                true
+        let allow = match direction.as_str() {
+            "a" | "allow" => true,
+            "d" | "deny" => false,
+            _ => return None,
+        };
+
+        let subject = match ask("Rule subject (edit as needed): ", Some(target)) {
+            Some(s) if s != CANCEL_SENTINEL => s,
+            _ => return None,
+        };
+        let subject = normalize_rule_subject(action, &subject);
+
+        let rule = if allow {
+            PolicyRule::Allow(action.clone(), subject.clone())
+        } else {
+            PolicyRule::Deny(action.clone(), subject.clone())
+        };
+
+        let persist = if let Some(path) = &self.persist_path {
+            let line = format_rule_line(&rule);
+            let answer = ask(
+                &format!("Persist \"{line}\" to {}? [y/N] ", path.display()),
+                None,
+            );
+            match answer.as_deref() {
+                Some(CANCEL_SENTINEL) => return None,
+                Some(a) => matches!(a.to_lowercase().as_str(), "y" | "yes"),
+                None => false,
             }
-            "r" | "root" | "dir" => {
-                self.add(PolicyRule::Allow(action.clone(), root_of(target)));
-                true
-            }
-            _ => false,
+        } else {
+            false
+        };
+
+        self.add(rule.clone());
+        if persist
+            && let Some(path) = &self.persist_path
+            && let Err(err) = append_rule(path, &rule)
+        {
+            warn!(
+                "{YELLOW}\u{26A0} could not persist rule to {}: {err}; keeping it for this session only{RESET}",
+                path.display()
+            );
+        }
+
+        if matches_pattern(target, &subject) {
+            Some(allow)
+        } else {
+            warn!(
+                "{YELLOW}\u{26A0} rule \"{}\" does not cover {target}; asking again{RESET}",
+                format_rule_line(&rule)
+            );
+            None
         }
     }
 }
 
-fn root_of(target: &str) -> String {
-    let normalized = normalize_path_separators(target);
-    match normalized.rfind('/') {
-        Some(0) => "/".to_string(),
-        Some(idx) => normalized[..idx].to_string(),
-        None => target.to_string(),
+/// Read a line for the rule builder. `initial` pre-fills an editable subject.
+fn real_ask(prompt: &str, initial: Option<&str>) -> Option<String> {
+    match initial {
+        Some(text) => crate::io::read_user_input_with_initial(prompt, text),
+        None => crate::io::read_user_input(prompt),
     }
+}
+
+/// Normalize an edited rule subject the same way `-r`/`-w` do: paths get `~`
+/// expanded, are resolved against the cwd, and have `.`/`..` collapsed while
+/// wildcards are preserved. Other actions are stored trimmed, as typed.
+fn normalize_rule_subject(action: &Action, subject: &str) -> String {
+    match action {
+        Action::Read | Action::Write => {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            resolve_policy_pattern(subject, &cwd)
+        }
+        _ => subject.trim().to_string(),
+    }
+}
+
+fn format_rule_line(rule: &PolicyRule) -> String {
+    match rule {
+        PolicyRule::Allow(action, pattern) => {
+            format!("allow {} {}", action.policy_name(), pattern)
+        }
+        PolicyRule::Deny(action, pattern) => {
+            format!("deny {} {}", action.policy_name(), pattern)
+        }
+    }
+}
+
+/// Append one rule line to the policy file, creating the file and its parent
+/// directories if needed. Existing content and formatting are preserved.
+fn append_rule(path: &Path, rule: &PolicyRule) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(err),
+    };
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str(&format_rule_line(rule));
+    content.push('\n');
+    std::fs::write(path, content)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -258,7 +405,7 @@ impl Policy {
 
         lines.push(String::new());
         if self.ask {
-            lines.push("You may ask for more permissions — the user will be asked to approve each request.".to_string());
+            lines.push("You may ask for more permissions — the user will be asked to approve each request, and can turn an approval into a reusable policy rule.".to_string());
         } else {
             lines.push("Do not attempt actions beyond granted permissions; you may suggest the user re-run with the appropriate flag.".to_string());
         }
@@ -619,5 +766,164 @@ mod tests {
             resolve_policy_pattern("./src/../lib/**", cwd),
             "/work/lib/**"
         );
+    }
+
+    #[test]
+    fn test_rule_line_round_trips_through_parser() {
+        for (action, pattern) in [
+            (Action::Read, "/tmp/x"),
+            (Action::Write, "/tmp/y"),
+            (Action::Execute, "cargo"),
+            (Action::WebFetch, "https://example.com"),
+            (Action::WebSearch, "rust async"),
+        ] {
+            let rule = PolicyRule::Allow(action.clone(), pattern.to_string());
+            let line = format_rule_line(&rule);
+            let parsed = Policy::parse(&line);
+            assert!(
+                parsed.is_allowed(&action, pattern),
+                "line {line:?} did not round-trip"
+            );
+        }
+    }
+
+    #[test]
+    fn test_append_rule_creates_and_appends() {
+        let dir = std::env::temp_dir().join(format!("ai-policy-append-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("policy");
+        append_rule(
+            &path,
+            &PolicyRule::Allow(Action::Read, "/tmp/a".to_string()),
+        )
+        .unwrap();
+        append_rule(
+            &path,
+            &PolicyRule::Deny(Action::Write, "/tmp/b".to_string()),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "allow read /tmp/a\ndeny write /tmp/b\n"
+        );
+        let parsed = Policy::from_file(&path).unwrap();
+        assert!(parsed.is_allowed(&Action::Read, "/tmp/a"));
+        assert!(!parsed.is_allowed(&Action::Write, "/tmp/b"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_normalize_rule_subject() {
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(
+            normalize_rule_subject(&Action::Read, "src/**"),
+            resolve_policy_pattern("src/**", &cwd)
+        );
+        assert_eq!(
+            normalize_rule_subject(&Action::WebFetch, " https://example.com "),
+            "https://example.com"
+        );
+    }
+
+    /// Scripted `ask`: returns the queued answers in order, ignoring the prompt.
+    fn scripted<'a>(answers: &'a [&'a str]) -> impl Fn(&str, Option<&str>) -> Option<String> + 'a {
+        let queue = std::cell::RefCell::new(answers.iter());
+        move |_, _| queue.borrow_mut().next().map(|s| s.to_string())
+    }
+
+    fn temp_policy(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("ai-rule-builder-{tag}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn test_rule_builder_allows_and_persists() {
+        let path = temp_policy("persist");
+        let _ = std::fs::remove_file(&path);
+        let state = ApprovalState::with_policy_file(path.clone());
+
+        let ask = scripted(&["r", "a", "/tmp/**", "y"]);
+        assert!(state.request_with(&Action::Read, "/tmp/file.txt", &ask));
+
+        let loaded = Policy::from_file(&path).unwrap();
+        assert!(loaded.is_allowed(&Action::Read, "/tmp/file.txt"));
+        assert!(loaded.is_allowed(&Action::Read, "/tmp/deep/file.txt"));
+        assert!(!loaded.is_allowed(&Action::Write, "/tmp/file.txt"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_rule_builder_deny_session_only() {
+        let path = temp_policy("session");
+        let _ = std::fs::remove_file(&path);
+        let state = ApprovalState::with_policy_file(path.clone());
+
+        let ask = scripted(&["r", "d", "/tmp/secret", "n"]);
+        assert!(!state.request_with(&Action::Read, "/tmp/secret/key", &ask));
+        assert!(
+            !path.exists(),
+            "declining persistence must not write a file"
+        );
+        assert!(matches!(
+            state.rules().as_slice(),
+            [PolicyRule::Deny(Action::Read, p)] if p == "/tmp/secret"
+        ));
+    }
+
+    #[test]
+    fn test_rule_builder_remembers_session_decision() {
+        let path = temp_policy("remember");
+        let _ = std::fs::remove_file(&path);
+        let state = std::sync::Arc::new(ApprovalState::with_policy_file(path.clone()));
+
+        // Create a session-only allow rule...
+        let ask = scripted(&["r", "a", "/tmp/**", "n"]);
+        assert!(state.request_with(&Action::Read, "/tmp/file.txt", &ask));
+
+        // ...then a different target under it is allowed without prompting.
+        let policy = Policy {
+            approval: Some(state.clone()),
+            ..Policy::default()
+        };
+        assert!(policy.is_allowed(&Action::Read, "/tmp/other.txt"));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_rule_builder_non_matching_rule_reprompts() {
+        let path = temp_policy("reprompt");
+        let _ = std::fs::remove_file(&path);
+        let state = ApprovalState::with_policy_file(path.clone());
+
+        // The rule does not cover the target, so the original prompt is shown
+        // again; the follow-up `y` allows this one call.
+        let ask = scripted(&["r", "a", "/elsewhere/**", "n", "y"]);
+        assert!(state.request_with(&Action::Read, "/tmp/file.txt", &ask));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_rule_builder_cancel_reprompts_then_denies() {
+        let path = temp_policy("cancel");
+        let _ = std::fs::remove_file(&path);
+        let state = ApprovalState::with_policy_file(path.clone());
+
+        // Cancelling the direction step returns to the original prompt; `N` denies.
+        let ask = scripted(&["r", "", "N"]);
+        assert!(!state.request_with(&Action::Read, "/tmp/file.txt", &ask));
+        assert!(state.rules().is_empty());
+
+        // The Ctrl-C sentinel in the subject editor cancels the same way.
+        let ask = scripted(&["r", "a", "/exit", "N"]);
+        assert!(!state.request_with(&Action::Read, "/tmp/file.txt", &ask));
+        assert!(state.rules().is_empty());
+    }
+
+    #[test]
+    fn test_rule_builder_not_offered_without_policy_file() {
+        let state = ApprovalState::new();
+        // `r` is ignored when there is nowhere to persist, falling through to deny.
+        let ask = scripted(&["r"]);
+        assert!(!state.request_with(&Action::Read, "/tmp/file.txt", &ask));
+        assert!(state.rules().is_empty());
     }
 }

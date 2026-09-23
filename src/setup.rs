@@ -390,6 +390,7 @@ pub(crate) fn apply_cli_overrides(cli: &Cli, config: &mut Config) {
 }
 
 pub(crate) fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> {
+    let effective_path = effective_policy_path(cli, config);
     let mut policy = if let Some(path) = &cli.policy {
         let path = crate::util::expand_tilde(&path.to_string_lossy());
         Policy::from_file(&path)?
@@ -397,6 +398,12 @@ pub(crate) fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> 
         let path = crate::util::expand_tilde(&path.to_string_lossy());
         if path.exists() {
             Policy::from_file(&path)?
+        } else {
+            Policy::default()
+        }
+    } else if let Some(path) = &effective_path {
+        if path.exists() {
+            Policy::from_file(path)?
         } else {
             Policy::default()
         }
@@ -443,10 +450,24 @@ pub(crate) fn load_policy(cli: &Cli, config: &Config) -> anyhow::Result<Policy> 
     policy.ask = cli.ask || cli.is_interactive();
 
     if policy.ask {
-        policy.approval = Some(std::sync::Arc::new(policy::ApprovalState::new()));
+        policy.approval = Some(std::sync::Arc::new(match effective_path {
+            Some(path) => policy::ApprovalState::with_policy_file(path),
+            None => policy::ApprovalState::new(),
+        }));
     }
 
     Ok(policy)
+}
+
+/// The policy file whose rules are in effect: `--policy`, else `config.policy`,
+/// else the default location. This is also where a persisted approval rule is
+/// appended.
+fn effective_policy_path(cli: &Cli, config: &Config) -> Option<std::path::PathBuf> {
+    cli.policy
+        .as_ref()
+        .or(config.policy.as_ref())
+        .map(|p| crate::util::expand_tilde(&p.to_string_lossy()))
+        .or_else(Config::default_policy_path)
 }
 
 #[cfg(test)]
@@ -476,6 +497,28 @@ mod tests {
 
     fn cli_explicit(name: &str) -> Cli {
         Cli::parse_from(["ai", "-s", name])
+    }
+
+    #[test]
+    fn test_effective_policy_path_precedence() {
+        let mut cli = cli();
+        let mut config = Config::default();
+        assert_eq!(
+            effective_policy_path(&cli, &config),
+            Config::default_policy_path()
+        );
+
+        config.policy = Some(std::path::PathBuf::from("/tmp/cfg-policy"));
+        assert_eq!(
+            effective_policy_path(&cli, &config),
+            Some(std::path::PathBuf::from("/tmp/cfg-policy"))
+        );
+
+        cli.agent.policy = Some(std::path::PathBuf::from("/tmp/cli-policy"));
+        assert_eq!(
+            effective_policy_path(&cli, &config),
+            Some(std::path::PathBuf::from("/tmp/cli-policy"))
+        );
     }
 
     fn save_session(dir: &Path, name: &str, provider: &str, model: &str, age: Duration) {

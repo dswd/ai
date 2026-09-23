@@ -48,7 +48,7 @@ Five things to keep straight:
 | Memory DB | `<data-dir>/ai/memory.db` | `memory` |
 | Embedding cache | `<cache-dir>/ai/fastembed` | — |
 | Skills | `<data-dir>/ai/skills` | `skills.dir` |
-| Policy file | none | `policy` |
+| Policy file | `<config-dir>/ai/policy` | `policy` |
 
 `<data-dir>` is the platform data dir (on Linux `~/.local/share`), `<cache-dir>` the platform cache
 dir (on Linux `~/.cache`).
@@ -236,7 +236,7 @@ context_window: 128000             # used by the interactive usage indicator
 
 session_dir: ~/.local/share/ai/sessions
 
-policy: ~/.config/ai/policy.txt    # allow/deny file
+policy: ~/.config/ai/policy        # allow/deny file (created on first persisted rule)
 
 memory: ~/.local/share/ai/memory.db
 embedding_model: multilingual-e5-small
@@ -283,7 +283,7 @@ mcp:
 | `thinking` | off | Extended-thinking budget. |
 | `context_window` | provider | Used for the usage indicator and pruning. |
 | `session_dir` | `<data-dir>/ai/sessions` | Session storage. |
-| `policy` | — | Policy file. |
+| `policy` | `<config-dir>/ai/policy` | Policy file (loaded when it exists; created on first persisted rule). |
 | `memory` | `<data-dir>/ai/memory.db` | SQLite database (or legacy `*.json`). |
 | `embedding_model` | `multilingual-e5-small` | Local embedding model. |
 | `memory_max_distance` | `0.175` | Cosine distance cutoff (E5 default). |
@@ -428,8 +428,8 @@ allow <action> <pattern>
 deny  <action> <pattern>
 ```
 
-Blank lines and `#` comments are ignored. Actions are `read`, `write`, `execute`, `web fetch`,
-`web search`.
+Blank lines and `#` comments are ignored. Actions are `read`, `write`, `execute`, `web-fetch`,
+and `web-search` (`web fetch`/`web search` with a space are *not* accepted).
 
 ```text
 # read a project tree but never its secrets
@@ -440,9 +440,9 @@ deny  read ~/projects/**/secrets/**
 allow execute cargo,npm,git,rustc
 
 # web requests, narrowly
-allow web fetch https://docs.rs/**
-allow web fetch https://api.github.com/**
-deny  web search *confidential*
+allow web-fetch https://docs.rs/**
+allow web-fetch https://api.github.com/**
+deny  web-search *confidential*
 ```
 
 ### Path matching
@@ -466,18 +466,52 @@ deny  web search *confidential*
 
 ### Interactive ask mode
 
-With `-i`/`--ask`, an action with no matching rule prompts you:
+With `-i`/`--ask` (or automatically in an interactive session), an action with no matching rule
+prompts you:
 
 ```text
-Allow read for /home/me/project/src/auth.rs? [y=once, a=always, r=this dir, N=deny]
+Allow read for /home/me/project/src/auth.rs? [y=once, r=rule, N=deny]
 ```
 
-- `y` — allow this one time.
-- `a` — remember the exact target for the rest of the session.
-- `r` — remember the target's directory.
+- `y` — allow this one time; nothing is remembered.
+- `r` — build a reusable rule (see below).
 - anything else — deny.
 
-Approvals live only in memory for the session and are never written to disk.
+Rules created here only ever apply to a target nothing else covers, and the usual first-match-wins
+order still holds, so a created `deny` cannot override an existing `allow`.
+
+#### Creating a rule
+
+Choosing `r` walks through three steps:
+
+1. **Direction** — `Create an allow or deny rule? [a=allow, d=deny]`.
+2. **Subject** — the exact target is pre-filled and editable, so you can widen it with wildcards:
+
+   ```text
+   Rule subject (edit as needed): /home/me/project/src/**
+   ```
+
+   Path subjects are normalized like `-r`/`-w` (`~` expands, relative paths resolve against the
+   current directory, `.`/`..` collapse) and stored absolute. URLs, search queries, and commands
+   are stored as typed.
+3. **Persistence** — the exact rule line is shown and you choose whether to keep it:
+
+   ```text
+   Persist "allow read /home/me/project/src/**" to /home/me/.config/ai/policy? [y/N]
+   ```
+
+   - **yes** — the rule is appended to the effective policy file, so it survives restarts.
+   - **no** (default) — the rule is remembered for this session only.
+
+If the finished rule does not actually cover the request that triggered it, ai says so and asks
+again. Cancelling any step (Ctrl-C/Ctrl-D/empty) returns to the original prompt.
+
+The effective policy file is `--policy` if given, otherwise `config.policy`, otherwise the default
+`<config-dir>/ai/policy` (e.g. `~/.config/ai/policy`). Persisting appends a single line there,
+creating the file and its directories if needed; the config file itself is never rewritten. If the
+write fails, the rule is kept for the session and a warning is printed.
+
+`ai setup`'s config-save approval does **not** offer rule creation — it is a plain yes/no.
 
 ### Common recipes
 
@@ -632,6 +666,10 @@ Memory stores durable facts and a transcript index, and injects relevant items i
 - On each user message, the query is embedded and the closest memory facts and transcript excerpts
   are retrieved. Items within the distance cutoff are injected, memory above transcripts, capped
   at a small number of hits.
+- Transcript excerpts from the **session in progress are excluded**, so a resumed or long session
+  never re-injects its own conversation. Excerpts from other sessions stay retrievable. Memory
+  maintenance (`ai dream`, including the end-of-session auto-dream) is unaffected: it reviews every
+  session, including the one that just ended.
 - Each injected item is shown with a cosine **match score** (higher is better).
 
 Nothing leaves your machine for retrieval; the embedding model is downloaded once to the cache dir.

@@ -12,7 +12,7 @@ A CLI agent for interacting with AI models, with tool use, filesystem and comman
 - **Tool system** — Filesystem tools, code search, web fetch/search, command execution, downloads, document extraction, and more.
 - **Sandboxed command execution** — The `execute` tool runs through a virtual bash interpreter (bashkit) with ~150 in-process builtins; external commands require explicit policy approval and, when a container image is configured (`-X`/`--container`), the whole command runs in a session container with only the policy-granted paths bind-mounted.
 - **Policy engine** — Granular allow/deny rules for read, write, execute, web fetch, and web search. Supports policy files, CLI overrides, interactive approval (`--ask`), and `--yolo` mode.
-- **Persistent memory** — Agent memory stored to disk (path configurable via `memory:` in the config) and injected into the system prompt; `--no-memory` disables it. Retrieval is semantic: facts and past exchanges are embedded locally (ONNX, via fastembed — configurable `embedding_model`, default `multilingual-e5-small`) and searched with sqlite-vec. Search results and injected references are capped to a 100-character fragment. Run maintenance with `ai dream`; set `dream.auto: true` to run it automatically at the end of each interactive session, or the session offers it once more than 50 maintenance tasks are pending.
+- **Persistent memory** — Agent memory stored to disk (path configurable via `memory:` in the config) and injected into the system prompt; `--no-memory` disables it. Retrieval is semantic: facts and past exchanges are embedded locally (ONNX, via fastembed — configurable `embedding_model`, default `multilingual-e5-small`) and searched with sqlite-vec. Transcript excerpts from the session in progress are skipped, so a resumed session never re-injects its own conversation. Search results and injected references are capped to a 100-character fragment. Run maintenance with `ai dream`; set `dream.auto: true` to run it automatically at the end of each interactive session, or the session offers it once more than 50 maintenance tasks are pending.
 - **Skills** — Reusable `SKILL.md` definitions in the skills folder (config `skills.dir`, default `<data-dir>/ai/skills`), listed in the system prompt and loadable on demand with the `load_skill` tool; the folder is granted read access automatically. With `skills.auto_create: true`, `ai dream` can author skills from past sessions (tagged `origin: ai`, only those are agent-editable). Inspect or remove them with `ai skills list` / `ai skills delete NAME`.
 - **Extended thinking** — Optional reasoning budgets for models that support it.
 - **Headless browser** — Optional stealth-mode browser (Obscura) for web tools.
@@ -126,7 +126,7 @@ ai run --web "find the latest docs for rig-core"
 ai run --yolo "do whatever it takes"
 ```
 
-With `--ask` (interactive approval), the agent can request access and you approve each request as it happens. Approvals are remembered for the session only: choose allow-once, remember the exact target, remember its directory, or deny.
+With `--ask` (interactive approval), the agent can request access and you approve each request as it happens. Approve once, or press `r` to build a reusable rule: pick allow/deny, edit the pre-filled subject (paths, URLs, commands — wildcards allowed), then choose whether to persist it to the policy file or keep it for the session only.
 
 ## Security contract
 
@@ -154,7 +154,7 @@ Treat a grant as **narrow** or don't grant it. A grant whose width makes the bou
 Policies are line-based allow/deny rules; the first matching rule wins. Patterns support `*` (within a segment) and `**` (across segments), and `~` expands to your home directory.
 
 ```
-# ~/.config/ai/policy.txt
+# ~/.config/ai/policy
 allow read /home/you/projects/**
 allow write /home/you/projects/**
 deny read /home/you/projects/secret/**
@@ -163,7 +163,9 @@ allow web-fetch https://docs.rs/**
 allow web-search **
 ```
 
-Load it with `ai -p=~/.config/ai/policy.txt ...`.
+Load it with `ai -p=~/.config/ai/policy ...`, or set `policy:` in the config. When neither is set,
+`<config-dir>/ai/policy` (e.g. `~/.config/ai/policy`) is loaded if it exists — this is also where
+rules you choose to persist from an interactive approval are appended.
 
 If a task needs a capability that isn't granted, the agent will suggest the exact flag to re-run with (e.g. `-r .`, `-w ./src`, `-x cargo,git`, `--web`).
 

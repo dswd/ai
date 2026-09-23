@@ -336,6 +336,12 @@ impl Config {
         dirs::config_dir().map(|d| d.join("ai").join("config.yaml"))
     }
 
+    /// Default policy file consulted when neither `--policy` nor `config.policy`
+    /// is set. Created on first rule persistence.
+    pub fn default_policy_path() -> Option<PathBuf> {
+        dirs::config_dir().map(|d| d.join("ai").join("policy"))
+    }
+
     /// Restore search API keys from `original` for providers whose key the setup
     /// AI omitted or blanked. New providers are left as-is (env fallback applies).
     pub fn preserve_search_secrets(&mut self, original: &Config) {

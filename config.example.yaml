@@ -46,8 +46,9 @@ system_prompt: "You are a concise, helpful CLI assistant."
 #   auto_create: false
 #   min_tuples: 10
 
-# Policy file with allow/deny rules (default: no rules — deny everything).
-# policy: "~/.config/ai/policy.txt"
+# Policy file with allow/deny rules. When unset, <config-dir>/ai/policy is
+# loaded if it exists; persisted approval rules are appended there.
+# policy: "~/.config/ai/policy"
 
 # Persistent memory database (enabled by default; `--no-memory` disables it).
 # memory: "~/.local/share/ai/memory.db"
