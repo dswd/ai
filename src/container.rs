@@ -102,7 +102,7 @@ pub(crate) fn mounts_from_policy(policy: &Policy) -> (Mounts, Vec<String>) {
         .chain(policy.deny_patterns(&Action::Write))
     {
         match static_prefix(&pattern) {
-            Some(p) if p.is_dir() => mounts.deny.push(p),
+            Some(p) if p.is_dir() => mounts.deny.push(real_path(p)),
             Some(p) => warnings.push(format!(
                 "container: cannot mask denied file '{}' (only directories can be masked); it is not mounted unless a broader allow covers it",
                 p.display()
@@ -116,6 +116,11 @@ pub(crate) fn mounts_from_policy(policy: &Policy) -> (Mounts, Vec<String>) {
     dedup(&mut mounts.read);
     dedup(&mut mounts.write);
     dedup(&mut mounts.deny);
+
+    // A write grant is read-write, so a path granted both read and write must
+    // not also be emitted read-only: the runtime rejects a duplicate mount
+    // destination (`-w PATH` grants both, see `load_policy`).
+    mounts.read.retain(|path| !mounts.write.contains(path));
     (mounts, warnings)
 }
 
@@ -462,8 +467,31 @@ mod tests {
         allow(&mut policy, Action::Read, &format!("{}/**", dir.display()));
         allow(&mut policy, Action::Write, &dir.to_string_lossy());
         let (mounts, _) = mounts_from_policy(&policy);
-        assert!(mounts.read.contains(&dir));
         assert!(mounts.write.contains(&dir));
+        assert!(
+            !mounts.read.contains(&dir),
+            "a writable root must not also be mounted read-only (duplicate destination)"
+        );
+        assert!(
+            mounts.read.iter().all(|read| !mounts.write.contains(read)),
+            "no path may appear in both mount lists"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_duplicate_grant_from_write_flag_mounts_once() {
+        // `-w PATH` records both `allow read PATH` and `allow write PATH`; the
+        // container must mount PATH exactly once, read-write.
+        let dir = std::env::temp_dir().join(format!("ai-container-dup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut policy = Policy::default();
+        allow(&mut policy, Action::Read, &dir.to_string_lossy());
+        allow(&mut policy, Action::Write, &dir.to_string_lossy());
+        let (mounts, _) = mounts_from_policy(&policy);
+        assert_eq!(mounts.write, vec![dir.clone()]);
+        assert!(mounts.read.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -486,7 +514,7 @@ mod tests {
         allow(&mut policy, Action::Write, "**");
         allow(&mut policy, Action::Write, &dir.to_string_lossy());
         let (mounts, _) = mounts_from_policy(&policy);
-        assert_eq!(mounts.read, vec![dir.clone()]);
+        assert!(mounts.read.is_empty());
         assert_eq!(mounts.write, vec![dir.clone()]);
         assert!(!mounts.read.contains(&PathBuf::from("/")));
         let _ = std::fs::remove_dir_all(&dir);
